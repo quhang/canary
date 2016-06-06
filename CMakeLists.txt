@@ -16,6 +16,13 @@ include(default_flags)
 include(build_dependency_library)
 
 # Specifies header file directory for dependency libraries.
-include_directories(${DEPENDENCY_INSTALL_PATH}/include)
+include_directories(${DEPENDENCY_INSTALL_PATH}/include/ ${CMAKE_SOURCE_DIR}/include/)
 
+# Canary library.
 add_subdirectory(src)
+# Applications.
+add_subdirectory(apps)
+# Canary tests.
+add_subdirectory(test)
+# Canary external headers.
+add_subdirectory(include)

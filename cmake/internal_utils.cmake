@@ -2,7 +2,7 @@
 
 # Defines compiler/linker flags used for building.
 macro(config_compiler_and_linker)
-  if(not CMAKE_COMPILER_IS_GNUCXX)
+  if(NOT CMAKE_COMPILER_IS_GNUCXX)
     message(FATAL_ERROR "Compiling environment other than GNU gcc is not supported")
   endif()
   set(cxx_base_flags "-std=c++14 -Wall -Wshadow")
@@ -55,6 +55,6 @@ endfunction()
 
 # Defines a test target.
 # cxx_test(name "libs" srcs...)
-function(cxx_test name libs)
-  cxx_test_with_flags("${name}" "${cxx_default}" "${libs}" "test/${name}.cc" ${ARGN})
+function(cxx_test name dir libs)
+  cxx_test_with_flags("${name}" "${cxx_default}" "${libs}" "${dir}/${name}.cc" ${ARGN})
 endfunction()
