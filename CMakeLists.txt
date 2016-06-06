@@ -1,28 +1,38 @@
-# Minimum required cmake version.
+##
+# Top-level cmake file.
+
+# Specifies the minimum required cmake version.
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
-# The global project name.
+# Global project name.
 project(canary-distribution)
 
+# Enables testing.
 enable_testing()
 
 # Adds cmake module search path.
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-# Changes default flags.
+# Sets up default environment variables.
 include(default_flags)
 
-# Builds dependency libraries.
+# Sets up dependency libraries.
 include(build_dependency_library)
 
-# Specifies header file directory for dependency libraries.
+# Specifies header file directories.
 include_directories(${DEPENDENCY_INSTALL_PATH}/include/ ${CMAKE_SOURCE_DIR}/include/)
 
-# Canary library.
+# Sets up cpplint tool.
+set(CPPLINT_TOOL ${CMAKE_SOURCE_DIR}/tools/cpplint.py)
+
+# Sets up cpplint tool.
+set(FORMAT_TOOL ${CMAKE_SOURCE_DIR}/tools/cppformat.sh)
+
+# Builds canary library.
 add_subdirectory(src)
-# Applications.
-add_subdirectory(apps)
-# Canary tests.
+# Builds applications.
+add_subdirectory(app)
+# Builds canary library tests.
 add_subdirectory(test)
-# Canary external headers.
+# Builds canary external headers.
 add_subdirectory(include)

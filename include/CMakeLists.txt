@@ -1,7 +1,10 @@
-file(GLOB_RECURSE ALL_EXTERNAL_HEADERS "*.h")
+##
+# Canary core library external headers.
+
+file(GLOB_RECURSE ALL_CANARY_EXTERNAL_HEADERS "*.h")
 
 # Checks code style.
-add_custom_target(check-h ${CMAKE_SOURCE_DIR}/tools/cpplint.py ${ALL_EXTERNAL_HEADERS} COMMENT "Check coding style.")
+add_custom_target(check_h "${CPPLINT_TOOL}" ${ALL_CANARY_EXTERNAL_HEADERS} COMMENT "Checks coding style.")
 
-# Format codes in place.
-add_custom_target(format-h clang-format-3.6 --style=Google -i ${ALL_EXTERNAL_HEADERS} COMMENT "Reformat all source codes.")
+# Formats codes in place.
+add_custom_target(format_h "${FORMAT_TOOL}" ${ALL_CANARY_EXTERNAL_HEADERS} COMMENT "Formats all source codes.")

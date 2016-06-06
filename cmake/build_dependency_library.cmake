@@ -1,13 +1,18 @@
-# Imports ExternaProject library.
+##
+# Sets up all dependency libraries.
+#
+# default_flags.cmake should be called before it.
+
+# Imports ExternaProject module.
 include(ExternalProject)
 
-# Imports threading library.
+# Imports the threading library as Threads::Threads.
 find_package(Threads REQUIRED)
 
-# Builds path for dependency libraries.
-set(DEPENDENCY_BUILD_PATH ${CMAKE_BINARY_DIR}/dependency_src/) 
-# Installs path for dependency libraries.
-set(DEPENDENCY_INSTALL_PATH ${CMAKE_BINARY_DIR}/dependency/) 
+# Sets build path for dependency libraries.
+set(DEPENDENCY_BUILD_PATH ${CMAKE_BINARY_DIR}/dependency_src)
+# Sets install path for dependency libraries.
+set(DEPENDENCY_INSTALL_PATH ${CMAKE_BINARY_DIR}/dependency)
 
 # Builds and installs gflags library.
 ExternalProject_Add(project_gflags
@@ -21,6 +26,7 @@ set_property(TARGET gflags PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}
 # Builds and installs glog library.
 ExternalProject_Add(project_glog
   URL ${CMAKE_SOURCE_DIR}/packages/glog_v0.3.4.tar.gz
+  # glog depends on gflags.
   DEPENDS project_gflags
   PREFIX ${DEPENDENCY_BUILD_PATH}/glog
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-gflags=${DEPENDENCY_INSTALL_PATH} --enable-shared=false --prefix=${DEPENDENCY_INSTALL_PATH}
@@ -57,6 +63,7 @@ ExternalProject_Add(project_gtest
   URL ${CMAKE_SOURCE_DIR}/packages/gtest_v1.7.0.tar.gz
   PREFIX ${DEPENDENCY_BUILD_PATH}/gtest
   CMAKE_ARGS -DCMAKE_BUILD_TYPE:STRING=Release
+  # gtest does not allow "make install".
   INSTALL_COMMAND mkdir -p ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/include/gtest/ ${DEPENDENCY_INSTALL_PATH}/include/
     && mkdir -p ${DEPENDENCY_INSTALL_PATH}/lib/ && cp -r <BINARY_DIR>/libgtest.a ${DEPENDENCY_INSTALL_PATH}/lib/
     && cp -r <BINARY_DIR>/libgtest_main.a ${DEPENDENCY_INSTALL_PATH}/lib/
