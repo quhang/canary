@@ -49,7 +49,6 @@ function(cxx_executable_with_flags name cxx_flags libs)
   endif()
   foreach(lib ${libs})
     target_link_libraries(${name} ${lib})
-    add_dependencies(${name} ${lib})
   endforeach()
 endfunction()
 

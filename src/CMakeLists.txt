@@ -12,7 +12,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # canary_core library target.
 cxx_static_library(canary_core "${cxx_default}" shared/internal.cc)
-add_dependencies(canary_core project_gflags project_glog project_cereal project_libevent)
+add_dependencies(canary_core project_cereal)
 # Library linking order matters. Dependency libraries are public so that built
 # executables can link to them.
 target_link_libraries(canary_core PUBLIC glog gflags event_pthreads event_core pthread dl)

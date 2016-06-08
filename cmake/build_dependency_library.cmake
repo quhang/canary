@@ -21,6 +21,7 @@ ExternalProject_Add(project_gflags
   CMAKE_ARGS -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_INSTALL_PREFIX:PATH=${DEPENDENCY_INSTALL_PATH}
 )
 add_library(gflags STATIC IMPORTED)
+add_dependencies(gflags project_gflags)
 set_property(TARGET gflags PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libgflags.a)
 
 # Builds and installs glog library.
@@ -34,6 +35,7 @@ ExternalProject_Add(project_glog
   INSTALL_COMMAND make install
 )
 add_library(glog STATIC IMPORTED)
+add_dependencies(glog project_glog)
 set_property(TARGET glog PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libglog.a)
 
 # Installs header-only cereal library.
@@ -54,8 +56,10 @@ ExternalProject_Add(project_libevent
   INSTALL_COMMAND make install
 )
 add_library(event_core STATIC IMPORTED)
+add_dependencies(event_core project_libevent)
 set_property(TARGET event_core PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libevent_core.a)
 add_library(event_pthreads STATIC IMPORTED)
+add_dependencies(event_pthreads project_libevent)
 set_property(TARGET event_pthreads PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libevent_pthreads.a)
 
 # Builds and installs gtest library.
@@ -69,6 +73,8 @@ ExternalProject_Add(project_gtest
     && cp -r <BINARY_DIR>/libgtest_main.a ${DEPENDENCY_INSTALL_PATH}/lib/
 )
 add_library(gtest STATIC IMPORTED)
+add_dependencies(gtest project_gtest)
 set_property(TARGET gtest PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libgtest.a)
 add_library(gtest_main STATIC IMPORTED)
+add_dependencies(gtest_main project_gtest)
 set_property(TARGET gtest_main PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libgtest_main.a)
