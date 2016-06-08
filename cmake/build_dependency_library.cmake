@@ -49,7 +49,7 @@ ExternalProject_Add(project_cereal
 ExternalProject_Add(project_libevent
   URL ${CMAKE_SOURCE_DIR}/packages/libevent_v2.0.22.tar.gz
   PREFIX ${DEPENDENCY_BUILD_PATH}/libevent
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-shared=false --prefix=${DEPENDENCY_INSTALL_PATH}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-shared=false --disable-openssl --prefix=${DEPENDENCY_INSTALL_PATH}
   BUILD_COMMAND make
   INSTALL_COMMAND make install
 )
