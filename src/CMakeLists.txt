@@ -11,7 +11,9 @@ config_compiler_and_linker()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # canary_core library target.
-cxx_static_library(canary_core "${cxx_default}" shared/internal.cc)
+cxx_static_library(canary_core "${cxx_default}"
+    shared/internal.cc
+    )
 add_dependencies(canary_core project_cereal)
 # Library linking order matters. Dependency libraries are public so that built
 # executables can link to them.
