@@ -40,18 +40,13 @@
 #ifndef CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
 #define CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
 
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/tcp.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-
 #include <string>
 
 #include "shared/internal_header.h"
+
+// Forward declaration.
+struct addrinfo;
+struct sockaddr;
 
 namespace canary {
 
@@ -60,223 +55,95 @@ namespace network {
 /**
  * Closes a socket. Returns 0 if success, and otherwise -1 with errno set.
  */
-inline int close_socket(int socket_fd) { return close(socket_fd); }
+int close_socket(int socket_fd);
 
 /**
  * Gets the last error number. Errno is thread-safe, i.e. its implementation is
  * likely a function macro.
  */
-inline int get_last_error_number() { return errno; }
+int get_last_error_number();
 
 /**
  * Gets the last error number for a socket.
  */
-inline int get_socket_error_number(int socket_fd) {
-  int value = 0;
-  socklen_t size = sizeof(value);
-  PCHECK(getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, &value, &size) == 0);
-  // Double checks the return value is integer.
-  CHECK_EQ(size, sizeof(value));
-  return value;
-}
+int get_socket_error_number(int socket_fd);
 
 /**
- * Checks whether an error code means blocking.
+ * Checks whether an error number means blocking.
  */
-inline bool is_blocked(int error_number) {
-  return error_number == EAGAIN || error_number == EWOULDBLOCK;
-}
+bool is_blocked(int error_number);
 
 /**
- * Checks whether the last error code means blocking.
+ * Checks whether the last error number means blocking.
  */
-inline bool is_blocked() { return is_blocked(get_last_error_number()); }
+bool is_blocked();
 
 /**
  * Gets the error message corresponding to a error number.
  */
-inline char* get_error_message(int error_number) {
-  return strerror(error_number);
-}
+char* get_error_message(int error_number);
 
 /**
  * Makes a socket non-blocking. Returns 0 if success, and otherwise -1 with
  * errno set.
  */
-inline int make_socket_nonblocking(int socket_fd) {
-  const int flags = fcntl(socket_fd, F_GETFL, nullptr);
-  // The flag is always non-negative.
-  CHECK_GE(flags, 0);
-  if (!(flags & O_NONBLOCK)) {
-    if (fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-      return -1;
-    }
-  }
-  return 0;
-}
+int make_socket_nonblocking(int socket_fd);
 
 /**
  * Sets the close-on-exec flag of a socket. Returns 0 if success, and otherwise
  * -1 with errno set.
  */
-inline int make_socket_closeonexec(int socket_fd) {
-  const int flags = fcntl(socket_fd, F_GETFD, nullptr);
-  // The flag is always non-negative.
-  CHECK_GE(flags, 0);
-  if (!(flags & FD_CLOEXEC)) {
-    if (fcntl(socket_fd, F_SETFD, flags | FD_CLOEXEC) == -1) {
-      return -1;
-    }
-  }
-  return 0;
-}
+int make_socket_closeonexec(int socket_fd);
 
 /**
  * Turns off the Nagle algorithm of a socket, and returns 0 is success, and
  * otherwise -1 with errno set.
  */
-inline int make_socket_nodelay(int socket_fd) {
-  const int one = 1;
-  return setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &one,
-                    static_cast<socklen_t>(sizeof(one)));
-}
+int make_socket_nodelay(int socket_fd);
 
 /**
- * Makes the address of a listener socket immediately reusable after the socket
+ * Makes the address of a listener socket immediately reuseable after the socket
  * is closed. Returns 0 if success, and otherwise -1 with errno set.
  */
-inline int make_listen_socket_reuseable(int socket_fd) {
-  const int one = 1;
-  return setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &one,
-                    static_cast<socklen_t>(sizeof(one)));
-}
+int make_listen_socket_reuseable(int socket_fd);
 
 /**
  * Translates a socket address to human-readable host and service names. Fails
  * if the translation does not work.
  */
-inline void translate_sockaddr_to_string(struct sockaddr* address, int socklen,
-                                         std::string* host,
-                                         std::string* service) {
-  char hostname[NI_MAXHOST];
-  char servicename[NI_MAXSERV];
-  const int status =
-      getnameinfo(address, socklen, hostname, NI_MAXHOST, servicename,
-                  NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
-  CHECK_EQ(status, 0) << gai_strerror(status);
-  if (host) {
-    host->assign(hostname);
-  }
-  if (service) {
-    service->assign(servicename);
-  }
-}
+void translate_sockaddr_to_string(struct sockaddr* address, int socklen,
+                                  std::string* host, std::string* service);
 
 /**
  * Gets the local address name of a socket. Returns 0 if success, and -1
  * otherwise with errno set.
  */
-inline int get_socket_local_address_name(int socket_fd, std::string* host,
-                                         std::string* service) {
-  struct sockaddr_storage address_buffer;
-  socklen_t size_buffer = sizeof(address_buffer);
-  if (getsockname(socket_fd, reinterpret_cast<sockaddr*>(&address_buffer),
-                  &size_buffer) == -1) {
-    return -1;
-  }
-  translate_sockaddr_to_string(reinterpret_cast<sockaddr*>(&address_buffer),
-                               size_buffer, host, service);
-  return 0;
-}
+int get_socket_local_address_name(int socket_fd, std::string* host,
+                                  std::string* service);
 
 /**
  * Gets the peer address name of a socket. Returns 0 if success, and -1
  * otherwise with errno set.
  */
-inline int get_socket_peer_address_name(int socket_fd, std::string* host,
-                                        std::string* service) {
-  struct sockaddr_storage address_buffer;
-  socklen_t size_buffer = sizeof(address_buffer);
-  if (getpeername(socket_fd, reinterpret_cast<sockaddr*>(&address_buffer),
-                  &size_buffer) == -1) {
-    return -1;
-  }
-  translate_sockaddr_to_string(reinterpret_cast<sockaddr*>(&address_buffer),
-                               size_buffer, host, service);
-  return 0;
-}
+int get_socket_peer_address_name(int socket_fd, std::string* host,
+                                 std::string* service);
 
 /**
  * Initializes addrinfo.
  */
-inline void initialize_addrinfo(struct addrinfo* hints, bool is_passive) {
-  memset(hints, 0, sizeof(*hints));
-  hints->ai_family = AF_INET;
-  hints->ai_socktype = SOCK_STREAM;
-  hints->ai_flags = is_passive ? AI_PASSIVE : 0;
-  hints->ai_protocol = 0;
-  hints->ai_canonname = nullptr;
-  hints->ai_addr = nullptr;
-  hints->ai_next = nullptr;
-}
+void initialize_addrinfo(struct addrinfo* hints, bool is_passive);
 
 /**
  * Allocates and binds a listening socket. Returns the socket fd or fails.
  */
-inline int allocate_and_bind_listen_socket(const std::string& service) {
-  int result_fd = -1;
-  struct addrinfo hints;
-  initialize_addrinfo(&hints, true);
-  struct addrinfo* available_addresses = nullptr;
-  const int errorcode =
-      getaddrinfo(nullptr, service.c_str(), &hints, &available_addresses);
-  CHECK_EQ(errorcode, 0) << gai_strerror(errorcode);
-  CHECK_NOTNULL(available_addresses);
-  result_fd =
-      socket(available_addresses->ai_family, available_addresses->ai_socktype,
-             available_addresses->ai_protocol);
-  PCHECK(result_fd >= 0);
-  PCHECK(make_socket_nonblocking(result_fd) == 0);
-  PCHECK(make_socket_closeonexec(result_fd) == 0);
-  PCHECK(make_socket_nodelay(result_fd) == 0);
-  PCHECK(make_listen_socket_reuseable(result_fd) == 0);
-  PCHECK(bind(result_fd, available_addresses->ai_addr,
-              available_addresses->ai_addrlen) == 0);
-  freeaddrinfo(available_addresses);
-  return result_fd;
-}
+int allocate_and_bind_listen_socket(const std::string& service);
 
 /**
  * Allocates a socket and connects to the other end. Returns the socket fd, and
  * otherwise -1 with errno set.
  */
-inline int allocate_and_connect_socket(const std::string& host,
-                                       const std::string& service) {
-  int result_fd = -1;
-  struct addrinfo hints;
-  initialize_addrinfo(&hints, false);
-  struct addrinfo* available_addresses = nullptr;
-  const int errorcode =
-      getaddrinfo(host.c_str(), service.c_str(), &hints, &available_addresses);
-  CHECK_EQ(errorcode, 0) << gai_strerror(errorcode);
-  CHECK_NOTNULL(available_addresses);
-  result_fd =
-      socket(available_addresses->ai_family, available_addresses->ai_socktype,
-             available_addresses->ai_protocol);
-  PCHECK(result_fd >= 0);
-  PCHECK(make_socket_nonblocking(result_fd) == 0);
-  PCHECK(make_socket_closeonexec(result_fd) == 0);
-  PCHECK(make_socket_nodelay(result_fd) == 0);
-  const int status = connect(result_fd, available_addresses->ai_addr,
-                             available_addresses->ai_addrlen);
-  freeaddrinfo(available_addresses);
-  if (status != -1 || get_last_error_number() == EINPROGRESS) {
-    return result_fd;
-  } else {
-    close_socket(result_fd);
-    return -1;
-  }
-}
+int allocate_and_connect_socket(const std::string& host,
+                                const std::string& service);
 
 }  // namespace network
 }  // namespace canary

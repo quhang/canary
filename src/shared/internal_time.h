@@ -34,14 +34,35 @@
 /**
  * @file src/shared/internal_time.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class InternalTime.
+ * @brief Timing functions.
  */
 
 #ifndef CANARY_SRC_SHARED_INTERNAL_TIME_H_
 #define CANARY_SRC_SHARED_INTERNAL_TIME_H_
+
+#include <chrono>  // NOLINT
+
 namespace canary {
+namespace time {
 
-class InternalTime {};
+/**
+ * Use case:
+ *   using namespace ::canary::time;
+ *   Timepoint start = Clock::now();
+ *   Timepoint end = Clock::now();
+ *   Duration duration = end - start;
+ *   std::cout << to_double(duration);
+ */
+typedef std::chrono::steady_clock Clock;
+/// @brief Time point type.
+typedef Clock::time_point Timepoint;
+/// @brief Time duration type.
+typedef Clock::duration Duration;
+/// @brief Convert a time duration to double.
+inline double to_double(const Duration& input) {
+  return std::chrono::duration<double>(input).count();
+}
 
+}  // namespace time
 }  // namespace canary
 #endif  // CANARY_SRC_SHARED_INTERNAL_TIME_H_

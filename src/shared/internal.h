@@ -43,6 +43,7 @@
 #include "shared/internal_header.h"
 #include "shared/internal_marshal.h"
 #include "shared/internal_network.h"
+#include "shared/internal_time.h"
 #include "shared/internal_type.h"
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_H_

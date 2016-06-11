@@ -66,6 +66,9 @@ int main(int argc, char* argv[]) {
 
   std::string buffer_host, buffer_service;
 
+  std::string host_name;
+  PCHECK(network::get_hostname(&host_name) == 0);
+  LOG(INFO) << "Host name: " << host_name;
   PCHECK(network::get_socket_local_address_name(
           socket_fd, &buffer_host, &buffer_service) == 0);
   LOG(INFO) << "Local address: " << buffer_host << " : " << buffer_service;
