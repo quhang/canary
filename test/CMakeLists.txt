@@ -13,3 +13,6 @@ set(TEST_LIBRARIES canary_core gtest)
 
 cxx_test(basic_marshal . "${TEST_LIBRARIES}")
 cxx_test(intensive_marshal . "${TEST_LIBRARIES}")
+
+cxx_executable(basic_server . "canary_core")
+cxx_executable(basic_client . "canary_core")

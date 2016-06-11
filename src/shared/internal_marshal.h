@@ -166,9 +166,11 @@ CEREAL_SETUP_ARCHIVE_TRAITS(cereal::CanaryInputArchive,
                             cereal::CanaryOutputArchive);
 
 namespace canary {
+
 // Imports names to Canary name space.
 using cereal::CanaryInputArchive;
 using cereal::CanaryOutputArchive;
+
 }  // namespace canary
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_MARSHAL_H_

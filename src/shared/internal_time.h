@@ -32,17 +32,16 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/internal_time.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Class InternalTime.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#ifndef CANARY_SRC_SHARED_INTERNAL_TIME_H_
+#define CANARY_SRC_SHARED_INTERNAL_TIME_H_
+namespace canary {
 
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_network.h"
-#include "shared/internal_type.h"
+class InternalTime {};
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+}  // namespace canary
+#endif  // CANARY_SRC_SHARED_INTERNAL_TIME_H_

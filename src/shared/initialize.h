@@ -44,10 +44,10 @@
 
 namespace canary {
 
-//! Initialize Canary worker runtime.
+//! Initializes Canary worker runtime.
 void InitializeCanaryWorker(int* argc, char** argv[]);
 
-//! Initialize Canary controller runtime.
+//! Initializes Canary controller runtime.
 void InitializeCanaryController(int* argc, char** argv[]);
 
 }  // namespace canary
