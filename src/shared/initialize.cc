@@ -32,23 +32,39 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/initialize.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Class Initialize.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#include "shared/initialize.h"
 
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_type.h"
+#include <event2/thread.h>
+#include <sys/signal.h>
 
-/**
- * Checks whether an errorcode means blocking.
- */
-#ifndef IS_EBLOCK
-#define IS_EBLOCK(x) ((x) == EAGAIN || (x) == EWOULDBLOCK)
-#endif  // IS_EBLOCK
+#include <string>
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+namespace {
+void InitializeCanaryInternal(const std::string& help_message, int* argc,
+                              char** argv[]) {
+  ::gflags::SetUsageMessage(help_message);
+  ::gflags::ParseCommandLineFlags(argc, argv, true);
+  ::google::InitGoogleLogging((*argv)[0]);
+  // Tells libevent to support threading.
+  CHECK_EQ(evthread_use_pthreads(), 0);
+  // Disables SIGPIPE signal, such that writing to a broken pipe can be handled
+  // without requiring signal mechanism.
+  PCHECK(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
+}
+}  // namespace
+
+namespace canary {
+
+void InitializeCanaryWorker(int* argc, char** argv[]) {
+  InitializeCanaryInternal("Run a Canary worker process.", argc, argv);
+}
+void InitializeCanaryController(int* argc, char** argv[]) {
+  InitializeCanaryInternal("Run a Canary controller process.", argc, argv);
+}
+
+}  // namespace canary

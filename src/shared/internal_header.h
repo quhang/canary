@@ -32,23 +32,52 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/internal_header.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Internal header files.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#ifndef CANARY_SRC_SHARED_INTERNAL_HEADER_H_
+#define CANARY_SRC_SHARED_INTERNAL_HEADER_H_
 
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_type.h"
+// Gflags library for managing command line flags.
+#include <gflags/gflags.h>
+// Glog library for logging.
+#include <glog/logging.h>
+
+// C++ libraries.
+#include <cinttypes>
+#include <functional>
+#include <sstream>
+#include <type_traits>
 
 /**
- * Checks whether an errorcode means blocking.
+ * Marks a class as singleton which only offers static access.
  */
-#ifndef IS_EBLOCK
-#define IS_EBLOCK(x) ((x) == EAGAIN || (x) == EWOULDBLOCK)
-#endif  // IS_EBLOCK
+#ifndef SINGLETON_STATIC
+#define SINGLETON_STATIC(T) \
+  T() = delete;             \
+  ~T() = delete
+#endif  // SINGLETON_STATIC
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+/**
+ * Marks a class as non-copyable and non-movable.
+ */
+#ifndef NON_COPYABLE_NOR_MOVABLE
+#define NON_COPYABLE_NOR_MOVABLE(T) \
+  T(const T&) = delete;             \
+  T(T&&) = delete;                  \
+  T& operator=(const T&) = delete;  \
+  T& operator=(T&&) = delete
+#endif  // NON_COPYABLE_NOR_MOVABLE
+
+/**
+ * Marks a class as non-copyable.
+ */
+#ifndef NON_COPYABLE
+#define NON_COPYABLE(T) \
+  T(const T&) = delete; \
+  T& operator=(const T&) = delete
+#endif  // NON_COPYABLE
+
+#endif  // CANARY_SRC_SHARED_INTERNAL_HEADER_H_

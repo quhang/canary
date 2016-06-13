@@ -1,4 +1,4 @@
-#include <shared/internal.h>
+#include <shared/initialize.h>
 
 #include <dlfcn.h>
 #include <glog/logging.h>

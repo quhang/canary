@@ -59,8 +59,8 @@ class ControllerSendCommandInterface {
 class ControllerReceiveCommandInterface {
  public:
   //! Called when receiving a command from a worker.
-  virtual void ReceiveCommandFromWorker(
-      WorkerId worker_id, Command command) = 0;
+  virtual void ReceiveCommandFromWorker(WorkerId worker_id,
+                                        Command command) = 0;
   //! Called when a worker is down.
   virtual void NotifyWorkerIsDown(WorkerId worker_id) = 0;
   //! Called when a worker is up.
@@ -76,8 +76,8 @@ class ControllerCommunicationManager : ControllerSendCommandInterface {
  public:
   //! Initializes the partition map for an application. Broadcast the map to all
   // workers.
-  void InitializeApplicationPartitionMap(
-      ApplicationId application_id, const PartitionMap& partition_map);
+  void InitializeApplicationPartitionMap(ApplicationId application_id,
+                                         const PartitionMap& partition_map);
   //! Updates the partition map for an applicaiton. Broadcast the update to all
   // workers.
   void UpdateApplicationPartitionMap(

@@ -32,23 +32,23 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/initialize.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Initialize worker/controller runtime.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#ifndef CANARY_SRC_SHARED_INITIALIZE_H_
+#define CANARY_SRC_SHARED_INITIALIZE_H_
 
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_type.h"
+#include "shared/internal.h"
 
-/**
- * Checks whether an errorcode means blocking.
- */
-#ifndef IS_EBLOCK
-#define IS_EBLOCK(x) ((x) == EAGAIN || (x) == EWOULDBLOCK)
-#endif  // IS_EBLOCK
+namespace canary {
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+//! Initialize Canary worker runtime.
+void InitializeCanaryWorker(int* argc, char** argv[]);
+
+//! Initialize Canary controller runtime.
+void InitializeCanaryController(int* argc, char** argv[]);
+
+}  // namespace canary
+#endif  // CANARY_SRC_SHARED_INITIALIZE_H_

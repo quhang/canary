@@ -9,6 +9,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/src/)
 
 # Configure test libraries.
-set(TEST_LIBRARIES canary_core gtest_main gtest)
+set(TEST_LIBRARIES canary_core gtest)
 
-cxx_test(basic worker "${TEST_LIBRARIES}")
+cxx_test(basic_marshal . "${TEST_LIBRARIES}")
+cxx_test(intensive_marshal . "${TEST_LIBRARIES}")

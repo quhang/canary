@@ -59,27 +59,23 @@ class WorkerSendDataInterface {
       std::function<void(const DataChunk&, const DataChunk&, DataChunk*)>;
   //! Sends data to a partition. The data is an intermediate data chunk to be
   // routed to a "gather" task.
-  virtual void SendDataToPartition(
-      ApplicationId application_id,
-      StageId stage_id,
-      PartitionId partition_id,
-      const DataChunk& data_chunk) = 0;
+  virtual void SendDataToPartition(ApplicationId application_id,
+                                   StageId stage_id, PartitionId partition_id,
+                                   const DataChunk& data_chunk) = 0;
   //! Sends data to a worker. Used for data partition migration, or restoring
   // data partitions from storage.
-  virtual void SendDataToWorker(
-      WorkerId worker_id, const DataChunk& data_chunk) = 0;
+  virtual void SendDataToWorker(WorkerId worker_id,
+                                const DataChunk& data_chunk) = 0;
   //! Reduces data at the worker side, and then sends to the singular task in a
   // stage.
-  virtual void ReduceAndSendDataToPartition(
-      ApplicationId application_id,
-      StageId stage_id,
-      const DataChunk& data_chunk,
-      CombinerFunction combiner_function);
+  virtual void ReduceAndSendDataToPartition(ApplicationId application_id,
+                                            StageId stage_id,
+                                            const DataChunk& data_chunk,
+                                            CombinerFunction combiner_function);
   //! Broadcasts data to all tasks in a stage.
-  virtual void BroadcastDatatoPartition(
-      ApplicationId application_id,
-      StageId stage_id,
-      const DataChunk& data_chunk);
+  virtual void BroadcastDatatoPartition(ApplicationId application_id,
+                                        StageId stage_id,
+                                        const DataChunk& data_chunk);
 };
 
 /**
@@ -88,14 +84,13 @@ class WorkerSendDataInterface {
 class WorkerReceiveDataInterface {
  public:
   //! Called when receiving data from a partition.
-  virtual void ReceiveDataFromPartition(
-      ApplicationId application_id,
-      StageId stage_id,
-      PartitionId partition_id,
-      const DataChunk& data_chunk) = 0;
+  virtual void ReceiveDataFromPartition(ApplicationId application_id,
+                                        StageId stage_id,
+                                        PartitionId partition_id,
+                                        const DataChunk& data_chunk) = 0;
   //! Called when receiving data from a worker.
-  virtual void ReceiveDataFromWorker(
-      WorkerId worker_id, const DataChunk& data_chunk) = 0;
+  virtual void ReceiveDataFromWorker(WorkerId worker_id,
+                                     const DataChunk& data_chunk) = 0;
 };
 
 /**
@@ -123,8 +118,8 @@ class WorkerReceiveCommandInterface {
  *
  * @see src/worker/worker_communication_interface.h
  */
-class WorkerCommunicationManager :
-    WorkerSendDataInterface, WorkerSendCommandInterface {
+class WorkerCommunicationManager : WorkerSendDataInterface,
+                                   WorkerSendCommandInterface {
  public:
   //! Register the worker data receiver. Returns whether it succeeds.
   bool RegisterWorkerDataReceiver(WorkerReceiveDataInterface* data_receiver);

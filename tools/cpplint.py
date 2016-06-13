@@ -1780,6 +1780,11 @@ def CheckHeaderFileIncluded(filename, include_state, error):
   if not os.path.exists(headerfile):
     return
   headername = FileInfo(headerfile).RepositoryName()
+  # hacked -quhang
+  if headername[:4] == 'src/':
+      headername = headername[4:]
+  elif headername[:8] == 'include/':
+      headername = headername[8:]
   first_include = 0
   for section_list in include_state.include_list:
     for f in section_list:
