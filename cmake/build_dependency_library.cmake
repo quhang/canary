@@ -49,7 +49,7 @@ ExternalProject_Add(project_cereal
 
 # Builds and installs libevent library.
 ExternalProject_Add(project_libevent
-  URL ${CMAKE_SOURCE_DIR}/packages/libevent_v2.0.22.tar.gz
+  URL ${CMAKE_SOURCE_DIR}/packages/libevent_v2.1.5.tar.gz
   PREFIX ${DEPENDENCY_BUILD_PATH}/libevent
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-shared=false --disable-openssl --prefix=${DEPENDENCY_INSTALL_PATH}
   BUILD_COMMAND make
