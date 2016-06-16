@@ -102,6 +102,29 @@ COUNTABLE_ENUM(PartitionId);
 enum class StageId : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(StageId);
 
+/**
+ * The version of the partition map.
+ */
+enum class PartitionMapVersion : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(PartitionMapVersion);
+
+struct FullPartitionId {
+  ApplicationId application_id;
+  VariableId variable_id;
+  PartitionId partition_id;
+  template<typename Archive> void serialize(Archive& archive) {
+    archive(application_id, variable_id, partition_id);
+  }
+};
+
+//typedef std::function<void<int, short>> EventCallback;
+//
+//inline void callback_delegate(int socket_fd, short what, void* arg) {
+//  auto callback = reinterpret_cast<EventCallback*>(arg);
+//  (*callback)(socket_fd, what);
+//  delete callback;
+//}
+
 }  // namespace canary
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_TYPE_H_
