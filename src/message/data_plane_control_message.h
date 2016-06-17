@@ -40,50 +40,86 @@
 #ifndef CANARY_SRC_MESSAGE_DATA_PLANE_CONTROL_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_DATA_PLANE_CONTROL_MESSAGE_H_
 
+#include <map>
+#include <utility>
+#include <string>
+
 #include "shared/internal.h"
 
 #include "message/message.h"
 
-#include <string>
-
 namespace canary {
 namespace message {
 
+/**
+ * The header used by data plane messages.
+ */
 struct DataPlaneHeader {
-  static const size_t kLength =
-      sizeof(MessageLength) + sizeof(MessageCategoryGroup) +
-      sizeof(MessageCategory);
-  static const size_t kOffset0 = 0;
-  static const size_t kOffset1 = kOffset0 + sizeof(MessageLength);
-  static const size_t kOffset2 = kOffset1 + sizeof(MessageCategoryGroup);
-  char content[kLength];
-  MessageLength get_length() const {
-    return *reinterpret_cast<MessageLength*>(header_content + offset0);
+ private:
+  typedef MessageLength Type0;
+  typedef MessageCategoryGroup Type1;
+  typedef MessageCategory Type2;
+  static const size_t kSize0 = sizeof(Type0);
+  static const size_t kSize1 = sizeof(Type1);
+  static const size_t kSize2 = sizeof(Type2);
+
+ public:
+  static const size_t kLength = kSize0 + kSize1 + kSize2;
+  Type0 get_length() const { return header.length; }
+  void set_length(Type0 length) { header.length = length; }
+  Type1 get_category_group() const { return header.category_group; }
+  void set_category_group(Type1 category_group) {
+    header.category_group = category_group;
   }
-  void set_length(MessageLength message_length) {
-    memcpy(content + kOffset0, &message_length, sizeof(message_length));
+  Type2 get_category() const { return header.category; }
+  void set_category(Type2 category) { header.category = category; }
+  template <typename MessageType>
+  static struct evbuffer* PackMessage(const MessageType& message) {
+    struct evbuffer* buffer = evbuffer_new();
+    CanaryOutputArchive archive(buffer);
+    archive(message);
+    DataPlaneHeader header;
+    header.set_length(evbuffer_get_length(buffer));
+    header.set_category_group(get_message_category_group(message));
+    header.set_category(get_message_category(message));
+    evbuffer_prepend(buffer, header.content, header.kLength);
+    return buffer;
   }
-  MessageCategoryGroup get_category_group() const {
-    return *reinterpret_cast<MessageCategoryGroup*>(header_content + offset1);
+  bool ExtractHeader(struct evbuffer* buffer) {
+    ssize_t bytes = evbuffer_copyout(buffer, content, kLength);
+    return bytes >= 0 && static_cast<size_t>(bytes) == kLength;
   }
-  void set_category_group(MessageCategoryGroup message_category_group) {
-    memcpy(content + kOffset1,
-           &message_category_group, sizeof(message_category_group));
+  template <MessageCategory category>
+  static typename get_message_type<category>::type* UnpackMessage(
+      struct evbuffer* buffer) {
+    typedef typename get_message_type<category>::type MessageType;
+    CHECK_EQ(evbuffer_drain(buffer, kLength), 0);
+    CanaryInputArchive archive(buffer);
+    auto message = new MessageType();
+    archive(*message);
+    evbuffer_free(buffer);
+    return message;
   }
-  MessageCategory get_category() const {
-    return *reinterpret_cast<MessageCategory*>(header_content + offset2);
-  }
-  void set_category(MessageCategory message_category) {
-    memcpy(content + kOffset2,
-           &message_category, sizeof(message_category));
-  }
+
+ private:
+  struct Header {
+    Type0 length;
+    Type1 category_group;
+    Type2 category;
+  };
+  union {
+    char content[kLength];
+    Header header;
+  };
+
+  static_assert(sizeof(header) == kLength, "Error.");
 };
 
 /*
  * These messages are exchanged between the controller and a worker to control
- * the underlying data plane of Canary, i.e. how data should be routed or
- * transmitted between workers, and how to manage worker membership when a
- * worker joins or leaves.
+ * the underlying data plane of Canary. E.g. how data is routed or transmitted
+ * between workers, and how worker membership is managed when a worker joins or
+ * leaves.
  */
 
 /**
@@ -92,7 +128,8 @@ struct DataPlaneHeader {
  */
 struct AssignWorkerId {
   WorkerId assigned_worker_id;
-  template<typename Archive> void serialize(Archive& archive) {
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
     archive(assigned_worker_id);
   }
 };
@@ -104,7 +141,8 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, ASSIGN_WORKER_ID, AssignWorkerId);
 struct RegisterServicePort {
   WorkerId from_worker_id;
   std::string route_service, transmit_service;
-  template<typename Archive> void serialize(Archive& archive) {
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id, route_service, transmit_service);
   }
 };
@@ -112,17 +150,77 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, REGISTER_SERVICE_PORT,
                  RegisterServicePort);
 
 /**
- * The controller updates the partition map to a worker.
+ * The controller updates the partition map to a worker, by refreshing the
+ * entire partition map.
  */
-struct UpdatePartitionMap {
+struct UpdatePartitionMapAndWorker {
   PartitionMapVersion version_id;
-  std::map<FullPartitionId, WorkerId> partition_map;
-  std::list<std::pair<FullPartitionId, WorkerId>> partition_map_update;
-  template<typename Archive> void serialize(Archive& archive) {
-    archive(version_id, partition_map, partition_map_update);
+  PartitionMap* partition_map = nullptr;
+  std::map<WorkerId, std::pair<std::string, std::string>> worker_ports;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    if (partition_map == nullptr) {
+      partition_map = new PartitionMap();
+    }
+    archive(version_id, *partition_map);
   }
 };
-REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP, UpdatePartitionMap);
+REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_AND_WORKER,
+                 UpdatePartitionMapAndWorker);
+
+/**
+ * The controller updates the partition map to a worker, by adding an
+ * application.
+ */
+struct UpdatePartitionMapAddApplication {
+  PartitionMapVersion version_id;
+  ApplicationId add_application_id;
+  PerApplicationPartitionMap* per_application_partition_map = nullptr;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(version_id, add_application_id);
+    if (per_application_partition_map == nullptr) {
+      per_application_partition_map = new PerApplicationPartitionMap();
+    }
+    archive(*per_application_partition_map);
+  }
+};
+REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_ADD_APPLICATION,
+                 UpdatePartitionMapAddApplication);
+
+/**
+ * The controller updates the partition map to a worker, by dropping an
+ * application.
+ */
+struct UpdatePartitionMapDropApplication {
+  PartitionMapVersion version_id;
+  ApplicationId drop_application_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(version_id, drop_application_id);
+  }
+};
+REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_DROP_APPLICATION,
+                 UpdatePartitionMapDropApplication);
+
+/**
+ * The controller updates the partition map to a worker, by giving incremental
+ * updates.
+ */
+struct UpdatePartitionMapIncremental {
+  PartitionMapVersion version_id;
+  PartitionMapUpdate* partition_map_update = nullptr;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(version_id);
+    if (partition_map_update == nullptr) {
+      partition_map_update = new PartitionMapUpdate();
+    }
+    archive(*partition_map_update);
+  }
+};
+REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_INCREMENTAL,
+                 UpdatePartitionMapIncremental);
 
 /**
  * The controller updates the new worker member to a worker.
@@ -130,7 +228,8 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP, UpdatePartitionMap);
 struct UpdateAddedWorker {
   WorkerId added_worker_id;
   std::string route_service, transmit_service;
-  template<typename Archive> void serialize(Archive& archive) {
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
     archive(added_worker_id, route_service, transmit_service);
   }
 };
@@ -142,7 +241,8 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_ADDED_WORKER, UpdateAddedWorker);
 struct NotifyWorkerDisconnect {
   WorkerId from_worker_id;
   WorkerId disconnected_worker_id;
-  template<typename Archive> void serialize(Archive& archive) {
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id, disconnected_worker_id);
   }
 };
@@ -153,10 +253,10 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, NOTIFY_WORKER_DISCONNECT,
  * The controller shuts down a worker.
  */
 struct ShutDownWorker {
-  template<typename Archive> void serialize(Archive&) {}
+  template <typename Archive>
+  void serialize(Archive&) {}  // NOLINT
 };
-REGISTER_MESSAGE(DATA_PLANE_CONTROL, SHUT_DOWN_WORKER,
-                 ShutDownWorker);
+REGISTER_MESSAGE(DATA_PLANE_CONTROL, SHUT_DOWN_WORKER, ShutDownWorker);
 
 }  // namespace message
 }  // namespace canary

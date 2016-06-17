@@ -216,5 +216,20 @@ int allocate_and_connect_socket(const std::string& host,
   }
 }
 
+EventMainThread::EventMainThread() {
+  event_base_ = CHECK_NOTNULL(event_base_new());
+  zero_timeval_ = CHECK_NOTNULL(
+      event_base_init_common_timeout(event_base_, new timeval{0, 0}));
+}
+EventMainThread::~EventMainThread() { event_base_free(event_base_); }
+
+int EventMainThread::Run() { return event_base_dispatch(event_base_); }
+
+void EventMainThread::DispatchInjectedEvent(int, short, void* arg) {  // NOLINT
+  auto handle = reinterpret_cast<CallbackType*>(arg);
+  (*handle)();
+  delete handle;
+}
+
 }  // namespace network
 }  // namespace canary

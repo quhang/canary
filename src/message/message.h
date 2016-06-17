@@ -45,8 +45,10 @@
 namespace canary {
 namespace message {
 
+//! The length of a message in bytes, excluding the message header.
 typedef uint32_t MessageLength;
 
+//! The category group of a message.
 enum class MessageCategoryGroup : int16_t {
   INVALID = -1,
   DATA_PLANE_CONTROL,
@@ -56,34 +58,70 @@ enum class MessageCategoryGroup : int16_t {
   TRANSMIT_DATA
 };
 
+//! The category of a message.
 enum class MessageCategory : int16_t {
   INVALID = -1,
   // Data plane control.
-  ASSIGN_WORKER_ID = 100, REGISTER_SERVICE_PORT, UPDATE_PARTITION_MAP,
-  UPDATE_ADDED_WORKER, NOTIFY_WORKER_DISCONNECT, SHUT_DOWN_WORKER,
+  ASSIGN_WORKER_ID = 100,
+  REGISTER_SERVICE_PORT,
+  UPDATE_PARTITION_MAP_AND_WORKER,
+  UPDATE_PARTITION_MAP_ADD_APPLICATION,
+  UPDATE_PARTITION_MAP_DROP_APPLICATION,
+  UPDATE_PARTITION_MAP_INCREMENTAL,
+  UPDATE_ADDED_WORKER,
+  NOTIFY_WORKER_DISCONNECT,
+  SHUT_DOWN_WORKER
 };
 
-template<typename T> MessageCategoryGroup get_message_category_group() {
+//! Gets the category group of a message.
+template <typename T>
+MessageCategoryGroup get_message_category_group() {
   return MessageCategoryGroup::INVALID;
 }
 
-template<typename T> MessageCategory get_message_category() {
+//! Gets the category group of a message.
+template <typename T>
+MessageCategoryGroup get_message_category_group(const T&) {
+  return MessageCategoryGroup::INVALID;
+}
+
+//! Gets the category of a message.
+template <typename T>
+MessageCategory get_message_category() {
   return MessageCategory::INVALID;
 }
 
-template<MessageCategoryGroup, MessageCategory> class get_message_type {
-};
+//! Gets the category of a message.
+template <typename T>
+MessageCategory get_message_category(const T&) {
+  return MessageCategory::INVALID;
+}
 
-#define REGISTER_MESSAGE(GROUP_NAME, CATEGORY_NAME, TYPE_NAME)  \
-  template<> MessageCategoryGroup get_message_category_group<TYPE_NAME>() {  \
-    return MessageCategoryGroup::GROUP_NAME;  \
-  }  \
-  template<> MessageCategory get_message_category<TYPE_NAME>() {  \
-    return MessageCategory::CATEGORY_NAME;  \
-  }  \
-  template<> class get_message_type<MessageCategoryGroup::GROUP_NAME,  \
-                                    MessageCategory::CATEGORY_NAME> {  \
-    typedef TYPE_NAME type;  \
+//! Gets the type of a message.
+template <MessageCategory>
+class get_message_type {};
+
+//! Registers a message type so that the above query interfaces work.
+#define REGISTER_MESSAGE(GROUP_NAME, CATEGORY_NAME, TYPE_NAME)        \
+  template <>                                                         \
+  MessageCategoryGroup get_message_category_group<TYPE_NAME>() {      \
+    return MessageCategoryGroup::GROUP_NAME;                          \
+  }                                                                   \
+  template <>                                                         \
+  MessageCategoryGroup get_message_category_group(const TYPE_NAME&) { \
+    return MessageCategoryGroup::GROUP_NAME;                          \
+  }                                                                   \
+  template <>                                                         \
+  MessageCategory get_message_category<TYPE_NAME>() {                 \
+    return MessageCategory::CATEGORY_NAME;                            \
+  }                                                                   \
+  template <>                                                         \
+  MessageCategory get_message_category(const TYPE_NAME&) {            \
+    return MessageCategory::CATEGORY_NAME;                            \
+  }                                                                   \
+  template <>                                                         \
+  struct get_message_type<MessageCategory::CATEGORY_NAME> {           \
+    typedef TYPE_NAME type;                                           \
   }
 
 }  // namespace message

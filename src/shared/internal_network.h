@@ -40,6 +40,7 @@
 #ifndef CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
 #define CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
 
+#include <event2/event.h>
 #include <string>
 
 #include "shared/internal_header.h"
@@ -47,6 +48,8 @@
 // Forward declaration.
 struct addrinfo;
 struct sockaddr;
+struct event_base;
+struct timeval;
 
 namespace canary {
 
@@ -144,6 +147,40 @@ int allocate_and_bind_listen_socket(const std::string& service);
  */
 int allocate_and_connect_socket(const std::string& host,
                                 const std::string& service);
+
+/**
+ * Event main thread, a wrapper over event_base.
+ */
+class EventMainThread {
+ protected:
+  typedef std::function<void()> CallbackType;
+
+ public:
+  EventMainThread();
+  virtual ~EventMainThread();
+  struct event_base* get_event_base();
+
+  //! Returns -1 if error happened, 0 if exit successfully, 1 if exit without
+  // any pending events.
+  int Run();
+
+  template <typename T>
+  void AddInjectedEvent(T&& handle) {
+    const auto status = event_base_once(
+        event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
+        new CallbackType(std::forward<T>(handle)), zero_timeval_);
+    CHECK_EQ(status, 0);
+  }
+
+  //! Dispatches an injected event.
+  static void DispatchInjectedEvent(int, short, void* arg);  // NOLINT
+
+ private:
+  struct event_base* event_base_ = nullptr;
+  // Zero time interval, which is used to indicate a single queue in
+  // event_base_.
+  const struct timeval* zero_timeval_ = nullptr;
+};
 
 }  // namespace network
 }  // namespace canary

@@ -112,19 +112,27 @@ struct FullPartitionId {
   ApplicationId application_id;
   VariableId variable_id;
   PartitionId partition_id;
-  template<typename Archive> void serialize(Archive& archive) {
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
     archive(application_id, variable_id, partition_id);
   }
 };
 
-//typedef std::function<void<int, short>> EventCallback;
-//
-//inline void callback_delegate(int socket_fd, short what, void* arg) {
-//  auto callback = reinterpret_cast<EventCallback*>(arg);
-//  (*callback)(socket_fd, what);
-//  delete callback;
-//}
-
 }  // namespace canary
+
+namespace std {
+
+template <typename T>
+class hash {
+  using sfinae = typename std::enable_if<std::is_enum<T>::value, T>::type;
+
+ public:
+  size_t operator()(const T& e) const {
+    return std::hash<typename std::underlying_type<T>::type>()(
+        canary::get_value(e));
+  }
+};
+
+}  // namespace std
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_TYPE_H_

@@ -32,14 +32,13 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/message/message_include.h
+ * @file src/controller/controller_communication_manager.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Includes all message types.
+ * @brief Class ControllerCommunicationManager.
  */
 
-#ifndef CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
-#define CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
+#include "controller/controller_communication_manager.h"
 
-#include "message/data_plane_control_message.h"
+DEFINE_string(controller_port, "29992", "Controller port.");
 
-#endif  // CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
+namespace canary {}  // namespace canary
