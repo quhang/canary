@@ -42,7 +42,7 @@
 #include "shared/initialize.h"
 #include "controller/controller_communication_manager.h"
 
-using namespace canary;
+using namespace canary;  // NOLINT
 
 class FakeCommandReceiver : public ControllerReceiveCommandInterface {
  public:

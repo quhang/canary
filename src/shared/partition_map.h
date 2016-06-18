@@ -49,6 +49,7 @@
 
 namespace canary {
 
+//! A partition map update.
 typedef std::list<std::pair<FullPartitionId, WorkerId>> PartitionMapUpdate;
 
 /**
@@ -56,63 +57,22 @@ typedef std::list<std::pair<FullPartitionId, WorkerId>> PartitionMapUpdate;
  */
 class PerApplicationPartitionMap {
  public:
-  //! Queries the worker id of a partition.
+  //! Queries the worker id of a partition. Returns INVALID if not available.
   WorkerId QueryWorkerId(VariableId variable_id,
-                         PartitionId partition_id) const {
-    const auto variable_id_value = get_value(variable_id);
-    CHECK_GE(variable_id_value, 0);
-    const auto partition_id_value = get_value(partition_id);
-    CHECK_GE(partition_id_value, 0);
-    if (variable_id_value >= static_cast<int>(application_map_.size())) {
-      return WorkerId::INVALID;
-    }
-    const auto& per_variable_map = application_map_[variable_id_value];
-    if (partition_id_value >= static_cast<int>(per_variable_map.size())) {
-      return WorkerId::INVALID;
-    }
-    return per_variable_map[partition_id_value];
-  }
+                         PartitionId partition_id) const;
 
-  //! Queries the partitioning of a variable.
-  int QueryVariablePartitioning(VariableId variable_id) const {
-    const auto variable_id_value = get_value(variable_id);
-    CHECK_GE(variable_id_value, 0);
-    if (variable_id_value >= static_cast<int>(application_map_.size())) {
-      return -1;
-    }
-    return static_cast<int>(application_map_.at(variable_id_value).size());
-  }
-
-  //! Updates the worker id of a partition.
-  void Update(VariableId variable_id, PartitionId partition_id,
-              WorkerId worker_id) {
-    const auto variable_id_value = get_value(variable_id);
-    CHECK_GE(variable_id_value, 0);
-    const auto partition_id_value = get_value(partition_id);
-    CHECK_GE(partition_id_value, 0);
-    application_map_.at(variable_id_value).at(partition_id_value) = worker_id;
-  }
+  //! Queries the partitioning of a variable. Returns -1 if not available.
+  int QueryVariablePartitioning(VariableId variable_id) const;
 
   //! Sets the number of variables.
-  void SetNumVariable(int num_variable) {
-    application_map_.clear();
-    application_map_.resize(num_variable);
-  }
+  void SetNumVariable(int num_variable);
 
   //! Sets the partitioning of a variable.
-  void SetVariablePartitioning(VariableId variable_id, int partitioning) {
-    application_map_.at(get_value(variable_id)).clear();
-    application_map_.at(get_value(variable_id))
-        .resize(partitioning, WorkerId::INVALID);
-  }
+  void SetVariablePartitioning(VariableId variable_id, int partitioning);
 
   //! Sets the worker id of a partition.
   void SetWorkerId(VariableId variable_id, PartitionId partition_id,
-                   WorkerId worker_id) {
-    const auto variable_id_value = get_value(variable_id);
-    const auto partition_id_value = get_value(partition_id);
-    application_map_.at(variable_id_value).at(partition_id_value) = worker_id;
-  }
+                   WorkerId worker_id);
 
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
@@ -130,55 +90,22 @@ class PartitionMap {
  public:
   //! Gets a per-application partition map.
   PerApplicationPartitionMap* GetPerApplicationPartitionMap(
-      ApplicationId application_id) {
-    auto iter = partition_map_.find(application_id);
-    if (iter == partition_map_.end()) {
-      return nullptr;
-    } else {
-      return &iter->second;
-    }
-  }
+      ApplicationId application_id);
 
   //! Adds a per-application partition map.
   PerApplicationPartitionMap* AddPerApplicationPartitionMap(
-      ApplicationId application_id) {
-    return &partition_map_[application_id];
-  }
+      ApplicationId application_id);
 
   //! Deletes a per-application partition map. Returns whether the deletion
   // succeeds.
-  bool DeletePerApplicationPartitionMap(ApplicationId application_id) {
-    auto iter = partition_map_.find(application_id);
-    if (iter == partition_map_.end()) {
-      return false;
-    } else {
-      partition_map_.erase(iter);
-      return true;
-    }
-  }
+  bool DeletePerApplicationPartitionMap(ApplicationId application_id);
 
   //! Merges the updates.
-  void MergeUpdate(const PartitionMapUpdate& update) {
-    for (auto& pair : update) {
-      auto& full_partition_id = pair.first;
-      auto& per_application_partition_map =
-          partition_map_.at(full_partition_id.application_id);
-      per_application_partition_map.Update(full_partition_id.variable_id,
-                                           full_partition_id.partition_id,
-                                           pair.second);
-    }
-  }
+  void MergeUpdate(const PartitionMapUpdate& update);
 
   //! Queries worker id.
   WorkerId QueryWorkerId(ApplicationId application_id, VariableId variable_id,
-                         PartitionId partition_id) const {
-    auto iter = partition_map_.find(application_id);
-    if (iter == partition_map_.end()) {
-      return WorkerId::INVALID;
-    } else {
-      return iter->second.QueryWorkerId(variable_id, partition_id);
-    }
-  }
+                         PartitionId partition_id) const;
 
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT

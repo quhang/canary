@@ -276,7 +276,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
   //! Processes an incoming message.
   // Sync call.
-  void ProcessIncomingMessage(const message::DataPlaneHeader& message_header,
+  void ProcessIncomingMessage(const message::ControlHeader& message_header,
                               struct evbuffer* buffer);
 
   //! Appends the worker sending queue.

@@ -52,43 +52,70 @@ namespace canary {
 namespace message {
 
 /**
- * The header used by data plane messages.
+ * The header used by data plane control messages.
  */
-struct DataPlaneHeader {
+struct ControlHeader {
  private:
   typedef MessageLength Type0;
   typedef MessageCategoryGroup Type1;
   typedef MessageCategory Type2;
-  static const size_t kSize0 = sizeof(Type0);
-  static const size_t kSize1 = sizeof(Type1);
-  static const size_t kSize2 = sizeof(Type2);
+
+  //! The header data structure.
+  struct Header {
+    Type0 length;
+    Type1 category_group;
+    Type2 category;
+  };
+
+  //! Used for decoding.
+  union {
+    char content_[sizeof(Header)];
+    Header header_;
+  };
+
+  static_assert(sizeof(Header) == sizeof(Type0) + sizeof(Type1) + sizeof(Type2),
+                "Needs fixes here!");
 
  public:
-  static const size_t kLength = kSize0 + kSize1 + kSize2;
-  Type0 get_length() const { return header.length; }
-  void set_length(Type0 length) { header.length = length; }
-  Type1 get_category_group() const { return header.category_group; }
+  //! The length of the header.
+  static const size_t kLength = sizeof(Header);
+
+  //! Gets message length.
+  Type0 get_length() const { return header_.length; }
+  //! Sets message length.
+  void set_length(Type0 length) { header_.length = length; }
+  //! Gets message category group.
+  Type1 get_category_group() const { return header_.category_group; }
+  //! Sets message category group.
   void set_category_group(Type1 category_group) {
-    header.category_group = category_group;
+    header_.category_group = category_group;
   }
-  Type2 get_category() const { return header.category; }
-  void set_category(Type2 category) { header.category = category; }
+  //! Gets message category.
+  Type2 get_category() const { return header_.category; }
+  //! Sets message category.
+  void set_category(Type2 category) { header_.category = category; }
+
+  //! Packs a message into a buffer with header added.
   template <typename MessageType>
   static struct evbuffer* PackMessage(const MessageType& message) {
     struct evbuffer* buffer = evbuffer_new();
     CanaryOutputArchive archive(buffer);
     archive(message);
-    DataPlaneHeader header;
+    ControlHeader header;
     header.set_length(evbuffer_get_length(buffer));
     header.set_category_group(get_message_category_group(message));
     header.set_category(get_message_category(message));
-    evbuffer_prepend(buffer, header.content, header.kLength);
+    evbuffer_prepend(buffer, header.content_, header.kLength);
     return buffer;
   }
+
+  //! Extracts the header from a buffer without changing the buffer.
   bool ExtractHeader(struct evbuffer* buffer) {
-    ssize_t bytes = evbuffer_copyout(buffer, content, kLength);
+    ssize_t bytes = evbuffer_copyout(buffer, content_, kLength);
     return bytes >= 0 && static_cast<size_t>(bytes) == kLength;
   }
+
+  //! Unpacks and consumes a buffer into a message.
   template <MessageCategory category>
   static typename get_message_type<category>::type* UnpackMessage(
       struct evbuffer* buffer) {
@@ -100,19 +127,6 @@ struct DataPlaneHeader {
     evbuffer_free(buffer);
     return message;
   }
-
- private:
-  struct Header {
-    Type0 length;
-    Type1 category_group;
-    Type2 category;
-  };
-  union {
-    char content[kLength];
-    Header header;
-  };
-
-  static_assert(sizeof(header) == kLength, "Error.");
 };
 
 /*

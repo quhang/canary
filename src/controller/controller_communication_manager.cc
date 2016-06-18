@@ -117,13 +117,13 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   // Sends initialization message.
   message::AssignWorkerId message;
   message.assigned_worker_id = worker_id;
-  struct evbuffer* buffer = message::DataPlaneHeader::PackMessage(message);
+  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
   AppendWorkerSendingQueue(worker_id, buffer);
 }
 
 void ControllerCommunicationManager::CallbackReadEvent(
     WorkerRecord* worker_record) {
-  message::DataPlaneHeader message_header;
+  message::ControlHeader message_header;
   struct evbuffer* receive_buffer = worker_record->receive_buffer;
   while (evbuffer_read(receive_buffer, worker_record->socket_fd, -1) != -1) {
     // If the full header is received.
@@ -217,7 +217,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.route_service = worker_record->route_service;
     update_message.transmit_service = worker_record->transmit_service;
     struct evbuffer* buffer =
-        message::DataPlaneHeader::PackMessage(update_message);
+        message::ControlHeader::PackMessage(update_message);
     AppendAllReadySendingQueue(buffer);
   }
 
@@ -231,7 +231,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
           pair.second->route_service, pair.second->transmit_service);
     }
     struct evbuffer* buffer =
-        message::DataPlaneHeader::PackMessage(update_message);
+        message::ControlHeader::PackMessage(update_message);
     AppendWorkerSendingQueue(worker_record->worker_id, buffer);
   }
 
@@ -285,7 +285,7 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
 
 void ControllerCommunicationManager::SendCommandToWorker(
     WorkerId worker_id, struct evbuffer* buffer) {
-  message::DataPlaneHeader header;
+  message::ControlHeader header;
   CHECK(header.ExtractHeader(buffer));
   CHECK(header.get_category_group() ==
         message::MessageCategoryGroup::WORKER_COMMAND);
@@ -338,7 +338,7 @@ void ControllerCommunicationManager::InternalAddApplication(
   message.version_id = internal_partition_map_version_;
   message.add_application_id = application_id;
   message.per_application_partition_map = per_application_partition_map;
-  struct evbuffer* buffer = message::DataPlaneHeader::PackMessage(message);
+  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
   AppendAllReadySendingQueue(buffer);
 
   delete per_application_partition_map;
@@ -353,7 +353,7 @@ void ControllerCommunicationManager::InternalDropApplication(
   message::UpdatePartitionMapDropApplication message;
   message.version_id = internal_partition_map_version_;
   message.drop_application_id = application_id;
-  struct evbuffer* buffer = message::DataPlaneHeader::PackMessage(message);
+  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
   AppendAllReadySendingQueue(buffer);
 }
 
@@ -366,7 +366,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
   message::UpdatePartitionMapIncremental message;
   message.version_id = internal_partition_map_version_;
   message.partition_map_update = partition_map_update;
-  struct evbuffer* buffer = message::DataPlaneHeader::PackMessage(message);
+  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
   AppendAllReadySendingQueue(buffer);
 
   delete partition_map_update;
@@ -375,7 +375,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
 void ControllerCommunicationManager::InternalShutDownWorker(
     WorkerId worker_id) {
   message::ShutDownWorker message;
-  struct evbuffer* buffer = message::DataPlaneHeader::PackMessage(message);
+  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
   AppendWorkerSendingQueue(worker_id, buffer);
 }
 
@@ -384,22 +384,22 @@ void ControllerCommunicationManager::InternalShutDownWorker(
  */
 
 void ControllerCommunicationManager::ProcessIncomingMessage(
-    const message::DataPlaneHeader& message_header, struct evbuffer* buffer) {
+    const message::ControlHeader& message_header, struct evbuffer* buffer) {
   using message::MessageCategoryGroup;
   using message::MessageCategory;
-  using message::DataPlaneHeader;
+  using message::ControlHeader;
   switch (message_header.get_category_group()) {
     case MessageCategoryGroup::DATA_PLANE_CONTROL:
       switch (message_header.get_category()) {
         case MessageCategory::REGISTER_SERVICE_PORT: {
-          auto message = DataPlaneHeader::UnpackMessage<
+          auto message = ControlHeader::UnpackMessage<
               MessageCategory::REGISTER_SERVICE_PORT>(buffer);
           // Ownership transferred.
           ProcessRegisterServicePortMessage(message);
           break;
         }
         case message::MessageCategory::NOTIFY_WORKER_DISCONNECT: {
-          auto message = DataPlaneHeader::UnpackMessage<
+          auto message = ControlHeader::UnpackMessage<
               MessageCategory::NOTIFY_WORKER_DISCONNECT>(buffer);
           // Ownership transferred.
           ProcessNotifyWorkerDisconnect(message);

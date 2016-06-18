@@ -122,6 +122,7 @@ struct FullPartitionId {
 
 namespace std {
 
+//! Hash function for enumeration values.
 template <typename T>
 class hash {
   using sfinae = typename std::enable_if<std::is_enum<T>::value, T>::type;
