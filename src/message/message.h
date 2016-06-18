@@ -75,25 +75,25 @@ enum class MessageCategory : int16_t {
 
 //! Gets the category group of a message.
 template <typename T>
-MessageCategoryGroup get_message_category_group() {
+inline MessageCategoryGroup get_message_category_group() {
   return MessageCategoryGroup::INVALID;
 }
 
 //! Gets the category group of a message.
 template <typename T>
-MessageCategoryGroup get_message_category_group(const T&) {
+inline MessageCategoryGroup get_message_category_group(const T&) {
   return MessageCategoryGroup::INVALID;
 }
 
 //! Gets the category of a message.
 template <typename T>
-MessageCategory get_message_category() {
+inline MessageCategory get_message_category() {
   return MessageCategory::INVALID;
 }
 
 //! Gets the category of a message.
 template <typename T>
-MessageCategory get_message_category(const T&) {
+inline MessageCategory get_message_category(const T&) {
   return MessageCategory::INVALID;
 }
 
@@ -102,26 +102,26 @@ template <MessageCategory>
 class get_message_type {};
 
 //! Registers a message type so that the above query interfaces work.
-#define REGISTER_MESSAGE(GROUP_NAME, CATEGORY_NAME, TYPE_NAME)        \
-  template <>                                                         \
-  MessageCategoryGroup get_message_category_group<TYPE_NAME>() {      \
-    return MessageCategoryGroup::GROUP_NAME;                          \
-  }                                                                   \
-  template <>                                                         \
-  MessageCategoryGroup get_message_category_group(const TYPE_NAME&) { \
-    return MessageCategoryGroup::GROUP_NAME;                          \
-  }                                                                   \
-  template <>                                                         \
-  MessageCategory get_message_category<TYPE_NAME>() {                 \
-    return MessageCategory::CATEGORY_NAME;                            \
-  }                                                                   \
-  template <>                                                         \
-  MessageCategory get_message_category(const TYPE_NAME&) {            \
-    return MessageCategory::CATEGORY_NAME;                            \
-  }                                                                   \
-  template <>                                                         \
-  struct get_message_type<MessageCategory::CATEGORY_NAME> {           \
-    typedef TYPE_NAME type;                                           \
+#define REGISTER_MESSAGE(GROUP_NAME, CATEGORY_NAME, TYPE_NAME)               \
+  template <>                                                                \
+  inline MessageCategoryGroup get_message_category_group<TYPE_NAME>() {      \
+    return MessageCategoryGroup::GROUP_NAME;                                 \
+  }                                                                          \
+  template <>                                                                \
+  inline MessageCategoryGroup get_message_category_group(const TYPE_NAME&) { \
+    return MessageCategoryGroup::GROUP_NAME;                                 \
+  }                                                                          \
+  template <>                                                                \
+  inline MessageCategory get_message_category<TYPE_NAME>() {                 \
+    return MessageCategory::CATEGORY_NAME;                                   \
+  }                                                                          \
+  template <>                                                                \
+  inline MessageCategory get_message_category(const TYPE_NAME&) {            \
+    return MessageCategory::CATEGORY_NAME;                                   \
+  }                                                                          \
+  template <>                                                                \
+  struct get_message_type<MessageCategory::CATEGORY_NAME> {                  \
+    typedef TYPE_NAME type;                                                  \
   }
 
 }  // namespace message

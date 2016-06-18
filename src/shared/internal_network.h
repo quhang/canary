@@ -158,12 +158,17 @@ class EventMainThread {
  public:
   EventMainThread();
   virtual ~EventMainThread();
-  struct event_base* get_event_base();
+
+  //! Gets the underlying event base.
+  struct event_base* get_event_base() {
+    return event_base_;
+  }
 
   //! Returns -1 if error happened, 0 if exit successfully, 1 if exit without
   // any pending events.
   int Run();
 
+  //! Adds an injected handle to be run.
   template <typename T>
   void AddInjectedEvent(T&& handle) {
     const auto status = event_base_once(
