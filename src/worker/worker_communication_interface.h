@@ -57,21 +57,22 @@ class WorkerSendDataInterface {
   // routed to a "gather" task.
   virtual void SendDataToPartition(ApplicationId application_id,
                                    StageId stage_id, PartitionId partition_id,
-                                   struct evbuffer*) = 0;
+                                   struct evbuffer* buffer) = 0;
   //! Sends data to a worker. Used for data partition migration, or restoring
   // data partitions from storage.
-  virtual void SendDataToWorker(
-      WorkerId worker_id, struct evbuffer* buffer) = 0;
+  virtual void SendDataToWorker(WorkerId worker_id,
+                                struct evbuffer* buffer) = 0;
   //! Reduces data at the worker side, and then sends to the singular task in a
   // stage.
   virtual void ReduceAndSendDataToPartition(ApplicationId application_id,
                                             StageId stage_id,
                                             struct evbuffer* buffer,
-                                            CombinerFunction combiner_function);
+                                            CombinerFunction combiner_function)
+      = 0;
   //! Broadcasts data to all tasks in a stage.
   virtual void BroadcastDatatoPartition(ApplicationId application_id,
                                         StageId stage_id,
-                                        struct evbuffer* buffer);
+                                        struct evbuffer* buffer) = 0;
 };
 
 /**

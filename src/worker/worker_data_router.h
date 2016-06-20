@@ -40,6 +40,9 @@
 #ifndef CANARY_SRC_WORKER_WORKER_DATA_ROUTER_H_
 #define CANARY_SRC_WORKER_WORKER_DATA_ROUTER_H_
 
+#include <list>
+#include <string>
+
 #include "shared/internal.h"
 #include "shared/partition_map.h"
 
@@ -83,7 +86,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   virtual ~WorkerDataRouter() {}
   void Initialize(network::EventMainThread* event_main_thread,
                   WorkerReceiveDataInterface* data_receiver,
-                  const std::string& route_service);
+                  const std::string& route_service) {}
 
  public:
   /*
@@ -94,47 +97,43 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Sync call.
   static void DispatchPeerAcceptEvent(struct evconnlistener* listener,
                                       int socket_fd, struct sockaddr* address,
-                                      int socklen, void* arg);
+                                      int socklen, void* arg) {}
 
   //! Dispatches the accept error event of the peer channel.
   // Sync call.
-  static void DispatchPeerAcceptErrorEvent(struct evconnlistener*, void*);
+  static void DispatchPeerAcceptErrorEvent(struct evconnlistener*, void*) {}
 
   //! Dispatches the connection feedback event of the peer channel.
   // Sync call.
-  static void DispatchPeerConnectEvent(int socket_fd, void*);
+  static void DispatchPeerConnectEvent(int socket_fd, void*) {}
 
   //! Dispatches the read event on the peer channel.
   // Sync call.
   static void DispatchPeerReadEvent(int socket_fd, short,  // NOLINT
-                                    void* arg);
+                                    void* arg) {}
 
   //! Dispatches the write event on the peer channel.
   // Sync call.
   static void DispatchPeerWriteEvent(int socket_fd, short,  // NOLINT
-                                     void* arg);
+                                     void* arg) {}
 
  public:
-
   //! Sends data to a partition. The data is an intermediate data chunk to be
   // routed to a "gather" task.
-  void SendDataToPartition(ApplicationId application_id,
-                           StageId stage_id, PartitionId partition_id,
-                           struct evbuffer*) override;
+  void SendDataToPartition(ApplicationId application_id, StageId stage_id,
+                           PartitionId partition_id, struct evbuffer*) override
+      {}
   //! Sends data to a worker. Used for data partition migration, or restoring
   // data partitions from storage.
-  void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override;
+  void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {}
   //! Reduces data at the worker side, and then sends to the singular task in a
   // stage.
-  void ReduceAndSendDataToPartition(ApplicationId application_id,
-                                    StageId stage_id,
-                                    struct evbuffer* buffer,
-                                    CombinerFunction combiner_function)
-      override;
+  void ReduceAndSendDataToPartition(
+      ApplicationId application_id, StageId stage_id, struct evbuffer* buffer,
+      CombinerFunction combiner_function) override {}
   //! Broadcasts data to all tasks in a stage.
-  void BroadcastDatatoPartition(ApplicationId application_id,
-                                StageId stage_id,
-                                struct evbuffer* buffer) override;
+  void BroadcastDatatoPartition(ApplicationId application_id, StageId stage_id,
+                                struct evbuffer* buffer) override {}
 
  private:
   network::EventMainThread* event_main_thread_ = nullptr;

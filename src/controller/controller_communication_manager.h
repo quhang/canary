@@ -286,13 +286,13 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
   //! Appends the worker sending queue if the channel is ready.
   // Sync call.
-  void AppendWorkerSendingQueueIfReady(
-      WorkerId worker_id, struct evbuffer* buffer);
+  void AppendWorkerSendingQueueIfReady(WorkerId worker_id,
+                                       struct evbuffer* buffer);
 
   //! Appends the worker sending queue.
   // Sync call.
-  void AppendWorkerSendingQueueWithFlag(
-      WorkerId worker_id, struct evbuffer* buffer, bool enforce);
+  void AppendWorkerSendingQueueWithFlag(WorkerId worker_id,
+                                        struct evbuffer* buffer, bool enforce);
 
   //! Appends all ready sending queues.
   // Sync call.
@@ -307,7 +307,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
   // Worker id keeps increasing and is not reused.
   WorkerId worker_id_allocator_ = WorkerId::FIRST;
-  std::map<WorkerId, WorkerRecord*> worker_id_to_status_;
+  std::map<WorkerId, WorkerRecord> worker_id_to_status_;
 
   PartitionMap internal_partition_map_;
   PartitionMapVersion internal_partition_map_version_ =

@@ -32,11 +32,34 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/worker/worker_data_router.cc
+ * @file src/message/command_message.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class WorkerDataRouter.
+ * @brief Class CommandMessage.
  */
 
-#include "worker/worker_data_router.h"
+#ifndef CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
+#define CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 
-namespace canary {}  // namespace canary
+#include "shared/internal.h"
+
+#include "message/message.h"
+
+namespace canary {
+namespace message {
+
+/**
+ * The controller updates the partition map to a worker, by refreshing the
+ * entire partition map.
+ */
+struct TestWorkerCommand {
+  std::string test_string;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(test_string);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, TEST_WORKER_COMMAND, TestWorkerCommand);
+
+}  // namespace message
+}  // namespace canary
+#endif  // CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_

@@ -58,6 +58,7 @@ void ControllerCommunicationManager::Initialize(
   evconnlistener_set_error_cb(listening_event_, DispatchAcceptErrorEvent);
   // Sets the initialization flag.
   is_initialized_ = true;
+  LOG(INFO) << "Controller communication manager is initialized.";
 }
 
 /*
@@ -84,7 +85,8 @@ void ControllerCommunicationManager::DispatchReadEvent(int socket_fd,
   auto worker_record = callback_arg->worker_record;
   CHECK_EQ(socket_fd, worker_record->socket_fd);
   callback_arg->manager->CallbackReadEvent(worker_record);
-  delete callback_arg;
+  // The argument should not be deleted.
+  // delete callback_arg;
 }
 
 void ControllerCommunicationManager::DispatchWriteEvent(int socket_fd,
@@ -94,7 +96,8 @@ void ControllerCommunicationManager::DispatchWriteEvent(int socket_fd,
   auto worker_record = callback_arg->worker_record;
   CHECK_EQ(socket_fd, worker_record->socket_fd);
   callback_arg->manager->CallbackWriteEvent(worker_record);
-  delete callback_arg;
+  // The argument should not be deleted.
+  // delete callback_arg;
 }
 
 /*
@@ -128,8 +131,8 @@ void ControllerCommunicationManager::CallbackReadEvent(
   message::ControlHeader message_header;
   int status = 0;
   while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
-    if (struct evbuffer* whole_message =
-        message_header.SegmentMessage(receive_buffer)) {
+    while (struct evbuffer* whole_message =
+            message_header.SegmentMessage(receive_buffer)) {
       ProcessIncomingMessage(message_header, whole_message);
     }
   }
@@ -141,8 +144,7 @@ void ControllerCommunicationManager::CallbackReadEvent(
 void ControllerCommunicationManager::CallbackWriteEvent(
     WorkerRecord* worker_record) {
   worker_record->send_buffer = network::send_as_much(
-      worker_record->socket_fd,
-      worker_record->send_buffer,
+      worker_record->socket_fd, worker_record->send_buffer,
       &worker_record->send_queue);
   if (worker_record->send_buffer != nullptr) {
     // Channel is blocked or has error.
@@ -162,7 +164,7 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
     WorkerId worker_id, int socket_fd, const std::string& host,
     const std::string& service) {
   CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
-  auto worker_record = worker_id_to_status_[worker_id];
+  auto worker_record = &worker_id_to_status_[worker_id];
   worker_record->worker_id = worker_id;
   worker_record->host = host;
   worker_record->service = service;
@@ -181,7 +183,7 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
 
 void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     message::RegisterServicePort* message) {
-  auto worker_record = worker_id_to_status_.at(message->from_worker_id);
+  auto worker_record = &worker_id_to_status_.at(message->from_worker_id);
   worker_record->route_service = message->route_service;
   worker_record->transmit_service = message->transmit_service;
   delete message;
@@ -204,7 +206,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
       update_message.worker_ports[pair.first] = std::make_pair(
-          pair.second->route_service, pair.second->transmit_service);
+          pair.second.route_service, pair.second.transmit_service);
     }
     struct evbuffer* buffer =
         message::ControlHeader::PackMessage(update_message);
@@ -215,7 +217,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
   worker_record->is_ready = true;
 
   // Notifies that a worker is up.
-  command_receiver_->NotifyWorkerIsUp(message->from_worker_id);
+  command_receiver_->NotifyWorkerIsUp(worker_record->worker_id);
 }
 
 void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
@@ -224,7 +226,7 @@ void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
   delete message;
   auto iter = worker_id_to_status_.find(shutdown_worker_id);
   if (iter != worker_id_to_status_.end()) {
-    CleanUpWorkerRecord(iter->second);
+    CleanUpWorkerRecord(&iter->second);
   }
 }
 
@@ -265,38 +267,34 @@ void ControllerCommunicationManager::SendCommandToWorker(
   CHECK(header.ExtractHeader(buffer));
   CHECK(header.get_category_group() ==
         message::MessageCategoryGroup::WORKER_COMMAND);
-  CHECK_EQ(header.get_length(), evbuffer_get_length(buffer) + header.kLength);
+  CHECK_EQ(header.kLength + header.get_length(), evbuffer_get_length(buffer));
   event_main_thread_->AddInjectedEvent(std::bind(
-      &SelfType::AppendWorkerSendingQueueIfReady, this,
-      worker_id, buffer));
+      &SelfType::AppendWorkerSendingQueueIfReady, this, worker_id, buffer));
 }
 
 void ControllerCommunicationManager::AddApplication(
     ApplicationId application_id,
     PerApplicationPartitionMap* per_application_partition_map) {
-  event_main_thread_->AddInjectedEvent(std::bind(
-      &SelfType::InternalAddApplication, this,
-      application_id, per_application_partition_map));
+  event_main_thread_->AddInjectedEvent(
+      std::bind(&SelfType::InternalAddApplication, this, application_id,
+                per_application_partition_map));
 }
 
 void ControllerCommunicationManager::DropApplication(
     ApplicationId application_id) {
-  event_main_thread_->AddInjectedEvent(std::bind(
-      &SelfType::InternalDropApplication, this,
-      application_id));
+  event_main_thread_->AddInjectedEvent(
+      std::bind(&SelfType::InternalDropApplication, this, application_id));
 }
 
 void ControllerCommunicationManager::UpdatePartitionMap(
     PartitionMapUpdate* partition_map_update) {
   event_main_thread_->AddInjectedEvent(std::bind(
-      &SelfType::InternalUpdatePartitionMap,
-      this, partition_map_update));
+      &SelfType::InternalUpdatePartitionMap, this, partition_map_update));
 }
 
 void ControllerCommunicationManager::ShutDownWorker(WorkerId worker_id) {
-  event_main_thread_->AddInjectedEvent(std::bind(
-      &SelfType::InternalShutDownWorker, this,
-      worker_id));
+  event_main_thread_->AddInjectedEvent(
+      std::bind(&SelfType::InternalShutDownWorker, this, worker_id));
 }
 
 /**
@@ -410,7 +408,7 @@ void ControllerCommunicationManager::AppendWorkerSendingQueueWithFlag(
     evbuffer_free(buffer);
     return;
   } else {
-    WorkerRecord* worker_record = iter->second;
+    WorkerRecord* worker_record = &iter->second;
     CHECK(worker_record->is_ready || !enforce);
     worker_record->send_queue.push_back(buffer);
     event_add(worker_record->write_event, nullptr);
@@ -420,7 +418,7 @@ void ControllerCommunicationManager::AppendWorkerSendingQueueWithFlag(
 void ControllerCommunicationManager::AppendAllReadySendingQueue(
     struct evbuffer* buffer) {
   for (auto& pair : worker_id_to_status_) {
-    WorkerRecord* worker_record = pair.second;
+    WorkerRecord* worker_record = &pair.second;
     if (worker_record->is_ready) {
       struct evbuffer* send_buffer = evbuffer_new();
       // Copy by reference.

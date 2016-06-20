@@ -43,6 +43,9 @@
 #ifndef CANARY_SRC_WORKER_WORKER_COMMUNICATION_MANAGER_H_
 #define CANARY_SRC_WORKER_WORKER_COMMUNICATION_MANAGER_H_
 
+#include <list>
+#include <string>
+
 #include "worker/worker_communication_interface.h"
 #include "worker/worker_data_router.h"
 #include "message/message_include.h"
@@ -56,8 +59,8 @@ namespace canary {
  *
  * @see src/worker/worker_communication_interface.h
  */
-class WorkerCommunicationManager
-    : public WorkerSendCommandInterface, public WorkerSendDataInterface {
+class WorkerCommunicationManager : public WorkerSendCommandInterface,
+                                   public WorkerSendDataInterface {
  private:
   typedef WorkerCommunicationManager SelfType;
   /**
@@ -96,20 +99,7 @@ class WorkerCommunicationManager
   // Prepare call.
   void Initialize(network::EventMainThread* event_main_thread,
                   WorkerReceiveCommandInterface* command_receiver,
-                  WorkerReceiveDataInterface* data_receiver) {
-    event_main_thread_ = CHECK_NOTNULL(event_main_thread);
-    command_receiver_ = command_receiver;
-    event_base_ = event_main_thread_->get_event_base();
-    route_service_ = FLAGS_worker_service;
-    data_router_.Initialize(event_main_thread_, data_receiver, route_service_);
-    // Initialize host and service, and initiate connection.
-    controller_record.host = FLAGS_controller_host;
-    controller_record.service = FLAGS_controller_service;
-    event_main_thread_->AddInjectedEvent(std::bind(
-            &SelfType::CallbackInitiateEvent, this));
-    // Sets the initialization flag.
-    is_initialized_ = true;
-  }
+                  WorkerReceiveDataInterface* data_receiver);
 
  public:
   /*
@@ -117,37 +107,17 @@ class WorkerCommunicationManager
    * Controller channel related.
    */
 
-  //! Dispatches the connection initiation event on the controller channel.
-  // Sync call.
-  static void DispatchInitiateEvent(int, short,  // NOLINT
-                                    void* arg) {
-    auto manager = reinterpret_cast<SelfType*>(arg);
-    manager->CallbackInitiateEvent();
-  }
-
   //! Dispatches the connection feedback event on the controller channel.
   // Sync call.
-  static void DispatchConnectEvent(int, short,  // NOLINT
-                                   void* arg) {
-    auto manager = reinterpret_cast<SelfType*>(arg);
-    manager->CallbackConnectEvent();
-  }
+  static void DispatchConnectEvent(int, short, void* arg);  // NOLINT
 
   //! Dispatches the read event on the controller channel.
   // Sync call.
-  static void DispatchReadEvent(int, short,  // NOLINT
-                                void* arg) {
-    auto manager = reinterpret_cast<SelfType*>(arg);
-    manager->CallbackReadEvent();
-  }
+  static void DispatchReadEvent(int, short, void* arg);  // NOLINT
 
   //! Dispatches the write event on the controller channel.
   // Sync call.
-  static void DispatchWriteEvent(int, short,  // NOLINT
-                                void* arg) {
-    auto manager = reinterpret_cast<SelfType*>(arg);
-    manager->CallbackWriteEvent();
-  }
+  static void DispatchWriteEvent(int, short, void* arg);  // NOLINT
 
  private:
   /*
@@ -155,196 +125,89 @@ class WorkerCommunicationManager
    */
   //! Timeout event to initiate the connection to the controller.
   // Sync call.
-  void CallbackInitiateEvent() {
-    controller_record.socket_fd = network::allocate_and_connect_socket(
-        controller_record.host, controller_record.service);
-    CHECK_GE(controller_record.socket_fd, 0);
-    CHECK_EQ(event_base_once(
-            event_base_, controller_record.socket_fd, EV_WRITE,
-            DispatchConnectEvent, this, nullptr), 0);
-  }
+  void CallbackInitiateEvent();
 
   //! Receives the connection feedback event from the controller.
   // Sync call.
-  void CallbackConnectEvent() {
-    const int error_flag = network::get_socket_error_number(
-        controller_record.socket_fd);
-    if (error_flag != 0) {
-      // The socket is in error state, so has to reopen it.
-      close(controller_record.socket_fd);
-      controller_record.socket_fd = -1;
-      event_main_thread_->AddDelayInjectedEvent(std::bind(
-              &SelfType::CallbackInitiateEvent, this));
-    } else {
-      InitializeControllerRecord();
-    }
-  }
+  void CallbackConnectEvent();
 
-  void InitializeControllerRecord() {
-    const int socket_fd = controller_record.socket_fd;
-    CHECK_NE(socket_fd, -1);
-    controller_record.is_ready = false;
-    controller_record.read_event = CHECK_NOTNULL(event_new(
-            event_base_, socket_fd, EV_READ | EV_PERSIST, &DispatchReadEvent,
-            this));
-    event_add(controller_record.read_event, nullptr);
-    controller_record.write_event = CHECK_NOTNULL(event_new(
-            event_base_, socket_fd, EV_WRITE, &DispatchWriteEvent, this));
-    controller_record.send_buffer = nullptr;
-    controller_record.receive_buffer = evbuffer_new();
-  }
-
+  //! Initializes the controller record.
+  void InitializeControllerRecord();
 
   //! Receives data or error from the controller.
   // Sync call.
-  void CallbackReadEvent() {
-    struct evbuffer* receive_buffer = controller_record.receive_buffer;
-    const int socket_fd = controller_record.socket_fd;
-
-    message::ControlHeader message_header;
-    int status = 0;
-    while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
-      if (struct evbuffer* whole_message =
-          message_header.SegmentMessage(receive_buffer)) {
-        ProcessIncomingMessage(message_header, whole_message);
-      }
-    }
-    if (status == 0 || (status == 1 && !network::is_blocked())) {
-      LOG(FATAL) << "Controller connection is down!";
-    }
-  }
+  void CallbackReadEvent();
 
   //! Sends data to the controller.
   // Sync call.
-  void CallbackWriteEvent() {
-    controller_record.send_buffer = network::send_as_much(
-        controller_record.socket_fd,
-        controller_record.send_buffer,
-        &controller_record.send_queue);
-    if (controller_record.send_buffer != nullptr) {
-      // Channel is blocked or has error.
-      if (network::is_blocked()) {
-        CHECK_EQ(event_add(controller_record.write_event, nullptr), 0);
-      } else {
-        LOG(FATAL) << "Controller connection is down!";
-      }
-    }
-  }
+  void CallbackWriteEvent();
 
  private:
-  void ProcessIncomingMessage(
-      const message::ControlHeader& message_header, struct evbuffer* buffer) {
-    using message::MessageCategoryGroup;
-    using message::MessageCategory;
-    using message::ControlHeader;
-    // If assigned worker_id.
-    // Differentiante between control messages and command messages.
-    switch (message_header.get_category_group()) {
-      case MessageCategoryGroup::DATA_PLANE_CONTROL:
-        switch (message_header.get_category()) {
-#define PROCESS_MESSAGE(TYPE, METHOD)  \
-    case MessageCategory::TYPE: { auto message =  \
-      message::ControlHeader::UnpackMessage<MessageCategory::TYPE>(buffer);  \
-      METHOD(message); break; }
-          PROCESS_MESSAGE(ASSIGN_WORKER_ID, ProcessAssignWorkerIdMessage);
-          PROCESS_MESSAGE(UPDATE_PARTITION_MAP_AND_WORKER,
-                          ProcessUpdatePartitionMapAndWorkerMessage);
-          PROCESS_MESSAGE(UPDATE_PARTITION_MAP_ADD_APPLICATION,
-                          ProcessUpdatePartitionMapAddApplicationMessage);
-          PROCESS_MESSAGE(UPDATE_PARTITION_MAP_DROP_APPLICATION,
-                          ProcessUpdatePartitionMapDropApplicationMessage);
-          PROCESS_MESSAGE(UPDATE_PARTITION_MAP_INCREMENTAL,
-                          ProcessUpdatePartitionMapIncrementalMessage);
-          PROCESS_MESSAGE(UPDATE_ADDED_WORKER,
-                          ProcessUpdateAddedWorkerMessage);
-          PROCESS_MESSAGE(SHUT_DOWN_WORKER,
-                          ProcessShutDownWorkerMessage);
-          default:
-            LOG(FATAL) << "Unexpected message type.";
-        }  // switch category.
-#undef PROCESS_MESSAGE
-        break;
-      case MessageCategoryGroup::WORKER_COMMAND:
-        command_receiver_->ReceiveCommandFromController(buffer);
-        break;
-      default:
-        LOG(FATAL) << "Invalid message header!";
-    }  // switch category group.
-  }
+  /*
+   * Process incoming messages.
+   */
+  //! Process an incoming message.
+  // Sync call.
+  void ProcessIncomingMessage(const message::ControlHeader& message_header,
+                              struct evbuffer* buffer);
 
-  void ProcessAssignWorkerIdMessage(message::AssignWorkerId* message) {
-    controller_record.assigned_worker_id = message->assigned_worker_id;
-    delete message;
-
-    message::RegisterServicePort update_message;
-    update_message.from_worker_id = controller_record.assigned_worker_id;
-    update_message.route_service = route_service_;
-    struct evbuffer* buffer
-        = message::ControlHeader::PackMessage(update_message);
-    AppendSendingQueue(buffer, false);
-
-    controller_record.is_ready = true;
-  }
+  void ProcessAssignWorkerIdMessage(message::AssignWorkerId* message);
   void ProcessUpdatePartitionMapAndWorkerMessage(
-      message::UpdatePartitionMapAndWorker* message) {
-    delete message;
-  }
+      message::UpdatePartitionMapAndWorker* message);
   void ProcessUpdatePartitionMapAddApplicationMessage(
-      message::UpdatePartitionMapAddApplication* message) {
-    delete message;
-  }
+      message::UpdatePartitionMapAddApplication* message);
   void ProcessUpdatePartitionMapDropApplicationMessage(
-      message::UpdatePartitionMapDropApplication* message) {
-    delete message;
-  }
+      message::UpdatePartitionMapDropApplication* message);
   void ProcessUpdatePartitionMapIncrementalMessage(
-      message::UpdatePartitionMapIncremental* message) {
-    delete message;
-  }
-  void ProcessUpdateAddedWorkerMessage(
-      message::UpdateAddedWorker* message) {
-    delete message;
-  }
-  void ProcessShutDownWorkerMessage(
-      message::ShutDownWorker* message) {
-    delete message;
-  }
+      message::UpdatePartitionMapIncremental* message);
+  void ProcessUpdateAddedWorkerMessage(message::UpdateAddedWorker* message);
+  void ProcessShutDownWorkerMessage(message::ShutDownWorker* message);
 
+ private:
+  /*
+   * Helper functions.
+   */
+  //! Append a message to the sending queue.
+  // Sync call.
   void AppendSendingQueue(struct evbuffer* buffer,
-                          bool enforce_controller_ready) {
-    CHECK(controller_record.is_ready || !enforce_controller_ready);
-    controller_record.send_queue.push_back(buffer);
-    event_add(controller_record.write_event, nullptr);
-  }
+                          bool enforce_controller_ready);
 
  public:
-  void SendCommandToController(struct evbuffer* buffer) override {
-    message::ControlHeader header;
-    CHECK(header.ExtractHeader(buffer));
-    CHECK(header.get_category_group() ==
-          message::MessageCategoryGroup::CONTROLLER_COMMAND);
-    CHECK_EQ(header.get_length(), evbuffer_get_length(buffer) + header.kLength);
-    event_main_thread_->AddInjectedEvent(std::bind(
-            &SelfType::AppendSendingQueue, this, buffer, true));
-  }
+  /*
+   * Command sending facility.
+   */
 
-  void SendDataToPartition(ApplicationId application_id,
-                           StageId stage_id, PartitionId partition_id,
-                           struct evbuffer*) override {
+  //! Sends a command to the controller.
+  // Async call.
+  void SendCommandToController(struct evbuffer* buffer) override;
+
+ public:
+  /*
+   * Data routing facilities are implemented by the data router.
+   * Async calls.
+   */
+
+  void SendDataToPartition(ApplicationId application_id, StageId stage_id,
+                           PartitionId partition_id,
+                           struct evbuffer* buffer) override {
+    data_router_.SendDataToPartition(application_id, stage_id, partition_id,
+                                     buffer);
   }
 
   void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {
+    data_router_.SendDataToWorker(worker_id, buffer);
   }
 
-  void ReduceAndSendDataToPartition(ApplicationId application_id,
-                                    StageId stage_id,
-                                    struct evbuffer* buffer,
-                                    CombinerFunction combiner_function) override {
+  void ReduceAndSendDataToPartition(
+      ApplicationId application_id, StageId stage_id, struct evbuffer* buffer,
+      CombinerFunction combiner_function) override {
+    data_router_.ReduceAndSendDataToPartition(application_id, stage_id, buffer,
+                                              combiner_function);
   }
 
-  void BroadcastDatatoPartition(ApplicationId application_id,
-                                StageId stage_id,
+  void BroadcastDatatoPartition(ApplicationId application_id, StageId stage_id,
                                 struct evbuffer* buffer) override {
+    data_router_.BroadcastDatatoPartition(application_id, stage_id, buffer);
   }
 
  protected:

@@ -149,14 +149,14 @@ int allocate_and_bind_listen_socket(const std::string& service);
 int allocate_and_connect_socket(const std::string& host,
                                 const std::string& service);
 
-
 /**
  * Sends as much data as possible from the buffer and the queue, and returns
  * the left buffer if sending does not complete.
  */
-template<typename Container>
-inline struct evbuffer* send_as_much(
-    int socket_fd, struct evbuffer* send_buffer, Container* send_queue) {
+template <typename Container>
+inline struct evbuffer* send_as_much(int socket_fd,
+                                     struct evbuffer* send_buffer,
+                                     Container* send_queue) {
   while (send_buffer != nullptr || !send_queue->empty()) {
     if (send_buffer == nullptr) {
       send_buffer = send_queue->front();
@@ -197,7 +197,7 @@ class EventMainThread {
   int Run();
 
   //! Adds an injected handle to be run.
-  template<typename T>
+  template <typename T>
   void AddInjectedEvent(T&& handle) {
     const auto status = event_base_once(
         event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
@@ -209,7 +209,7 @@ class EventMainThread {
   static void DispatchInjectedEvent(int, short, void* arg);  // NOLINT
 
   //! Adds a delayed injected handle to be run.
-  template<typename T>
+  template <typename T>
   void AddDelayInjectedEvent(T&& handle) {
     const auto status = event_base_once(
         event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
