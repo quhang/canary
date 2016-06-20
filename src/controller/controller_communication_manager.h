@@ -106,6 +106,7 @@ class ControllerReceiveCommandInterface {
  */
 class ControllerCommunicationManager : public ControllerSendCommandInterface {
  private:
+  typedef ControllerCommunicationManager SelfType;
   /**
    * The data structure associated with a worker.
    */
@@ -127,7 +128,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
     //! Send buffer, which is grabbed from the sending queue.
     struct evbuffer* send_buffer = nullptr;
     //! Send queue, which owns all the buffers.
-    std::list<struct evbuffer*> sending_queue;
+    std::list<struct evbuffer*> send_queue;
     //! Receive buffer.
     struct evbuffer* receive_buffer = nullptr;
   };
@@ -136,7 +137,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
    * Used to pass argument during callback.
    */
   struct WorkerRecordEventArg {
-    ControllerCommunicationManager* manager;
+    SelfType* manager;
     WorkerRecord* worker_record;
   };
 
@@ -282,6 +283,16 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   //! Appends the worker sending queue.
   // Sync call.
   void AppendWorkerSendingQueue(WorkerId worker_id, struct evbuffer* buffer);
+
+  //! Appends the worker sending queue if the channel is ready.
+  // Sync call.
+  void AppendWorkerSendingQueueIfReady(
+      WorkerId worker_id, struct evbuffer* buffer);
+
+  //! Appends the worker sending queue.
+  // Sync call.
+  void AppendWorkerSendingQueueWithFlag(
+      WorkerId worker_id, struct evbuffer* buffer, bool enforce);
 
   //! Appends all ready sending queues.
   // Sync call.

@@ -109,12 +109,6 @@ struct ControlHeader {
     return buffer;
   }
 
-  //! Extracts the header from a buffer without changing the buffer.
-  bool ExtractHeader(struct evbuffer* buffer) {
-    ssize_t bytes = evbuffer_copyout(buffer, content_, kLength);
-    return bytes >= 0 && static_cast<size_t>(bytes) == kLength;
-  }
-
   //! Unpacks and consumes a buffer into a message.
   template <MessageCategory category>
   static typename get_message_type<category>::type* UnpackMessage(
@@ -126,6 +120,29 @@ struct ControlHeader {
     archive(*message);
     evbuffer_free(buffer);
     return message;
+  }
+
+  //! Extracts the header from a buffer without changing the buffer.
+  bool ExtractHeader(struct evbuffer* buffer) {
+    ssize_t bytes = evbuffer_copyout(buffer, content_, kLength);
+    return bytes >= 0 && static_cast<size_t>(bytes) == kLength;
+  }
+
+  //! Tries to drain out a message from the buffer.
+  struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
+    if (!ExtractHeader(buffer)) {
+      return nullptr;
+    }
+    const size_t full_length = kLength + get_length();
+    // If the full message is received.
+    if (full_length > evbuffer_get_length(buffer)) {
+      return nullptr;
+    }
+    struct evbuffer* result = evbuffer_new();
+    const int bytes = evbuffer_remove_buffer(buffer, result, full_length);
+    CHECK_GE(bytes, 0);
+    CHECK_EQ(static_cast<size_t>(bytes), full_length);
+    return result;
   }
 };
 

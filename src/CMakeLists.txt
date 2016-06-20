@@ -13,9 +13,12 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 # canary_core library target.
 cxx_static_library(canary_core "${cxx_default}"
     shared/initialize.cc
+    shared/internal_flag.cc
     shared/internal_network.cc
     shared/partition_map.cc
     controller/controller_communication_manager.cc
+    worker/worker_communication_manager.cc
+    worker/worker_data_router.cc
     )
 add_dependencies(canary_core project_cereal)
 # Library linking order matters. Dependency libraries are public so that built

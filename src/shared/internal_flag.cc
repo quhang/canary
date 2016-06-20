@@ -32,19 +32,15 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/internal_flag.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Internal command line flags.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
-
 #include "shared/internal_flag.h"
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_network.h"
-#include "shared/internal_time.h"
-#include "shared/internal_type.h"
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+DEFINE_string(controller_host, "localhost", "The host name of the controller.");
+DEFINE_string(controller_service, "29992",
+              "The port for worker to connect to the controller.");
+DEFINE_string(worker_service, "39993",
+              "The port for workers to connect to each other..");

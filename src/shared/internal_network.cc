@@ -220,6 +220,8 @@ EventMainThread::EventMainThread() {
   event_base_ = CHECK_NOTNULL(event_base_new());
   zero_timeval_ = CHECK_NOTNULL(
       event_base_init_common_timeout(event_base_, new timeval{0, 0}));
+  delay_timeval_ = CHECK_NOTNULL(
+      event_base_init_common_timeout(event_base_, new timeval{1, 0}));
 }
 EventMainThread::~EventMainThread() { event_base_free(event_base_); }
 

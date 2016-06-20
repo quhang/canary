@@ -41,6 +41,7 @@
 #define CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
 
 #include <event2/event.h>
+#include <event2/buffer.h>
 #include <string>
 
 #include "shared/internal_header.h"
@@ -148,6 +149,33 @@ int allocate_and_bind_listen_socket(const std::string& service);
 int allocate_and_connect_socket(const std::string& host,
                                 const std::string& service);
 
+
+/**
+ * Sends as much data as possible from the buffer and the queue, and returns
+ * the left buffer if sending does not complete.
+ */
+template<typename Container>
+inline struct evbuffer* send_as_much(
+    int socket_fd, struct evbuffer* send_buffer, Container* send_queue) {
+  while (send_buffer != nullptr || !send_queue->empty()) {
+    if (send_buffer == nullptr) {
+      send_buffer = send_queue->front();
+      send_queue->pop_front();
+    }
+    const int status = evbuffer_write(send_buffer, socket_fd);
+    if (status == -1) {
+      break;
+    }
+    CHECK_EQ(evbuffer_drain(send_buffer, status), 0);
+    // A message is sent.
+    if (evbuffer_get_length(send_buffer) == 0) {
+      evbuffer_free(send_buffer);
+      send_buffer = nullptr;
+    }
+  }
+  return send_buffer;
+}
+
 /**
  * Event main thread, a wrapper over event_base.
  */
@@ -169,7 +197,7 @@ class EventMainThread {
   int Run();
 
   //! Adds an injected handle to be run.
-  template <typename T>
+  template<typename T>
   void AddInjectedEvent(T&& handle) {
     const auto status = event_base_once(
         event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
@@ -180,11 +208,26 @@ class EventMainThread {
   //! Dispatches an injected event.
   static void DispatchInjectedEvent(int, short, void* arg);  // NOLINT
 
+  //! Adds a delayed injected handle to be run.
+  template<typename T>
+  void AddDelayInjectedEvent(T&& handle) {
+    const auto status = event_base_once(
+        event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
+        new CallbackType(std::forward<T>(handle)), delay_timeval_);
+    CHECK_EQ(status, 0);
+  }
+
+  //! Dispatches a delayed injected event.
+  static void DispatchDelayInjectedEvent(int, short, void* arg);  // NOLINT
+
  private:
   struct event_base* event_base_ = nullptr;
   // Zero time interval, which is used to indicate a single queue in
   // event_base_.
   const struct timeval* zero_timeval_ = nullptr;
+  // One second time interval, which is used to indicate a single queue in
+  // event_base_.
+  const struct timeval* delay_timeval_ = nullptr;
 };
 
 }  // namespace network

@@ -32,19 +32,14 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/worker/worker_data_router.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Class WorkerDataRouter.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#include "worker/worker_data_router.h"
 
-#include "shared/internal_flag.h"
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_network.h"
-#include "shared/internal_time.h"
-#include "shared/internal_type.h"
+namespace canary {
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+
+}  // namespace canary

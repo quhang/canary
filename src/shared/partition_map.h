@@ -107,6 +107,9 @@ class PartitionMap {
   WorkerId QueryWorkerId(ApplicationId application_id, VariableId variable_id,
                          PartitionId partition_id) const;
 
+  //! Queries worker id.
+  WorkerId QueryWorkerId(const FullPartitionId& full_partition_id) const;
+
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(partition_map_);

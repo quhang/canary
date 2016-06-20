@@ -39,9 +39,6 @@
 
 #include "controller/controller_communication_manager.h"
 
-DEFINE_string(control_port, "29992",
-              "The port for worker to connect to the controller.");
-
 namespace canary {
 
 void ControllerCommunicationManager::Initialize(
@@ -52,8 +49,9 @@ void ControllerCommunicationManager::Initialize(
   event_base_ = event_main_thread_->get_event_base();
   // Registers the listening port.
   listening_socket_ =
-      network::allocate_and_bind_listen_socket(FLAGS_control_port);
+      network::allocate_and_bind_listen_socket(FLAGS_controller_service);
   CHECK_NE(listening_socket_, -1);
+  // Starts the listening service.
   listening_event_ = CHECK_NOTNULL(
       evconnlistener_new(event_base_, &DispatchAcceptEvent, this,
                          LEV_OPT_CLOSE_ON_FREE, kBacklog, listening_socket_));
@@ -69,7 +67,7 @@ void ControllerCommunicationManager::Initialize(
 void ControllerCommunicationManager::DispatchAcceptEvent(
     struct evconnlistener* listener, int socket_fd, struct sockaddr* address,
     int socklen, void* arg) {
-  auto manager = reinterpret_cast<ControllerCommunicationManager*>(arg);
+  auto manager = reinterpret_cast<SelfType*>(arg);
   manager->CallbackAcceptEvent(listener, socket_fd, address, socklen);
 }
 
@@ -113,8 +111,9 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   const WorkerId worker_id = worker_id_allocator_++;
   VLOG(1) << "Allocated WorkerId=" << get_value(worker_id);
   InitializeWorkerRecord(worker_id, socket_fd, host, service);
-
-  // Sends initialization message.
+  // Handshake protocol:
+  // controller -> worker: AssignWorkerId.
+  // worker -> controller: RegisterServicePortMessage.
   message::AssignWorkerId message;
   message.assigned_worker_id = worker_id;
   struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
@@ -123,58 +122,35 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
 
 void ControllerCommunicationManager::CallbackReadEvent(
     WorkerRecord* worker_record) {
-  message::ControlHeader message_header;
   struct evbuffer* receive_buffer = worker_record->receive_buffer;
-  while (evbuffer_read(receive_buffer, worker_record->socket_fd, -1) != -1) {
-    // If the full header is received.
-    if (message_header.ExtractHeader(receive_buffer)) {
-      const size_t full_length =
-          message_header.kLength + message_header.get_length();
-      // If the full message is received.
-      if (full_length <= evbuffer_get_length(receive_buffer)) {
-        struct evbuffer* result = evbuffer_new();
-        const int bytes =
-            evbuffer_remove_buffer(receive_buffer, result, full_length);
-        CHECK_GE(bytes, 0);
-        CHECK_EQ(static_cast<size_t>(bytes), full_length);
-        ProcessIncomingMessage(message_header, result);
-      }
+  const int socket_fd = worker_record->socket_fd;
+
+  message::ControlHeader message_header;
+  int status = 0;
+  while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
+    if (struct evbuffer* whole_message =
+        message_header.SegmentMessage(receive_buffer)) {
+      ProcessIncomingMessage(message_header, whole_message);
     }
   }
-  if (!network::is_blocked()) {
+  if (status == 0 || (status == 1 && !network::is_blocked())) {
     CleanUpWorkerRecord(worker_record);
   }
 }
 
 void ControllerCommunicationManager::CallbackWriteEvent(
     WorkerRecord* worker_record) {
-  while (true) {
-    if (worker_record->send_buffer == nullptr) {
-      if (!worker_record->sending_queue.empty()) {
-        worker_record->send_buffer = worker_record->sending_queue.front();
-        worker_record->sending_queue.pop_front();
-      } else {
-        // Nothing to send.
-        return;
-      }
+  worker_record->send_buffer = network::send_as_much(
+      worker_record->socket_fd,
+      worker_record->send_buffer,
+      &worker_record->send_queue);
+  if (worker_record->send_buffer != nullptr) {
+    // Channel is blocked or has error.
+    if (network::is_blocked()) {
+      CHECK_EQ(event_add(worker_record->write_event, nullptr), 0);
+    } else {
+      CleanUpWorkerRecord(worker_record);
     }
-    const int status =
-        evbuffer_write(worker_record->send_buffer, worker_record->socket_fd);
-    if (status == -1) {
-      break;
-    }
-    CHECK_EQ(evbuffer_drain(worker_record->send_buffer, status), 0);
-    // A message is sent.
-    if (evbuffer_get_length(worker_record->send_buffer) == 0) {
-      evbuffer_free(worker_record->send_buffer);
-      worker_record->send_buffer = nullptr;
-    }
-  }
-  // Channel is blocked or has error.
-  if (network::is_blocked()) {
-    CHECK_EQ(event_add(worker_record->write_event, nullptr), 0);
-  } else {
-    CleanUpWorkerRecord(worker_record);
   }
 }
 
@@ -193,11 +169,11 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
   worker_record->socket_fd = socket_fd;
   worker_record->is_ready = false;
   worker_record->read_event = CHECK_NOTNULL(event_new(
-      event_base_, socket_fd, EV_READ | EV_PERSIST, &DispatchWriteEvent,
+      event_base_, socket_fd, EV_READ | EV_PERSIST, &DispatchReadEvent,
       new WorkerRecordEventArg{this, worker_record}));
   event_add(worker_record->read_event, nullptr);
   worker_record->write_event = CHECK_NOTNULL(
-      event_new(event_base_, socket_fd, EV_WRITE, &DispatchReadEvent,
+      event_new(event_base_, socket_fd, EV_WRITE, &DispatchWriteEvent,
                 new WorkerRecordEventArg{this, worker_record}));
   worker_record->send_buffer = nullptr;
   worker_record->receive_buffer = evbuffer_new();
@@ -267,7 +243,7 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
   if (worker_record->receive_buffer) {
     evbuffer_free(worker_record->receive_buffer);
   }
-  for (auto buffer : worker_record->sending_queue) {
+  for (auto buffer : worker_record->send_queue) {
     if (buffer) {
       evbuffer_free(buffer);
     }
@@ -291,7 +267,7 @@ void ControllerCommunicationManager::SendCommandToWorker(
         message::MessageCategoryGroup::WORKER_COMMAND);
   CHECK_EQ(header.get_length(), evbuffer_get_length(buffer) + header.kLength);
   event_main_thread_->AddInjectedEvent(std::bind(
-      &::canary::ControllerCommunicationManager::AppendWorkerSendingQueue, this,
+      &SelfType::AppendWorkerSendingQueueIfReady, this,
       worker_id, buffer));
 }
 
@@ -299,27 +275,27 @@ void ControllerCommunicationManager::AddApplication(
     ApplicationId application_id,
     PerApplicationPartitionMap* per_application_partition_map) {
   event_main_thread_->AddInjectedEvent(std::bind(
-      &::canary::ControllerCommunicationManager::InternalAddApplication, this,
+      &SelfType::InternalAddApplication, this,
       application_id, per_application_partition_map));
 }
 
 void ControllerCommunicationManager::DropApplication(
     ApplicationId application_id) {
   event_main_thread_->AddInjectedEvent(std::bind(
-      &::canary::ControllerCommunicationManager::InternalDropApplication, this,
+      &SelfType::InternalDropApplication, this,
       application_id));
 }
 
 void ControllerCommunicationManager::UpdatePartitionMap(
     PartitionMapUpdate* partition_map_update) {
   event_main_thread_->AddInjectedEvent(std::bind(
-      &::canary::ControllerCommunicationManager::InternalUpdatePartitionMap,
+      &SelfType::InternalUpdatePartitionMap,
       this, partition_map_update));
 }
 
 void ControllerCommunicationManager::ShutDownWorker(WorkerId worker_id) {
   event_main_thread_->AddInjectedEvent(std::bind(
-      &::canary::ControllerCommunicationManager::InternalShutDownWorker, this,
+      &SelfType::InternalShutDownWorker, this,
       worker_id));
 }
 
@@ -376,7 +352,7 @@ void ControllerCommunicationManager::InternalShutDownWorker(
     WorkerId worker_id) {
   message::ShutDownWorker message;
   struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
-  AppendWorkerSendingQueue(worker_id, buffer);
+  AppendWorkerSendingQueueIfReady(worker_id, buffer);
 }
 
 /**
@@ -419,13 +395,24 @@ void ControllerCommunicationManager::ProcessIncomingMessage(
 
 void ControllerCommunicationManager::AppendWorkerSendingQueue(
     WorkerId worker_id, struct evbuffer* buffer) {
+  AppendWorkerSendingQueueWithFlag(worker_id, buffer, false);
+}
+
+void ControllerCommunicationManager::AppendWorkerSendingQueueIfReady(
+    WorkerId worker_id, struct evbuffer* buffer) {
+  AppendWorkerSendingQueueWithFlag(worker_id, buffer, true);
+}
+
+void ControllerCommunicationManager::AppendWorkerSendingQueueWithFlag(
+    WorkerId worker_id, struct evbuffer* buffer, bool enforce) {
   auto iter = worker_id_to_status_.find(worker_id);
   if (iter == worker_id_to_status_.end()) {
     evbuffer_free(buffer);
     return;
   } else {
     WorkerRecord* worker_record = iter->second;
-    worker_record->sending_queue.push_back(buffer);
+    CHECK(worker_record->is_ready || !enforce);
+    worker_record->send_queue.push_back(buffer);
     event_add(worker_record->write_event, nullptr);
   }
 }
@@ -438,7 +425,7 @@ void ControllerCommunicationManager::AppendAllReadySendingQueue(
       struct evbuffer* send_buffer = evbuffer_new();
       // Copy by reference.
       CHECK_EQ(evbuffer_add_buffer_reference(send_buffer, buffer), 0);
-      worker_record->sending_queue.push_back(send_buffer);
+      worker_record->send_queue.push_back(send_buffer);
       event_add(worker_record->write_event, nullptr);
     }
   }

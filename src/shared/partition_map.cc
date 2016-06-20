@@ -135,4 +135,15 @@ WorkerId PartitionMap::QueryWorkerId(ApplicationId application_id,
   }
 }
 
+WorkerId PartitionMap::QueryWorkerId(
+    const FullPartitionId& full_partition_id) const {
+  auto iter = partition_map_.find(full_partition_id.application_id);
+  if (iter == partition_map_.end()) {
+    return WorkerId::INVALID;
+  } else {
+    return iter->second.QueryWorkerId(full_partition_id.variable_id,
+                                      full_partition_id.partition_id);
+  }
+}
+
 }  // namespace canary
