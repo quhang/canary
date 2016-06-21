@@ -151,6 +151,7 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
   void ProcessIncomingMessage(const message::ControlHeader& message_header,
                               struct evbuffer* buffer);
 
+  // All the following messages are data plane control messages.
   void ProcessAssignWorkerIdMessage(message::AssignWorkerId* message);
   void ProcessUpdatePartitionMapAndWorkerMessage(
       message::UpdatePartitionMapAndWorker* message);
@@ -185,6 +186,7 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
   /*
    * Data routing facilities are implemented by the data router.
    * Async calls.
+   * @see src/worker/worker_data_router.h
    */
 
   void SendDataToPartition(ApplicationId application_id, StageId stage_id,
@@ -210,7 +212,7 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
     data_router_.BroadcastDatatoPartition(application_id, stage_id, buffer);
   }
 
- protected:
+ private:
   network::EventMainThread* event_main_thread_ = nullptr;
   struct event_base* event_base_ = nullptr;
   WorkerReceiveCommandInterface* command_receiver_ = nullptr;

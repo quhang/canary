@@ -131,14 +131,8 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
     std::list<struct evbuffer*> send_queue;
     //! Receive buffer.
     struct evbuffer* receive_buffer = nullptr;
-  };
-
-  /**
-   * Used to pass argument during callback.
-   */
-  struct WorkerRecordEventArg {
-    SelfType* manager;
-    WorkerRecord* worker_record;
+    //! Pointer to the manager.
+    SelfType* manager = nullptr;
   };
 
   //! Default backlog argument. Concurrent pending TCP connecting events.

@@ -17,5 +17,6 @@ cxx_test(intensive_marshal . "${TEST_LIBRARIES}")
 cxx_executable(basic_server . "canary_core")
 cxx_executable(basic_client . "canary_core")
 
+cxx_executable(basic_command_exchange . "canary_core")
 cxx_executable(worker_command_manager worker "canary_core")
 cxx_executable(controller_command_manager controller "canary_core")

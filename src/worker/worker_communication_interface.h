@@ -64,11 +64,9 @@ class WorkerSendDataInterface {
                                 struct evbuffer* buffer) = 0;
   //! Reduces data at the worker side, and then sends to the singular task in a
   // stage.
-  virtual void ReduceAndSendDataToPartition(ApplicationId application_id,
-                                            StageId stage_id,
-                                            struct evbuffer* buffer,
-                                            CombinerFunction combiner_function)
-      = 0;
+  virtual void ReduceAndSendDataToPartition(
+      ApplicationId application_id, StageId stage_id, struct evbuffer* buffer,
+      CombinerFunction combiner_function) = 0;
   //! Broadcasts data to all tasks in a stage.
   virtual void BroadcastDatatoPartition(ApplicationId application_id,
                                         StageId stage_id,
@@ -107,6 +105,9 @@ class WorkerReceiveCommandInterface {
  public:
   //! Called when receiving a command from the controller.
   virtual void ReceiveCommandFromController(struct evbuffer* buffer) = 0;
+
+  //! Called when the worker id is assigned.
+  virtual void AssignWorkerId(WorkerId worker_id) = 0;
 };
 
 }  // namespace canary

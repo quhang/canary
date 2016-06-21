@@ -72,8 +72,9 @@ enum class MessageCategory : int16_t {
   NOTIFY_WORKER_DISCONNECT,
   SHUT_DOWN_WORKER,
   // Worker commands (from the controller).
-  TEST_WORKER_COMMAND = 200
+  TEST_WORKER_COMMAND = 200,
   // Controller commands (from a worker).
+  TEST_CONTROLLER_COMMAND = 300
 };
 
 //! Gets the category group of a message.
@@ -221,7 +222,6 @@ struct ControlHeader {
     return result;
   }
 };
-
 
 }  // namespace message
 }  // namespace canary

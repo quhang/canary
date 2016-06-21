@@ -81,23 +81,17 @@ void ControllerCommunicationManager::DispatchAcceptErrorEvent(
 void ControllerCommunicationManager::DispatchReadEvent(int socket_fd,
                                                        short,  // NOLINT
                                                        void* arg) {
-  auto callback_arg = reinterpret_cast<WorkerRecordEventArg*>(arg);
-  auto worker_record = callback_arg->worker_record;
+  auto worker_record = reinterpret_cast<WorkerRecord*>(arg);
   CHECK_EQ(socket_fd, worker_record->socket_fd);
-  callback_arg->manager->CallbackReadEvent(worker_record);
-  // The argument should not be deleted.
-  // delete callback_arg;
+  worker_record->manager->CallbackReadEvent(worker_record);
 }
 
 void ControllerCommunicationManager::DispatchWriteEvent(int socket_fd,
                                                         short,  // NOLINT
                                                         void* arg) {
-  auto callback_arg = reinterpret_cast<WorkerRecordEventArg*>(arg);
-  auto worker_record = callback_arg->worker_record;
+  auto worker_record = reinterpret_cast<WorkerRecord*>(arg);
   CHECK_EQ(socket_fd, worker_record->socket_fd);
-  callback_arg->manager->CallbackWriteEvent(worker_record);
-  // The argument should not be deleted.
-  // delete callback_arg;
+  worker_record->manager->CallbackWriteEvent(worker_record);
 }
 
 /*
@@ -132,7 +126,7 @@ void ControllerCommunicationManager::CallbackReadEvent(
   int status = 0;
   while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
     while (struct evbuffer* whole_message =
-            message_header.SegmentMessage(receive_buffer)) {
+               message_header.SegmentMessage(receive_buffer)) {
       ProcessIncomingMessage(message_header, whole_message);
     }
   }
@@ -164,21 +158,21 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
     WorkerId worker_id, int socket_fd, const std::string& host,
     const std::string& service) {
   CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
-  auto worker_record = &worker_id_to_status_[worker_id];
-  worker_record->worker_id = worker_id;
-  worker_record->host = host;
-  worker_record->service = service;
-  worker_record->socket_fd = socket_fd;
-  worker_record->is_ready = false;
-  worker_record->read_event = CHECK_NOTNULL(event_new(
-      event_base_, socket_fd, EV_READ | EV_PERSIST, &DispatchReadEvent,
-      new WorkerRecordEventArg{this, worker_record}));
-  event_add(worker_record->read_event, nullptr);
-  worker_record->write_event = CHECK_NOTNULL(
-      event_new(event_base_, socket_fd, EV_WRITE, &DispatchWriteEvent,
-                new WorkerRecordEventArg{this, worker_record}));
-  worker_record->send_buffer = nullptr;
-  worker_record->receive_buffer = evbuffer_new();
+  auto& worker_record = worker_id_to_status_[worker_id];
+  worker_record.worker_id = worker_id;
+  worker_record.host = host;
+  worker_record.service = service;
+  worker_record.socket_fd = socket_fd;
+  worker_record.is_ready = false;
+  worker_record.read_event =
+      CHECK_NOTNULL(event_new(event_base_, socket_fd, EV_READ | EV_PERSIST,
+                              &DispatchReadEvent, &worker_record));
+  CHECK_EQ(event_add(worker_record.read_event, nullptr), 0);
+  worker_record.write_event = CHECK_NOTNULL(event_new(
+      event_base_, socket_fd, EV_WRITE, &DispatchWriteEvent, &worker_record));
+  worker_record.send_buffer = nullptr;
+  worker_record.receive_buffer = evbuffer_new();
+  worker_record.manager = this;
 }
 
 void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
@@ -186,7 +180,6 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
   auto worker_record = &worker_id_to_status_.at(message->from_worker_id);
   worker_record->route_service = message->route_service;
   worker_record->transmit_service = message->transmit_service;
-  delete message;
 
   // Tells other workers of the added worker.
   {
@@ -218,16 +211,18 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
 
   // Notifies that a worker is up.
   command_receiver_->NotifyWorkerIsUp(worker_record->worker_id);
+
+  delete message;
 }
 
 void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
     message::NotifyWorkerDisconnect* message) {
   const WorkerId shutdown_worker_id = message->disconnected_worker_id;
-  delete message;
   auto iter = worker_id_to_status_.find(shutdown_worker_id);
   if (iter != worker_id_to_status_.end()) {
     CleanUpWorkerRecord(&iter->second);
   }
+  delete message;
 }
 
 void ControllerCommunicationManager::CleanUpWorkerRecord(
@@ -383,7 +378,7 @@ void ControllerCommunicationManager::ProcessIncomingMessage(
           LOG(FATAL) << "Unexpected message type.";
       }  // switch category.
       break;
-    case MessageCategoryGroup::WORKER_COMMAND:
+    case MessageCategoryGroup::CONTROLLER_COMMAND:
       command_receiver_->ReceiveCommand(buffer);
       break;
     default:

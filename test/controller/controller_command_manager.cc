@@ -3,7 +3,7 @@
 #include "shared/initialize.h"
 #include "controller/controller_communication_manager.h"
 
-using namespace canary;  // NOLINT
+using namespace canary;
 
 class TestReceiver : public ControllerReceiveCommandInterface {
  public:

@@ -121,8 +121,8 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   //! Sends data to a partition. The data is an intermediate data chunk to be
   // routed to a "gather" task.
   void SendDataToPartition(ApplicationId application_id, StageId stage_id,
-                           PartitionId partition_id, struct evbuffer*) override
-      {}
+                           PartitionId partition_id,
+                           struct evbuffer*) override {}
   //! Sends data to a worker. Used for data partition migration, or restoring
   // data partitions from storage.
   void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {}

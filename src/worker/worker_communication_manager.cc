@@ -130,7 +130,7 @@ void WorkerCommunicationManager::CallbackReadEvent() {
   int status = 0;
   while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
     while (struct evbuffer* whole_message =
-            message_header.SegmentMessage(receive_buffer)) {
+               message_header.SegmentMessage(receive_buffer)) {
       ProcessIncomingMessage(message_header, whole_message);
     }
   }
@@ -204,7 +204,6 @@ void WorkerCommunicationManager::ProcessIncomingMessage(
 void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
     message::AssignWorkerId* message) {
   controller_record.assigned_worker_id = message->assigned_worker_id;
-  delete message;
 
   LOG(INFO) << "Assigned worker id="
             << get_value(controller_record.assigned_worker_id);
@@ -217,6 +216,11 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
 
   // The controller channel is ready.
   controller_record.is_ready = true;
+
+  // Nofity the command receiver.
+  command_receiver_->AssignWorkerId(controller_record.assigned_worker_id);
+
+  delete message;
 }
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapAndWorkerMessage(

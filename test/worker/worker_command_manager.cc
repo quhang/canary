@@ -18,6 +18,9 @@ class TestReceiver : public WorkerReceiveCommandInterface {
     delete message;
   }
 
+  void AssignWorkerId(WorkerId worker_id) override {
+    LOG(INFO) << "Assign worker id:" << get_value(worker_id);
+  }
  private:
   WorkerCommunicationManager* manager_ = nullptr;
 };

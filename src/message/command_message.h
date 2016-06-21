@@ -40,6 +40,8 @@
 #ifndef CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 
+#include <string>
+
 #include "shared/internal.h"
 
 #include "message/message.h"
@@ -47,10 +49,6 @@
 namespace canary {
 namespace message {
 
-/**
- * The controller updates the partition map to a worker, by refreshing the
- * entire partition map.
- */
 struct TestWorkerCommand {
   std::string test_string;
   template <typename Archive>
@@ -59,6 +57,17 @@ struct TestWorkerCommand {
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, TEST_WORKER_COMMAND, TestWorkerCommand);
+
+struct TestControllerCommand {
+  WorkerId from_worker_id;
+  std::string test_string;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id, test_string);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, TEST_CONTROLLER_COMMAND,
+                 TestControllerCommand);
 
 }  // namespace message
 }  // namespace canary
