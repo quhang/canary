@@ -43,13 +43,14 @@ namespace canary {
 
 void ControllerCommunicationManager::Initialize(
     network::EventMainThread* event_main_thread,
-    ControllerReceiveCommandInterface* command_receiver) {
+    ControllerReceiveCommandInterface* command_receiver,
+    const std::string& controller_service) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   command_receiver_ = CHECK_NOTNULL(command_receiver);
   event_base_ = event_main_thread_->get_event_base();
   // Registers the listening port.
   listening_socket_ =
-      network::allocate_and_bind_listen_socket(FLAGS_controller_service);
+      network::allocate_and_bind_listen_socket(controller_service);
   CHECK_NE(listening_socket_, -1);
   // Starts the listening service.
   listening_event_ = CHECK_NOTNULL(
@@ -184,7 +185,8 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
   {
     message::UpdateAddedWorker update_message;
     update_message.added_worker_id = worker_record->worker_id;
-    update_message.route_service = worker_record->route_service;
+    update_message.network_address.host = worker_record->host;
+    update_message.network_address.service = worker_record->route_service;
     struct evbuffer* buffer =
         message::SerializeMessageWithControlHeader(update_message);
     AppendAllReadySendingQueue(buffer);
@@ -196,7 +198,10 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.version_id = internal_partition_map_version_;
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
-      update_message.worker_ports[pair.first] = pair.second.route_service;
+      NetworkAddress network_address;
+      network_address.host = pair.second.host;
+      network_address.service = pair.second.route_service;
+      update_message.worker_ports[pair.first] = network_address;
     }
     struct evbuffer* buffer =
         message::SerializeMessageWithControlHeader(update_message);

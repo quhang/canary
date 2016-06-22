@@ -86,6 +86,15 @@ enum class MessageCategory : int16_t {
   DIRECT_DATA_STORAGE
 };
 
+struct NetworkAddress {
+  std::string host;
+  std::string service;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(host, service);
+  }
+};
+
 /*
  * Helper function for tranlating between message types and message category
  * lables.
@@ -190,20 +199,10 @@ struct DataHeader {
   //! Sequence number, and acknowledge sequence number.
   SequenceNumber sequence, ack_sequence;
   //! Header if the message is routed to a partition.
-  struct RouteHeader {
-    ApplicationId to_application_id;
-    VariableGroupId to_variable_group_id;
-    PartitionId to_partition_id;
-    PartitionMapVersion partition_map_version;
-  };
-  //! Header if the message is directed to a worker.
-  struct DirectHeader {
-    WorkerId to_worker_id;
-  };
-  union {
-    RouteHeader route;
-    DirectHeader direct;
-  };
+  PartitionMapVersion partition_map_version;
+  ApplicationId to_application_id;
+  VariableGroupId to_variable_group_id;
+  PartitionId to_partition_id;
 
   template <typename MessageType>
   void FillInMessageType() {

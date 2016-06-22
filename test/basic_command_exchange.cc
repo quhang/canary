@@ -92,6 +92,20 @@ class WorkerTestReceiver : public WorkerReceiveCommandInterface {
   int total_commands = 0;
 };
 
+class TestDataReceiver : public WorkerReceiveDataInterface {
+ public:
+  //! Called when receiving data from a partition. The routed data might be
+  // rejected, which means this is not the right destination. The header is
+  // stripped.
+  bool ReceiveRoutedData(ApplicationId application_id,
+                         VariableGroupId variable_group_id,
+                         PartitionId partition_id,
+                         struct evbuffer* buffer) override {};
+  //! Called when receiving data from a worker, which is sent directly. The
+  // header is stripped.
+  void ReceiveDirectData(struct evbuffer* buffer) override {};
+};
+
 int main(int argc, char* argv[]) {
   InitializeCanaryWorker(&argc, &argv);
 
@@ -105,12 +119,16 @@ int main(int argc, char* argv[]) {
   });
 
   for (int i = 0; i < FLAGS_num_worker; ++i) {
-    auto worker_thread = new std::thread([]{
+    auto worker_thread = new std::thread([i]{
         WorkerCommunicationManager manager;
         WorkerTestReceiver command_receiver;
+        TestDataReceiver data_receiver;
         command_receiver.set_manager(&manager);
         network::EventMainThread main_thread;
-        manager.Initialize(&main_thread, &command_receiver, nullptr);
+        manager.Initialize(&main_thread, &command_receiver, &data_receiver,
+                           FLAGS_controller_host,
+                           FLAGS_controller_service,
+                           std::to_string(std::stoi(FLAGS_worker_service) + i));
         main_thread.Run();
     });
   }

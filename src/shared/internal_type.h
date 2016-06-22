@@ -99,7 +99,7 @@ COUNTABLE_ENUM(VariableId);
 /**
  * The id of a partition.
  */
-enum class PartitionId : int32_t { BROADCAST = -2, INVALID = -1, FIRST = 0 };
+enum class PartitionId : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionId);
 
 /**
@@ -115,7 +115,6 @@ enum class PartitionMapVersion : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionMapVersion);
 
 typedef uint64_t SequenceNumber;
-typedef int32_t DuplicateFactor;
 
 struct FullPartitionId {
   ApplicationId application_id;

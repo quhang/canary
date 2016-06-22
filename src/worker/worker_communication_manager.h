@@ -99,7 +99,13 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
   // Prepare call.
   void Initialize(network::EventMainThread* event_main_thread,
                   WorkerReceiveCommandInterface* command_receiver,
-                  WorkerReceiveDataInterface* data_receiver);
+                  WorkerReceiveDataInterface* data_receiver,
+                  const std::string& controller_host
+                  = FLAGS_controller_host,
+                  const std::string& controller_service
+                  = FLAGS_controller_service,
+                  const std::string& worker_service
+                  = FLAGS_worker_service);
 
  public:
   /*

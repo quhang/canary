@@ -88,6 +88,10 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     struct evbuffer* receive_buffer = nullptr;
     //! Pointer to the router.
     WorkerDataRouter* router = nullptr;
+    //! Sequence number for sending.
+    SequenceNumber next_sending_sequence_no = 0;
+    //! Sequence number for acknowledging.
+    SequenceNumber next_receiving_sequence_no = 0;
   };
 
   //! Default backlog argument. Concurrent pending TCP connecting events.
@@ -99,13 +103,10 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   void Initialize(WorkerId worker_id,
                   network::EventMainThread* event_main_thread,
                   WorkerReceiveDataInterface* data_receiver,
-                  const std::string& route_service) {
-    // TODO
-    return;
+                  const std::string& route_service = FLAGS_worker_service) {
     self_worker_id_ = worker_id;
     event_main_thread_ = CHECK_NOTNULL(event_main_thread);
-    // TODO
-    // data_receiver_ = CHECK_NOTNULL(data_receiver);
+    data_receiver_ = CHECK_NOTNULL(data_receiver);
     event_base_ = event_main_thread_->get_event_base();
     route_service_ = route_service;
     // Registers the listening port.
@@ -153,6 +154,15 @@ class WorkerDataRouter : public WorkerSendDataInterface {
 
   //! Dispatches the read event on the peer channel.
   // Sync call.
+  static void DispatchPassiveConnectEvent(int socket_fd, short,  // NOLINT
+                                          void* arg) {
+    auto peer_record = reinterpret_cast<PeerRecord*>(arg);
+    CHECK_EQ(socket_fd, peer_record->socket_fd);
+    peer_record->router->CallbackPassiveConnectEvent(peer_record);
+  }
+
+  //! Dispatches the read event on the peer channel.
+  // Sync call.
   static void DispatchReadEvent(int socket_fd, short, void* arg) {  // NOLINT
     auto peer_record = reinterpret_cast<PeerRecord*>(arg);
     CHECK_EQ(socket_fd, peer_record->socket_fd);
@@ -168,18 +178,128 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   }
 
  public:
+  /*
+   * Public sending data interface.
+   */
   //! Routes data to a partition. The header is not added.
+  // Async call.
   void SendDataToPartition(ApplicationId application_id,
                            VariableGroupId variable_group_id,
                            PartitionId partition_id,
-                           struct evbuffer* buffer) override {}
+                           struct evbuffer* buffer) override {
+    // Add header to the message.
+    const auto length = evbuffer_get_length(buffer);
+    auto header = message::AddDataHeader(buffer);
+    header->length = length;
+    header->category_group =
+        message::MessageCategoryGroup::APPLICATION_DATA_ROUTE;
+    header->category = message::MessageCategory::ROUTE_DATA_UNICAST;
+    header->to_application_id = application_id;
+    header->to_variable_group_id = variable_group_id;
+    header->to_partition_id = partition_id;
+    event_main_thread_->AddInjectedEvent(
+        std::bind(&SelfType::RouteUnicastData, this, buffer));
+  }
+
   //! Sends data to a worker. Used for data partition migration, or restoring
-  // data partitions from storage. The header is not added.
-  void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {}
+  // data partitions from storage. The header is added.
+  // Async call.
+  void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {
+    CHECK(message::CheckIsIntegrateDataMessage(buffer));
+    CHECK(message::ExamineDataHeader(buffer)->category_group ==
+          message::MessageCategoryGroup::APPLICATION_DATA_DIRECT);
+    event_main_thread_->AddInjectedEvent(
+        std::bind(&SelfType::SendDataToWorkerInternal, this,
+                  worker_id, buffer));
+  }
+
   //! Broadcasts data to all tasks in a stage.
+  // Async call.
   void BroadcastDataToPartition(ApplicationId application_id,
                                 VariableGroupId variable_group_id,
-                                struct evbuffer* buffer) override {}
+                                struct evbuffer* buffer) override {
+    event_main_thread_->AddInjectedEvent(
+        std::bind(&SelfType::BroadcastDataToPartition, this,
+                  application_id, variable_group_id, buffer));
+  }
+
+ private:
+  // Sync call.
+  void SendDataToWorkerInternal(WorkerId worker_id, struct evbuffer* buffer) {
+    // TODO(quhang).
+  }
+
+  // Sync call.
+  void BroadcastDataToPartitionInternal(
+      ApplicationId application_id,
+      VariableGroupId variable_group_id,
+      struct evbuffer* buffer) override {
+    // TODO(quhang).
+  }
+
+
+  //! Routes a unicast data message, with its header.
+  // Sync call.
+  void RouteUnicastData(struct evbuffer* buffer) {
+    auto header = message::ExamineDataHeader(buffer);
+    const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
+        header->application_id,
+        header->variable_group_id,
+        header->partition_id);
+    header->route_partition_map_version = internal_partition_map_version_;
+    AddPeerSendingQueue(dest_worker_id, buffer);
+  }
+
+  //! Adds a data message to the peer sending queue.
+  // Sync call.
+  void AppendPeerSendingQueue(WorkerId worker_id, struct evbuffer* buffer) {
+    auto peer_record = GetPeerRecordIfReady(worker_id);
+    if (peer_record != nullptr) {
+      peer_record->send_queue.push_back(buffer);
+      CHECK_EQ(event_add(peer_record->write_event), 0);
+    } else {
+      AddToPendingQueue(buffer);
+    }
+  }
+
+  //! Adds a data message to the pending queue.
+  // Sync call.
+  void AddToPendingQueue(struct evbuffer* buffer) {
+    auto header = message::ExamineDataHeader(buffer);
+    CHECK(header->category == message::MessageCategory::ROUTE_DATA_UNICAST)
+        << "Not implemented.";
+    pending_queue.push_back(buffer);
+  }
+
+  void RefreshPending() {
+    ReexaminePendingQueue();
+  }
+
+  //! Resends messages in the pending queue again.
+  // Sync call.
+  void ReexaminePendingQueue() {
+    std::list<struct evbuffer*> buffer_queue;
+    std::swap(buffer_queue, pending_queue_);
+    for (auto buffer : buffer_queue) {
+      RouteUnicastData(buffer);
+    }
+  }
+
+  //! Returns the peer record if it is ready.
+  // Sync call.
+  PeerRecord* GetPeerRecordIfReady(WorkerId worker_id) {
+    if (worker_id == WorkerId::INVALID) {
+      return nullptr;
+    }
+    auto iter = worker_id_to_status_.find(worker_id);
+    if (iter == worker_id_to_status_.end()) {
+      return nullptr;
+    }
+    if (!iter->is_ready) {
+      return nullptr;
+    }
+    return std::addressof(*iter);
+  }
 
  public:
   /*
@@ -210,8 +330,11 @@ class WorkerDataRouter : public WorkerSendDataInterface {
       event_main_thread_->AddDelayInjectedEvent(
           std::bind(&SelfType::CallbackInitiateEvent, this, peer_record));
     } else {
-      InitializePeerRecord(peer_record);
+      InitializeActivePeerRecord(peer_record);
     }
+  }
+
+  void InitializeActivePeerRecord(PeerRecord* peer_record) {
   }
 
   void CallbackAcceptEvent(struct evconnlistener* listener, int socket_fd,
@@ -223,17 +346,26 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     // Handshake protocol:
     // slave -> master: worker_id.
     auto peer_record = new PeerRecord();
+    InitializePassivePeerRecord(peer_record);
+  }
+
+  void InitializePassivePeerRecord(PeerRecord* peer_record) {
     peer_record->worker_id = WorkerId::INVALID;
     peer_record->socket_fd = socket_fd;
     peer_record->is_ready = false;
     peer_record->to_be_activated = true;
-    CHECK_EQ(event_base_once(event_base_, socket_fd, EV_READ, DispatchReadEvent,
+    CHECK_EQ(event_base_once(event_base_, socket_fd, EV_READ,
+                             DispatchPassiveConnectEvent,
                              peer_record, nullptr),
              0);
     peer_record->read_event = nullptr;
     peer_record->write_event = nullptr;
     peer_record->receive_buffer = evbuffer_new();
     peer_record->router = this;
+  }
+
+  void CallbackPassiveConnectEvent(PeerRecord* peer_record) {
+    // Expect sending the worker id.
   }
 
   void CallbackReadEvent(PeerRecord* peer_record) {
@@ -244,6 +376,10 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
       while (struct evbuffer* whole_message =
                  message::SegmentDataMessage(receive_buffer)) {
+        // For debugging.
+        // auto header = message::ExamineHeader(whole_message);
+        // CHECK_EQ(header->sequence, peer_record->next_receiving_sequence_no);
+        // ++peer_record->next_receiving_sequence_no;
         ProcessIncomingMessage(whole_message);
       }
     }
@@ -281,9 +417,79 @@ class WorkerDataRouter : public WorkerSendDataInterface {
 
   void ProcessIncomingMessage(struct evbuffer* buffer) {}
 
-  void InitializePeerRecord(PeerRecord* peer_record) {}
 
   void CleanUpPeerRecord(PeerRecord* peer_record) {}
+
+  void UpdatePartitionMapAndWorker(
+      message::UpdatePartitionMapAndWorker* message) {
+    internal_partition_map_version_ = message->version_id;
+    internal_partition_map_ = std::move(*message->partition_map);
+    delete message->partition_map;
+    for (auto& pair : message->worker_addresses) {
+      const WorkerId new_worker_id = pair.first;
+      if (new_worker_id < self_worker_id) {
+        InitializeConnectPeer(new_worker_id,
+                              pair.second.host,
+                              pair.second.service);
+      }
+    }
+    TriggerRefresh();
+    delete message;
+  }
+
+  void InitializeConnectPeer(WorkerId worker_id,
+                             const std::string& worker_host,
+                             const std::string& worker_service) {
+    CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
+    auto& peer_record = worker_id_to_status[worker_id];
+    peer_record.worker_id = worker_id;
+    peer_record.host = worker_host;
+    peer_record.service = worker_service;
+    peer_record.router = this;
+    CallbackInitiateEvent(&peer_record);
+  }
+
+  void UpdatePartitionMapAddApplication(
+      message::UpdatePartitionMapAddApplication* message) {
+    internal_partition_map_version_ = message->version_id;
+    *internal_partition_map_.AddPerApplicationPartitionMap(
+        message->add_application_id)
+        = std::move(*message->per_application_partition_map);
+    delete message->per_application_partition_map;
+
+    TriggerRefresh();
+    delete message;
+  }
+  void UpdatePartitionMapDropApplication(
+      message::UpdatePartitionMapDropApplication* message) {
+    internal_partition_map_version_ = message->version_id;
+    CHECK(internal_partition_map_.DeletePerApplicationPartitionMap(
+            message->drop_application_id));
+    delete message;
+  }
+  void UpdatePartitionMapIncremental(
+      message::UpdatePartitionMapIncremental* message) {
+    internal_partition_map_version_ = message->version_id;
+    internal_partition_map_.MergeUpdate(*message->partition_map_update);
+    delete message->partition_map_update;
+
+    TriggerRefresh();
+    delete message;
+  }
+  void UpdateAddedWorker(message::UpdateAddedWorker* message) {
+    if (message->added_worker_id < self_worker_id) {
+      InitializeConnectPeer(message->added_worker_id,
+                            message->network_address.host,
+                            message->network_address.route_service);
+    }
+
+    TriggerRefresh();
+    delete message;
+  }
+  void ShutDownWorker(message::ShutDownWorker* message) {
+    LOG(FATAL) << "Not implemented.";
+  }
+
 
  private:
   WorkerId self_worker_id_ = WorkerId::INVALID;
@@ -302,6 +508,9 @@ class WorkerDataRouter : public WorkerSendDataInterface {
 
   int listening_socket_ = -1;
   struct evconnlistener* listening_event_ = nullptr;
+
+  // Routing message that cannot be delivered now.
+  std::list<struct evbuffer*> pending_queue_;
 };
 
 }  // namespace canary

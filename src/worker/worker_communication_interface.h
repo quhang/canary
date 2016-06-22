@@ -55,7 +55,7 @@ class WorkerSendDataInterface {
                                    PartitionId partition_id,
                                    struct evbuffer* buffer) = 0;
   //! Sends data to a worker. Used for data partition migration, or restoring
-  // data partitions from storage. The header is not added.
+  // data partitions from storage. The header is added.
   virtual void SendDataToWorker(WorkerId worker_id,
                                 struct evbuffer* buffer) = 0;
   //! Broadcasts data to all tasks in a stage.

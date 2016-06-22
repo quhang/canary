@@ -44,16 +44,21 @@ namespace canary {
 void WorkerCommunicationManager::Initialize(
     network::EventMainThread* event_main_thread,
     WorkerReceiveCommandInterface* command_receiver,
-    WorkerReceiveDataInterface* data_receiver) {
+    WorkerReceiveDataInterface* data_receiver,
+    const std::string& controller_host,
+    const std::string& controller_service,
+    const std::string& worker_service) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   command_receiver_ = CHECK_NOTNULL(command_receiver);
-  // TODO
-  // data_receiver_ = CHECK_NOTNULL(data_receiver);
+  data_receiver_ = CHECK_NOTNULL(data_receiver);
+  if (data_receiver_ == nullptr) {
+    LOG(WARNING) << "No data receiver registerred!";
+  }
   event_base_ = event_main_thread_->get_event_base();
-  route_service_ = FLAGS_worker_service;
+  route_service_ = worker_service;
   // Initialize host and service, and initiate connection.
-  controller_record.host = FLAGS_controller_host;
-  controller_record.service = FLAGS_controller_service;
+  controller_record.host = controller_host;
+  controller_record.service = controller_service;
   event_main_thread_->AddInjectedEvent(
       std::bind(&SelfType::CallbackInitiateEvent, this));
   // Sets the initialization flag.
@@ -233,39 +238,33 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapAndWorkerMessage(
     message::UpdatePartitionMapAndWorker* message) {
-  LOG(INFO) << "Update1";
-  delete message;
+  data_router_->UpdatePartitionMapAndWorker(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapAddApplicationMessage(
     message::UpdatePartitionMapAddApplication* message) {
-  LOG(INFO) << "Update2";
-  delete message;
+  data_router_->UpdatePartitionMapAddApplication(message);
 }
 
 void WorkerCommunicationManager::
     ProcessUpdatePartitionMapDropApplicationMessage(
         message::UpdatePartitionMapDropApplication* message) {
-  LOG(INFO) << "Update3";
-  delete message;
+  data_router_->UpdatePartitionMapDropApplication(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapIncrementalMessage(
     message::UpdatePartitionMapIncremental* message) {
-  LOG(INFO) << "Update4";
-  delete message;
+  data_router_->UpdatePartitionMapIncremental(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdateAddedWorkerMessage(
     message::UpdateAddedWorker* message) {
-  LOG(INFO) << "Update5";
-  delete message;
+  data_router_->UpdateAddedWorker(message);
 }
 
 void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
     message::ShutDownWorker* message) {
-  LOG(INFO) << "Update6";
-  delete message;
+  data_router_->ShutDownWorker(message);
 }
 
 /*

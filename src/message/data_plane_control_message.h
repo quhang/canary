@@ -91,7 +91,7 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, REGISTER_SERVICE_PORT,
 struct UpdatePartitionMapAndWorker {
   PartitionMapVersion version_id;
   PartitionMap* partition_map = nullptr;
-  std::map<WorkerId, std::string> worker_ports;
+  std::map<WorkerId, NetworkAddress> worker_addresses;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(version_id);
@@ -99,7 +99,7 @@ struct UpdatePartitionMapAndWorker {
       partition_map = new PartitionMap();
     }
     archive(*partition_map);
-    archive(worker_ports);
+    archive(worker_addresses);
   }
 };
 REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_AND_WORKER,
@@ -164,10 +164,10 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_INCREMENTAL,
  */
 struct UpdateAddedWorker {
   WorkerId added_worker_id;
-  std::string route_service;
+  NetworkAddress network_address;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(added_worker_id, route_service);
+    archive(added_worker_id, network_address);
   }
 };
 REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_ADDED_WORKER, UpdateAddedWorker);

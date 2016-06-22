@@ -151,7 +151,9 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   //! Initializes the communication manager.
   // Prepare call.
   void Initialize(network::EventMainThread* event_main_thread,
-                  ControllerReceiveCommandInterface* command_receiver);
+                  ControllerReceiveCommandInterface* command_receiver,
+                  const std::string& controller_service
+                  = FLAGS_controller_service);
 
  public:
   /*
