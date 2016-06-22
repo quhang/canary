@@ -42,8 +42,8 @@
 namespace canary {
 namespace message {
 
-ControlHeader HeaderTrait<ControlHeader>::kEmpty;
-DataHeader HeaderTrait<DataHeader>::kEmpty;
+ControlHeader HeaderTrait<ControlHeader>::empty;
+DataHeader HeaderTrait<DataHeader>::empty;
 
 }  // namespace message
 }  // namespace canary

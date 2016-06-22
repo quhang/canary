@@ -113,7 +113,7 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   // worker -> controller: RegisterServicePortMessage.
   message::AssignWorkerId message;
   message.assigned_worker_id = worker_id;
-  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
+  struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendWorkerSendingQueue(worker_id, buffer);
 }
 
@@ -129,7 +129,7 @@ void ControllerCommunicationManager::CallbackReadEvent(
       ProcessIncomingMessage(whole_message);
     }
   }
-  if (status == 0 || (status == 1 && !network::is_blocked())) {
+  if (status == 0 || (status == -1 && !network::is_blocked())) {
     CleanUpWorkerRecord(worker_record);
   }
 }
@@ -139,6 +139,7 @@ void ControllerCommunicationManager::CallbackWriteEvent(
   worker_record->send_buffer = network::send_as_much(
       worker_record->socket_fd, worker_record->send_buffer,
       &worker_record->send_queue);
+  // If not all data are sent.
   if (worker_record->send_buffer != nullptr) {
     // Channel is blocked or has error.
     if (network::is_blocked()) {
@@ -170,7 +171,7 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
   worker_record.write_event = CHECK_NOTNULL(event_new(
       event_base_, socket_fd, EV_WRITE, &DispatchWriteEvent, &worker_record));
   worker_record.send_buffer = nullptr;
-  worker_record.receive_buffer = evbuffer_new();
+  worker_record.receive_buffer = CHECK_NOTNULL(evbuffer_new());
   worker_record.manager = this;
 }
 
@@ -185,7 +186,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.added_worker_id = worker_record->worker_id;
     update_message.route_service = worker_record->route_service;
     struct evbuffer* buffer =
-        message::SerializeControlMessageWithHeader(update_message);
+        message::SerializeMessageWithControlHeader(update_message);
     AppendAllReadySendingQueue(buffer);
   }
 
@@ -198,7 +199,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
       update_message.worker_ports[pair.first] = pair.second.route_service;
     }
     struct evbuffer* buffer =
-        message::SerializeControlMessageWithHeader(update_message);
+        message::SerializeMessageWithControlHeader(update_message);
     AppendWorkerSendingQueue(worker_record->worker_id, buffer);
   }
 
@@ -298,7 +299,7 @@ void ControllerCommunicationManager::ShutDownWorker(WorkerId worker_id) {
 void ControllerCommunicationManager::InternalAddApplication(
     ApplicationId application_id,
     PerApplicationPartitionMap* per_application_partition_map) {
-  // The per application partition map is deleted here.
+  // The per application partition map is moved here.
   *internal_partition_map_.AddPerApplicationPartitionMap(application_id) =
       std::move(*per_application_partition_map);
   delete per_application_partition_map;
@@ -309,7 +310,7 @@ void ControllerCommunicationManager::InternalAddApplication(
   message.add_application_id = application_id;
   message.per_application_partition_map =
       internal_partition_map_.GetPerApplicationPartitionMap(application_id);
-  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
+  struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendAllReadySendingQueue(buffer);
 }
 
@@ -322,7 +323,7 @@ void ControllerCommunicationManager::InternalDropApplication(
   message::UpdatePartitionMapDropApplication message;
   message.version_id = internal_partition_map_version_;
   message.drop_application_id = application_id;
-  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
+  struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendAllReadySendingQueue(buffer);
 }
 
@@ -335,7 +336,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
   message::UpdatePartitionMapIncremental message;
   message.version_id = internal_partition_map_version_;
   message.partition_map_update = partition_map_update;
-  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
+  struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendAllReadySendingQueue(buffer);
 
   delete partition_map_update;
@@ -344,7 +345,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
 void ControllerCommunicationManager::InternalShutDownWorker(
     WorkerId worker_id) {
   message::ShutDownWorker message;
-  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
+  struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendWorkerSendingQueueIfReady(worker_id, buffer);
 }
 

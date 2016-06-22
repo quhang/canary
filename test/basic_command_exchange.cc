@@ -49,7 +49,7 @@ class ControllerTestReceiver : public ControllerReceiveCommandInterface {
   void TestSend(WorkerId worker_id) {
     message::TestWorkerCommand command;
     command.test_string = std::to_string(initial_command_[worker_id]);
-    auto buffer = message::SerializeControlMessageWithHeader(command);
+    auto buffer = message::SerializeMessageWithControlHeader(command);
     manager_->SendCommandToWorker(worker_id, buffer);
   }
   ControllerCommunicationManager* manager_ = nullptr;
@@ -77,7 +77,7 @@ class WorkerTestReceiver : public WorkerReceiveCommandInterface {
     LOG(INFO) << "Worker " << get_value(worker_id_) << " send "
         << out_command.test_string;
 
-    auto send_buffer = message::SerializeControlMessageWithHeader(out_command);
+    auto send_buffer = message::SerializeMessageWithControlHeader(out_command);
     manager_->SendCommandToController(send_buffer);
   }
 

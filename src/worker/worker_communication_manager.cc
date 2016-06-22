@@ -134,7 +134,7 @@ void WorkerCommunicationManager::CallbackReadEvent() {
       ProcessIncomingMessage(whole_message);
     }
   }
-  if (status == 0 || (status == 1 && !network::is_blocked())) {
+  if (status == 0 || (status == -1 && !network::is_blocked())) {
     LOG(FATAL) << "Controller connection is down!";
   }
 }
@@ -214,7 +214,7 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
   update_message.from_worker_id = controller_record.assigned_worker_id;
   update_message.route_service = route_service_;
   struct evbuffer* buffer =
-      message::SerializeControlMessageWithHeader(update_message);
+      message::SerializeMessageWithControlHeader(update_message);
   AppendSendingQueue(buffer, false);
 
   CHECK(!controller_record.is_ready);

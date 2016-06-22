@@ -55,7 +55,7 @@ typedef uint32_t MessageLength;
 //! The category group of a message.
 enum class MessageCategoryGroup : int16_t {
   INVALID = -1,
-  DATA_PLANE_CONTROL,
+  DATA_PLANE_CONTROL = 0,
   WORKER_COMMAND,
   CONTROLLER_COMMAND,
   APPLICATION_DATA_ROUTE,
@@ -142,7 +142,7 @@ class get_message_type {};
     typedef TYPE_NAME Type;                                                  \
   }
 
-//! The trait of message headers.
+//! The trait class of message headers.
 template <typename T>
 class HeaderTrait {};
 
@@ -167,12 +167,13 @@ struct ControlHeader {
   }
 };
 
+//! The header must be a POD class.
 static_assert(std::is_pod<ControlHeader>::value, "Not POD type!");
 
 template <>
 struct HeaderTrait<ControlHeader> {
   typedef ControlHeader Type;
-  static Type kEmpty;
+  static Type empty;
 };
 
 /**
@@ -188,12 +189,14 @@ struct DataHeader {
   MessageCategory category;
   //! Sequence number, and acknowledge sequence number.
   SequenceNumber sequence, ack_sequence;
+  //! Header if the message is routed to a partition.
   struct RouteHeader {
     ApplicationId to_application_id;
     VariableGroupId to_variable_group_id;
     PartitionId to_partition_id;
     PartitionMapVersion partition_map_version;
   };
+  //! Header if the message is directed to a worker.
   struct DirectHeader {
     WorkerId to_worker_id;
   };
@@ -213,12 +216,13 @@ struct DataHeader {
   }
 };
 
+//! The header must be a POD class.
 static_assert(std::is_pod<DataHeader>::value, "Not POD type!");
 
 template <>
 struct HeaderTrait<DataHeader> {
   typedef DataHeader Type;
-  static Type kEmpty;
+  static Type empty;
 };
 
 //! Examines the header of a buffer, which allows modifyication.
@@ -228,18 +232,16 @@ inline T* ExamineHeader(struct evbuffer* buffer) {
 }
 
 constexpr auto ExamineControlHeader = ExamineHeader<ControlHeader>;
-
 constexpr auto ExamineDataHeader = ExamineHeader<DataHeader>;
 
-//! Adds header to a buffer.
+//! Adds a header to a buffer, and returns the header.
 template <typename T, typename = typename HeaderTrait<T>::Type>
 inline T* AddHeader(struct evbuffer* buffer) {
-  CHECK_EQ(evbuffer_prepend(buffer, &HeaderTrait<T>::kEmpty, sizeof(T)), 0);
+  CHECK_EQ(evbuffer_prepend(buffer, &HeaderTrait<T>::empty, sizeof(T)), 0);
   return ExamineHeader<T>(buffer);
 }
 
 constexpr auto AddControlHeader = AddHeader<ControlHeader>;
-
 constexpr auto AddDataHeader = AddHeader<DataHeader>;
 
 //! Strips the header of a buffer, and returns the header. The header must be
@@ -254,27 +256,21 @@ inline T* StripHeader(struct evbuffer* buffer) {
 }
 
 constexpr auto StripControlHeader = StripHeader<ControlHeader>;
-
 constexpr auto StripDataHeader = StripHeader<DataHeader>;
 
-//! Strips the header of a buffer, and returns the header. The header must be
-// deallocated after usage.
+//! Removes the header of a buffer.
 template <typename T, typename = typename HeaderTrait<T>::Type>
 inline void RemoveHeader(struct evbuffer* buffer) {
-  const int bytes = evbuffer_drain(buffer, sizeof(T));
-  CHECK_EQ(bytes, 0);
+  CHECK_EQ(evbuffer_drain(buffer, sizeof(T)), 0);
 }
 
 constexpr auto RemoveControlHeader = RemoveHeader<ControlHeader>;
-
 constexpr auto RemoveDataHeader = RemoveHeader<DataHeader>;
 
 //! Serializes a messsage to a buffer, and returns the buffer.
 template <typename MessageType>
-inline struct evbuffer* SerializeMessage(
-    const MessageType& message, struct evbuffer* input_buffer = nullptr) {
-  struct evbuffer* buffer =
-      (input_buffer != nullptr) ? input_buffer : evbuffer_new();
+inline struct evbuffer* SerializeMessage(const MessageType& message) {
+  struct evbuffer* buffer = evbuffer_new();
   {
     CanaryOutputArchive archive(buffer);
     archive(message);
@@ -282,11 +278,13 @@ inline struct evbuffer* SerializeMessage(
   return buffer;
 }
 
-//! Serializes a messsage to a buffer, and returns the buffer.
+//! Serializes a messsage to a buffer, adds a control header, and returns the
+// buffer.
 template <typename MessageType>
-inline struct evbuffer* SerializeControlMessageWithHeader(
-    const MessageType& message, struct evbuffer* input_buffer = nullptr) {
-  struct evbuffer* buffer = SerializeMessage(message, input_buffer);
+inline struct evbuffer* SerializeMessageWithControlHeader(
+    const MessageType& message) {
+  struct evbuffer* buffer = SerializeMessage(message);
+  // The length before adding the header.
   const auto length = evbuffer_get_length(buffer);
   auto header = AddHeader<ControlHeader>(buffer);
   header->length = length;
@@ -294,18 +292,19 @@ inline struct evbuffer* SerializeControlMessageWithHeader(
   return buffer;
 }
 
-//! Serializes a messsage from a buffer, and returns remaining data.
+//! Deserializes a message from a buffer, whose header has been stripped.
 template <typename MessageType>
 inline void DeserializeMessage(struct evbuffer* buffer, MessageType* message) {
   {
     CanaryInputArchive archive(buffer);
     archive(*message);
   }
-  CHECK_EQ(evbuffer_get_length(buffer), 0);
+  CHECK_EQ(evbuffer_get_length(buffer), 0u);
   evbuffer_free(buffer);
 }
 
-//! Tries to segment a message from the buffer.
+//! Tries to segment a message from the buffer, and returns the segmented
+// message.
 template <typename T, typename = typename HeaderTrait<T>::Type>
 inline struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
   T* header = ExamineHeader<T>(buffer);
@@ -313,7 +312,7 @@ inline struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
     return nullptr;
   }
   const auto total_length = header->length + sizeof(T);
-  if (evbuffer_get_length(buffer) < total_length) {
+  if (total_length > evbuffer_get_length(buffer)) {
     return nullptr;
   }
   struct evbuffer* result = evbuffer_new();
@@ -324,18 +323,17 @@ inline struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
 }
 
 constexpr auto SegmentControlMessage = SegmentMessage<ControlHeader>;
-
 constexpr auto SegmentDataMessage = SegmentMessage<DataHeader>;
 
-//! Check whether it is an integrate message.
+//! Checks whether it is an integrate message.
 template <typename T, typename = typename HeaderTrait<T>::Type>
 inline bool CheckIsIntegrateMessage(struct evbuffer* buffer) {
   T* header = ExamineHeader<T>(buffer);
   if (header == nullptr) {
     return false;
   }
-  const auto length = header->length + sizeof(T);
-  return evbuffer_get_length(buffer) == length;
+  const auto total_length = header->length + sizeof(T);
+  return evbuffer_get_length(buffer) == total_length;
 }
 
 constexpr auto CheckIsIntegrateControlMessage =
