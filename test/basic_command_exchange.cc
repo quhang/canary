@@ -13,18 +13,22 @@ using namespace canary;  // NOLINT
 class ControllerTestReceiver : public ControllerReceiveCommandInterface {
  public:
   void ReceiveCommand(struct evbuffer* buffer) override {
-    auto in_command =
-        message::ControlHeader::UnpackMessage<
-        message::MessageCategory::TEST_CONTROLLER_COMMAND>(buffer);
-    const WorkerId from_worker_id = in_command->from_worker_id;
-    CHECK_EQ(in_command->test_string,
+    {
+      auto header = message::StripControlHeader(buffer);
+      CHECK(header->category ==
+            message::MessageCategory::TEST_CONTROLLER_COMMAND);
+      delete header;
+    }
+    message::TestControllerCommand in_command;
+    message::DeserializeMessage(buffer, &in_command);
+    const WorkerId from_worker_id = in_command.from_worker_id;
+    CHECK_EQ(in_command.test_string,
              std::to_string(initial_command_.at(from_worker_id)))
         << get_value(from_worker_id);
     ++initial_command_.at(from_worker_id);
     TestSend(from_worker_id);
     LOG(INFO) << "Send to:" << get_value(from_worker_id) << " value= " <<
         initial_command_[from_worker_id];
-    delete in_command;
   }
   void NotifyWorkerIsDown(WorkerId worker_id) override {
     LOG(FATAL);
@@ -45,7 +49,7 @@ class ControllerTestReceiver : public ControllerReceiveCommandInterface {
   void TestSend(WorkerId worker_id) {
     message::TestWorkerCommand command;
     command.test_string = std::to_string(initial_command_[worker_id]);
-    auto buffer = message::ControlHeader::PackMessage(command);
+    auto buffer = message::SerializeControlMessageWithHeader(command);
     manager_->SendCommandToWorker(worker_id, buffer);
   }
   ControllerCommunicationManager* manager_ = nullptr;
@@ -58,17 +62,23 @@ class WorkerTestReceiver : public WorkerReceiveCommandInterface {
     manager_ = manager;
   }
   void ReceiveCommandFromController(struct evbuffer* buffer) override {
-    auto message =
-        message::ControlHeader::UnpackMessage<
-        message::MessageCategory::TEST_WORKER_COMMAND>(buffer);
-    message::TestControllerCommand command;
-    command.test_string = message->test_string;
-    command.from_worker_id = worker_id_;
+    {
+      auto header = message::StripControlHeader(buffer);
+      CHECK(header->category ==
+            message::MessageCategory::TEST_WORKER_COMMAND);
+      delete header;
+    }
+    message::TestWorkerCommand in_command;
+    message::DeserializeMessage(buffer, &in_command);
+
+    message::TestControllerCommand out_command;
+    out_command.test_string = in_command.test_string;
+    out_command.from_worker_id = worker_id_;
     LOG(INFO) << "Worker " << get_value(worker_id_) << " send "
-        << message->test_string;
-    auto send_buffer = message::ControlHeader::PackMessage(command);
+        << out_command.test_string;
+
+    auto send_buffer = message::SerializeControlMessageWithHeader(out_command);
     manager_->SendCommandToController(send_buffer);
-    delete message;
   }
 
   void AssignWorkerId(WorkerId worker_id) {

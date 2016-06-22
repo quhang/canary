@@ -106,14 +106,14 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   network::translate_sockaddr_to_string(address, socklen, &host, &service);
   VLOG(1) << host << ":" << service << " reaches the controller port.";
   const WorkerId worker_id = worker_id_allocator_++;
-  VLOG(1) << "Allocated WorkerId=" << get_value(worker_id);
+  VLOG(1) << "Allocate worker id (" << get_value(worker_id) << ")";
   InitializeWorkerRecord(worker_id, socket_fd, host, service);
   // Handshake protocol:
   // controller -> worker: AssignWorkerId.
   // worker -> controller: RegisterServicePortMessage.
   message::AssignWorkerId message;
   message.assigned_worker_id = worker_id;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
+  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
   AppendWorkerSendingQueue(worker_id, buffer);
 }
 
@@ -122,12 +122,11 @@ void ControllerCommunicationManager::CallbackReadEvent(
   struct evbuffer* receive_buffer = worker_record->receive_buffer;
   const int socket_fd = worker_record->socket_fd;
 
-  message::ControlHeader message_header;
   int status = 0;
   while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
     while (struct evbuffer* whole_message =
-               message_header.SegmentMessage(receive_buffer)) {
-      ProcessIncomingMessage(message_header, whole_message);
+               message::SegmentControlMessage(receive_buffer)) {
+      ProcessIncomingMessage(whole_message);
     }
   }
   if (status == 0 || (status == 1 && !network::is_blocked())) {
@@ -179,16 +178,14 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     message::RegisterServicePort* message) {
   auto worker_record = &worker_id_to_status_.at(message->from_worker_id);
   worker_record->route_service = message->route_service;
-  worker_record->transmit_service = message->transmit_service;
 
   // Tells other workers of the added worker.
   {
     message::UpdateAddedWorker update_message;
     update_message.added_worker_id = worker_record->worker_id;
     update_message.route_service = worker_record->route_service;
-    update_message.transmit_service = worker_record->transmit_service;
     struct evbuffer* buffer =
-        message::ControlHeader::PackMessage(update_message);
+        message::SerializeControlMessageWithHeader(update_message);
     AppendAllReadySendingQueue(buffer);
   }
 
@@ -198,14 +195,14 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.version_id = internal_partition_map_version_;
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
-      update_message.worker_ports[pair.first] = std::make_pair(
-          pair.second.route_service, pair.second.transmit_service);
+      update_message.worker_ports[pair.first] = pair.second.route_service;
     }
     struct evbuffer* buffer =
-        message::ControlHeader::PackMessage(update_message);
+        message::SerializeControlMessageWithHeader(update_message);
     AppendWorkerSendingQueue(worker_record->worker_id, buffer);
   }
 
+  CHECK(!worker_record->is_ready);
   // The worker is now ready.
   worker_record->is_ready = true;
 
@@ -246,10 +243,14 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
     }
   }
   const auto worker_id = worker_record->worker_id;
+  const bool is_ready = worker_record->is_ready;
   worker_id_to_status_.erase(worker_id);
 
-  // Notifies that a worker is down.
-  command_receiver_->NotifyWorkerIsDown(worker_id);
+  // Checks the is_ready flag so that up and down events are paired.
+  if (is_ready) {
+    // Notifies that a worker is down.
+    command_receiver_->NotifyWorkerIsDown(worker_id);
+  }
 }
 
 /*
@@ -258,11 +259,9 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
 
 void ControllerCommunicationManager::SendCommandToWorker(
     WorkerId worker_id, struct evbuffer* buffer) {
-  message::ControlHeader header;
-  CHECK(header.ExtractHeader(buffer));
-  CHECK(header.get_category_group() ==
+  CHECK(message::CheckIsIntegrateControlMessage(buffer));
+  CHECK(message::ExamineControlHeader(buffer)->category_group ==
         message::MessageCategoryGroup::WORKER_COMMAND);
-  CHECK_EQ(header.kLength + header.get_length(), evbuffer_get_length(buffer));
   event_main_thread_->AddInjectedEvent(std::bind(
       &SelfType::AppendWorkerSendingQueueIfReady, this, worker_id, buffer));
 }
@@ -299,18 +298,19 @@ void ControllerCommunicationManager::ShutDownWorker(WorkerId worker_id) {
 void ControllerCommunicationManager::InternalAddApplication(
     ApplicationId application_id,
     PerApplicationPartitionMap* per_application_partition_map) {
+  // The per application partition map is deleted here.
   *internal_partition_map_.AddPerApplicationPartitionMap(application_id) =
       std::move(*per_application_partition_map);
+  delete per_application_partition_map;
   ++internal_partition_map_version_;
 
   message::UpdatePartitionMapAddApplication message;
   message.version_id = internal_partition_map_version_;
   message.add_application_id = application_id;
-  message.per_application_partition_map = per_application_partition_map;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
+  message.per_application_partition_map =
+      internal_partition_map_.GetPerApplicationPartitionMap(application_id);
+  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
   AppendAllReadySendingQueue(buffer);
-
-  delete per_application_partition_map;
 }
 
 void ControllerCommunicationManager::InternalDropApplication(
@@ -322,7 +322,7 @@ void ControllerCommunicationManager::InternalDropApplication(
   message::UpdatePartitionMapDropApplication message;
   message.version_id = internal_partition_map_version_;
   message.drop_application_id = application_id;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
+  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
   AppendAllReadySendingQueue(buffer);
 }
 
@@ -335,7 +335,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
   message::UpdatePartitionMapIncremental message;
   message.version_id = internal_partition_map_version_;
   message.partition_map_update = partition_map_update;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
+  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
   AppendAllReadySendingQueue(buffer);
 
   delete partition_map_update;
@@ -344,7 +344,7 @@ void ControllerCommunicationManager::InternalUpdatePartitionMap(
 void ControllerCommunicationManager::InternalShutDownWorker(
     WorkerId worker_id) {
   message::ShutDownWorker message;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(message);
+  struct evbuffer* buffer = message::SerializeControlMessageWithHeader(message);
   AppendWorkerSendingQueueIfReady(worker_id, buffer);
 }
 
@@ -352,30 +352,30 @@ void ControllerCommunicationManager::InternalShutDownWorker(
  * Internal helper functions.
  */
 
+// Macro used to dispatch a message type to a method.
+#define PROCESS_MESSAGE(TYPE, METHOD)                                 \
+  case MessageCategory::TYPE: {                                       \
+    auto message =                                                    \
+        new message::get_message_type<MessageCategory::TYPE>::Type(); \
+    message::RemoveControlHeader(buffer);                             \
+    message::DeserializeMessage(buffer, message);                     \
+    METHOD(message);                                                  \
+    break;                                                            \
+  }
 void ControllerCommunicationManager::ProcessIncomingMessage(
-    const message::ControlHeader& message_header, struct evbuffer* buffer) {
+    struct evbuffer* buffer) {
+  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
   using message::ControlHeader;
-  switch (message_header.get_category_group()) {
+  switch (header->category_group) {
     case MessageCategoryGroup::DATA_PLANE_CONTROL:
-      switch (message_header.get_category()) {
-        case MessageCategory::REGISTER_SERVICE_PORT: {
-          auto message = ControlHeader::UnpackMessage<
-              MessageCategory::REGISTER_SERVICE_PORT>(buffer);
-          // Ownership transferred.
-          ProcessRegisterServicePortMessage(message);
-          break;
-        }
-        case message::MessageCategory::NOTIFY_WORKER_DISCONNECT: {
-          auto message = ControlHeader::UnpackMessage<
-              MessageCategory::NOTIFY_WORKER_DISCONNECT>(buffer);
-          // Ownership transferred.
-          ProcessNotifyWorkerDisconnect(message);
-          break;
-        }
-        default:
-          LOG(FATAL) << "Unexpected message type.";
+      switch (header->category) {
+        PROCESS_MESSAGE(REGISTER_SERVICE_PORT,
+                        ProcessRegisterServicePortMessage);
+        PROCESS_MESSAGE(NOTIFY_WORKER_DISCONNECT,
+                        ProcessNotifyWorkerDisconnect);
+        default: { LOG(FATAL) << "Unexpected message type."; }
       }  // switch category.
       break;
     case MessageCategoryGroup::CONTROLLER_COMMAND:
@@ -385,6 +385,7 @@ void ControllerCommunicationManager::ProcessIncomingMessage(
       LOG(FATAL) << "Invalid message header!";
   }  // switch category group.
 }
+#undef PROCESS_MESSAGE
 
 void ControllerCommunicationManager::AppendWorkerSendingQueue(
     WorkerId worker_id, struct evbuffer* buffer) {
@@ -401,10 +402,12 @@ void ControllerCommunicationManager::AppendWorkerSendingQueueWithFlag(
   auto iter = worker_id_to_status_.find(worker_id);
   if (iter == worker_id_to_status_.end()) {
     evbuffer_free(buffer);
+    LOG(WARNING) << "Message is dropped because a worker is down!";
     return;
   } else {
     WorkerRecord* worker_record = &iter->second;
-    CHECK(worker_record->is_ready || !enforce);
+    CHECK(worker_record->is_ready || !enforce)
+        << "Cannot send messages after a worker is down!";
     worker_record->send_queue.push_back(buffer);
     event_add(worker_record->write_event, nullptr);
   }

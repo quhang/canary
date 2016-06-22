@@ -85,6 +85,12 @@ enum class ApplicationId : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(ApplicationId);
 
 /**
+ * The id of a variable group.
+ */
+enum class VariableGroupId : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(VariableGroupId);
+
+/**
  * The id of a variable.
  */
 enum class VariableId : int32_t { INVALID = -1, FIRST = 0 };
@@ -93,7 +99,7 @@ COUNTABLE_ENUM(VariableId);
 /**
  * The id of a partition.
  */
-enum class PartitionId : int32_t { INVALID = -1, FIRST = 0 };
+enum class PartitionId : int32_t { BROADCAST = -2, INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionId);
 
 /**
@@ -108,13 +114,16 @@ COUNTABLE_ENUM(StageId);
 enum class PartitionMapVersion : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionMapVersion);
 
+typedef uint64_t SequenceNumber;
+typedef int32_t DuplicateFactor;
+
 struct FullPartitionId {
   ApplicationId application_id;
-  VariableId variable_id;
+  VariableGroupId variable_group_id;
   PartitionId partition_id;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, variable_id, partition_id);
+    archive(application_id, variable_group_id, partition_id);
   }
 };
 

@@ -18,7 +18,7 @@ class TestReceiver : public ControllerReceiveCommandInterface {
     for (int i = 0; i < 1000; ++i) {
       message::TestWorkerCommand command;
       command.test_string = std::to_string(i);
-      auto buffer = message::ControlHeader::PackMessage(command);
+      auto buffer = message::SerializeControlMessageWithHeader(command);
       manager_->SendCommandToWorker(worker_id, buffer);
     }
   }

@@ -148,8 +148,7 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
    */
   //! Process an incoming message.
   // Sync call.
-  void ProcessIncomingMessage(const message::ControlHeader& message_header,
-                              struct evbuffer* buffer);
+  void ProcessIncomingMessage(struct evbuffer* buffer);
 
   // All the following messages are data plane control messages.
   void ProcessAssignWorkerIdMessage(message::AssignWorkerId* message);
@@ -189,33 +188,30 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
    * @see src/worker/worker_data_router.h
    */
 
-  void SendDataToPartition(ApplicationId application_id, StageId stage_id,
+  void SendDataToPartition(ApplicationId application_id,
+                           VariableGroupId variable_group_id,
                            PartitionId partition_id,
                            struct evbuffer* buffer) override {
-    data_router_.SendDataToPartition(application_id, stage_id, partition_id,
-                                     buffer);
+    data_router_.SendDataToPartition(application_id, variable_group_id,
+                                     partition_id, buffer);
   }
 
   void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {
     data_router_.SendDataToWorker(worker_id, buffer);
   }
 
-  void ReduceAndSendDataToPartition(
-      ApplicationId application_id, StageId stage_id, struct evbuffer* buffer,
-      CombinerFunction combiner_function) override {
-    data_router_.ReduceAndSendDataToPartition(application_id, stage_id, buffer,
-                                              combiner_function);
-  }
-
-  void BroadcastDatatoPartition(ApplicationId application_id, StageId stage_id,
+  void BroadcastDataToPartition(ApplicationId application_id,
+                                VariableGroupId variable_group_id,
                                 struct evbuffer* buffer) override {
-    data_router_.BroadcastDatatoPartition(application_id, stage_id, buffer);
+    data_router_.BroadcastDataToPartition(application_id, variable_group_id,
+                                          buffer);
   }
 
  private:
   network::EventMainThread* event_main_thread_ = nullptr;
   struct event_base* event_base_ = nullptr;
   WorkerReceiveCommandInterface* command_receiver_ = nullptr;
+  WorkerReceiveDataInterface* data_receiver_ = nullptr;
   bool is_initialized_ = false;
 
   WorkerDataRouter data_router_;

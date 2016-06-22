@@ -11,11 +11,15 @@ class TestReceiver : public WorkerReceiveCommandInterface {
     manager_ = manager;
   }
   void ReceiveCommandFromController(struct evbuffer* buffer) override {
-    auto message =
-        message::ControlHeader::UnpackMessage<
-        message::MessageCategory::TEST_WORKER_COMMAND>(buffer);
-    LOG(INFO) << "Received :" << message->test_string;
-    delete message;
+    {
+      auto header = message::StripControlHeader(buffer);
+      CHECK(header->category ==
+            message::MessageCategory::TEST_WORKER_COMMAND);
+      delete header;
+    }
+    message::TestWorkerCommand command;
+    message::DeserializeMessage(buffer, &command);
+    LOG(INFO) << "Received :" << command.test_string;
   }
 
   void AssignWorkerId(WorkerId worker_id) override {

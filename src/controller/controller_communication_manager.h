@@ -59,15 +59,16 @@ namespace canary {
  */
 class ControllerSendCommandInterface {
  public:
-  //! Sends a command to a worker as long as the worker is notified up. The
-  // buffer ownership is transferred.
+  //! Sends a command to a worker. The command will not reach the worker if it
+  // is not notified that the worker is up. The buffer ownership is transferred.
   virtual void SendCommandToWorker(WorkerId worker_id,
                                    struct evbuffer* buffer) = 0;
 
   /*
    * The partition map will be synchronized to workers automatically.
    */
-  //! Updates the partition map by adding an application.
+  //! Updates the partition map by adding an application. The ownership of the
+  // partition map is transferred.
   virtual void AddApplication(
       ApplicationId application_id,
       PerApplicationPartitionMap* per_application_partition_map) = 0;
@@ -75,10 +76,11 @@ class ControllerSendCommandInterface {
   //! Updates the partition map by dropping an application.
   virtual void DropApplication(ApplicationId application_id) = 0;
 
-  //! Updates the partition map incrementally.
+  //! Updates the partition map incrementally. The ownership of the update data
+  // structure is transferred.
   virtual void UpdatePartitionMap(PartitionMapUpdate* partition_map_update) = 0;
 
-  //! Shuts down a worker.
+  //! Shuts down a worker. TODO(quhang): sematic not clear.
   virtual void ShutDownWorker(WorkerId worker_id) = 0;
 };
 
@@ -95,7 +97,8 @@ class ControllerReceiveCommandInterface {
   //! Called when a worker is down, even if it is shut down by the controller.
   virtual void NotifyWorkerIsDown(WorkerId worker_id) = 0;
 
-  //! Called when a worker is up.
+  //! Called when a worker is up. The up notification and down notification are
+  // paired.
   virtual void NotifyWorkerIsUp(WorkerId worker_id) = 0;
 };
 
@@ -108,7 +111,8 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
  private:
   typedef ControllerCommunicationManager SelfType;
   /**
-   * The data structure associated with a worker.
+   * The data structure that tracks the communication channel between the
+   * controller and a worker.
    */
   struct WorkerRecord {
     //! The id of the connected worker.
@@ -116,10 +120,10 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
     //! Worker hostname.
     std::string host;
     //! Worker port names.
-    std::string service, route_service, transmit_service;
-    //! Worker-controller communication socket.
+    std::string service, route_service;
+    //! Communication socket.
     int socket_fd = -1;
-    //! Whether the worker has replied with route/transmit ports.
+    //! Whether the worker has replied with registration information.
     bool is_ready = false;
     //! Persistent read event.
     struct event* read_event = nullptr;
@@ -135,7 +139,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
     SelfType* manager = nullptr;
   };
 
-  //! Default backlog argument. Concurrent pending TCP connecting events.
+  //! Default backlog argument, i.e. Concurrent pending TCP connecting events.
   static const int kBacklog = -1;
 
  public:
@@ -205,7 +209,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   // Sync call.
   void ProcessRegisterServicePortMessage(message::RegisterServicePort* message);
 
-  //! Cleans up a worker record if it is disconnected..
+  //! Cleans up a worker record if it is disconnected.
   // Sync call.
   void ProcessNotifyWorkerDisconnect(message::NotifyWorkerDisconnect* message);
 
@@ -243,7 +247,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
  private:
   /**
-   * Implements async interfaces as synchronous callback.
+   * Implements async interfaces using synchronous callback.
    */
 
   //! Updates the partition map by adding an application.
@@ -271,8 +275,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
   //! Processes an incoming message.
   // Sync call.
-  void ProcessIncomingMessage(const message::ControlHeader& message_header,
-                              struct evbuffer* buffer);
+  void ProcessIncomingMessage(struct evbuffer* buffer);
 
   //! Appends the worker sending queue.
   // Sync call.

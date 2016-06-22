@@ -49,27 +49,18 @@ namespace canary {
  */
 class WorkerSendDataInterface {
  public:
-  //! A combiner function consumes two buffers and merges into one.
-  typedef std::function<struct evbuffer*(struct evbuffer*, struct evbuffer*)>
-      CombinerFunction;
-
-  //! Sends data to a partition. The data is an intermediate data chunk to be
-  // routed to a "gather" task.
+  //! Routes data to a partition. The header is not added.
   virtual void SendDataToPartition(ApplicationId application_id,
-                                   StageId stage_id, PartitionId partition_id,
+                                   VariableGroupId variable_group_id,
+                                   PartitionId partition_id,
                                    struct evbuffer* buffer) = 0;
   //! Sends data to a worker. Used for data partition migration, or restoring
-  // data partitions from storage.
+  // data partitions from storage. The header is not added.
   virtual void SendDataToWorker(WorkerId worker_id,
                                 struct evbuffer* buffer) = 0;
-  //! Reduces data at the worker side, and then sends to the singular task in a
-  // stage.
-  virtual void ReduceAndSendDataToPartition(
-      ApplicationId application_id, StageId stage_id, struct evbuffer* buffer,
-      CombinerFunction combiner_function) = 0;
   //! Broadcasts data to all tasks in a stage.
-  virtual void BroadcastDatatoPartition(ApplicationId application_id,
-                                        StageId stage_id,
+  virtual void BroadcastDataToPartition(ApplicationId application_id,
+                                        VariableGroupId variable_group_id,
                                         struct evbuffer* buffer) = 0;
 };
 
@@ -79,14 +70,16 @@ class WorkerSendDataInterface {
  */
 class WorkerReceiveDataInterface {
  public:
-  //! Called when receiving data from a partition.
-  virtual void ReceiveDataFromPartition(ApplicationId application_id,
-                                        StageId stage_id,
-                                        PartitionId partition_id,
-                                        struct evbuffer* buffer) = 0;
-  //! Called when receiving data from a worker.
-  virtual void ReceiveDataFromWorker(WorkerId worker_id,
-                                     struct evbuffer* buffer) = 0;
+  //! Called when receiving data from a partition. The routed data might be
+  // rejected, which means this is not the right destination. The header is
+  // stripped.
+  virtual bool ReceiveRoutedData(ApplicationId application_id,
+                                 VariableGroupId variable_group_id,
+                                 PartitionId partition_id,
+                                 struct evbuffer* buffer) = 0;
+  //! Called when receiving data from a worker, which is sent directly. The
+  // header is stripped.
+  virtual void ReceiveDirectData(struct evbuffer* buffer) = 0;
 };
 
 /**
@@ -94,7 +87,8 @@ class WorkerReceiveDataInterface {
  */
 class WorkerSendCommandInterface {
  public:
-  //! Sends a command to the controller.
+  //! Sends a command to the controller. Can be called after the controller
+  // assigns a worker id. The header should be already added.
   virtual void SendCommandToController(struct evbuffer* buffer) = 0;
 };
 
@@ -104,6 +98,7 @@ class WorkerSendCommandInterface {
 class WorkerReceiveCommandInterface {
  public:
   //! Called when receiving a command from the controller.
+  // The header is kept.
   virtual void ReceiveCommandFromController(struct evbuffer* buffer) = 0;
 
   //! Called when the worker id is assigned.

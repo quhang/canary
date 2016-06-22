@@ -45,6 +45,10 @@
 namespace canary {
 namespace message {
 
+/*
+ * Basic types related to messages.
+ */
+
 //! The length of a message in bytes, excluding the message header.
 typedef uint32_t MessageLength;
 
@@ -54,8 +58,8 @@ enum class MessageCategoryGroup : int16_t {
   DATA_PLANE_CONTROL,
   WORKER_COMMAND,
   CONTROLLER_COMMAND,
-  ROUTE_DATA,
-  TRANSMIT_DATA
+  APPLICATION_DATA_ROUTE,
+  APPLICATION_DATA_DIRECT
 };
 
 //! The category of a message.
@@ -74,8 +78,18 @@ enum class MessageCategory : int16_t {
   // Worker commands (from the controller).
   TEST_WORKER_COMMAND = 200,
   // Controller commands (from a worker).
-  TEST_CONTROLLER_COMMAND = 300
+  TEST_CONTROLLER_COMMAND = 300,
+  // Application data.
+  ROUTE_DATA_UNICAST = 400,
+  ROUTE_DATA_MULTICAST,
+  DIRECT_DATA_MIGRATE = 500,
+  DIRECT_DATA_STORAGE
 };
+
+/*
+ * Helper function for tranlating between message types and message category
+ * lables.
+ */
 
 //! Gets the category group of a message.
 template <typename T>
@@ -125,103 +139,210 @@ class get_message_type {};
   }                                                                          \
   template <>                                                                \
   struct get_message_type<MessageCategory::CATEGORY_NAME> {                  \
-    typedef TYPE_NAME type;                                                  \
+    typedef TYPE_NAME Type;                                                  \
   }
+
+//! The trait of message headers.
+template <typename T>
+class HeaderTrait {};
 
 /**
- * The header used by the control plane.
+ * The header data structure for control messages.
  */
 struct ControlHeader {
- private:
-  typedef MessageLength Type0;
-  typedef MessageCategoryGroup Type1;
-  typedef MessageCategory Type2;
-
-  //! The header data structure.
-  struct Header {
-    Type0 length;
-    Type1 category_group;
-    Type2 category;
-  };
-
-  //! Used for decoding.
-  union {
-    char content_[sizeof(Header)];
-    Header header_;
-  };
-
-  static_assert(sizeof(Header) == sizeof(Type0) + sizeof(Type1) + sizeof(Type2),
-                "Needs fixes here!");
-
- public:
-  //! The length of the header.
-  static const size_t kLength = sizeof(Header);
-
-  //! Gets message length.
-  Type0 get_length() const { return header_.length; }
-  //! Sets message length.
-  void set_length(Type0 length) { header_.length = length; }
-  //! Gets message category group.
-  Type1 get_category_group() const { return header_.category_group; }
-  //! Sets message category group.
-  void set_category_group(Type1 category_group) {
-    header_.category_group = category_group;
-  }
-  //! Gets message category.
-  Type2 get_category() const { return header_.category; }
-  //! Sets message category.
-  void set_category(Type2 category) { header_.category = category; }
-
-  //! Packs a message into a buffer with header added.
+  //! The message length.
+  MessageLength length;
+  //! The message category group.
+  MessageCategoryGroup category_group;
+  //! The message category.
+  MessageCategory category;
   template <typename MessageType>
-  static struct evbuffer* PackMessage(const MessageType& message) {
-    struct evbuffer* buffer = evbuffer_new();
-    CanaryOutputArchive archive(buffer);
-    archive(message);
-    ControlHeader header;
-    header.set_length(evbuffer_get_length(buffer));
-    header.set_category_group(get_message_category_group(message));
-    header.set_category(get_message_category(message));
-    evbuffer_prepend(buffer, header.content_, header.kLength);
-    return buffer;
+  void FillInMessageType() {
+    category_group = get_message_category_group<MessageType>();
+    category = get_message_category<MessageType>();
   }
-
-  //! Unpacks and consumes a buffer into a message.
-  template <MessageCategory category>
-  static typename get_message_type<category>::type* UnpackMessage(
-      struct evbuffer* buffer) {
-    typedef typename get_message_type<category>::type MessageType;
-    CHECK_EQ(evbuffer_drain(buffer, kLength), 0);
-    CanaryInputArchive archive(buffer);
-    auto message = new MessageType();
-    archive(*message);
-    evbuffer_free(buffer);
-    return message;
-  }
-
-  //! Extracts the header from a buffer without changing the buffer.
-  bool ExtractHeader(struct evbuffer* buffer) {
-    ssize_t bytes = evbuffer_copyout(buffer, content_, kLength);
-    return bytes >= 0 && static_cast<size_t>(bytes) == kLength;
-  }
-
-  //! Tries to drain out a message from the buffer.
-  struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
-    if (!ExtractHeader(buffer)) {
-      return nullptr;
-    }
-    const size_t full_length = kLength + get_length();
-    // If the full message is received.
-    if (full_length > evbuffer_get_length(buffer)) {
-      return nullptr;
-    }
-    struct evbuffer* result = evbuffer_new();
-    const int bytes = evbuffer_remove_buffer(buffer, result, full_length);
-    CHECK_GE(bytes, 0);
-    CHECK_EQ(static_cast<size_t>(bytes), full_length);
-    return result;
+  template <typename MessageType>
+  void FillInMessageType(const MessageType&) {
+    FillInMessageType<MessageType>();
   }
 };
+
+static_assert(std::is_pod<ControlHeader>::value, "Not POD type!");
+
+template <>
+struct HeaderTrait<ControlHeader> {
+  typedef ControlHeader Type;
+  static Type kEmpty;
+};
+
+/**
+ * The header data structure for data messages.
+ */
+
+struct DataHeader {
+  //! The message length.
+  MessageLength length;
+  //! The message category group.
+  MessageCategoryGroup category_group;
+  //! The message category.
+  MessageCategory category;
+  //! Sequence number, and acknowledge sequence number.
+  SequenceNumber sequence, ack_sequence;
+  struct RouteHeader {
+    ApplicationId to_application_id;
+    VariableGroupId to_variable_group_id;
+    PartitionId to_partition_id;
+    PartitionMapVersion partition_map_version;
+  };
+  struct DirectHeader {
+    WorkerId to_worker_id;
+  };
+  union {
+    RouteHeader route;
+    DirectHeader direct;
+  };
+
+  template <typename MessageType>
+  void FillInMessageType() {
+    category_group = get_message_category_group<MessageType>();
+    category = get_message_category<MessageType>();
+  }
+  template <typename MessageType>
+  void FillInMessageType(const MessageType&) {
+    FillInMessageType<MessageType>();
+  }
+};
+
+static_assert(std::is_pod<DataHeader>::value, "Not POD type!");
+
+template <>
+struct HeaderTrait<DataHeader> {
+  typedef DataHeader Type;
+  static Type kEmpty;
+};
+
+//! Examines the header of a buffer, which allows modifyication.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline T* ExamineHeader(struct evbuffer* buffer) {
+  return reinterpret_cast<T*>(evbuffer_pullup(buffer, sizeof(T)));
+}
+
+constexpr auto ExamineControlHeader = ExamineHeader<ControlHeader>;
+
+constexpr auto ExamineDataHeader = ExamineHeader<DataHeader>;
+
+//! Adds header to a buffer.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline T* AddHeader(struct evbuffer* buffer) {
+  CHECK_EQ(evbuffer_prepend(buffer, &HeaderTrait<T>::kEmpty, sizeof(T)), 0);
+  return ExamineHeader<T>(buffer);
+}
+
+constexpr auto AddControlHeader = AddHeader<ControlHeader>;
+
+constexpr auto AddDataHeader = AddHeader<DataHeader>;
+
+//! Strips the header of a buffer, and returns the header. The header must be
+// deallocated after usage.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline T* StripHeader(struct evbuffer* buffer) {
+  T* result = new T();
+  const int bytes =
+      evbuffer_remove(buffer, reinterpret_cast<char*>(result), sizeof(T));
+  CHECK_EQ(bytes, static_cast<int>(sizeof(T)));
+  return result;
+}
+
+constexpr auto StripControlHeader = StripHeader<ControlHeader>;
+
+constexpr auto StripDataHeader = StripHeader<DataHeader>;
+
+//! Strips the header of a buffer, and returns the header. The header must be
+// deallocated after usage.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline void RemoveHeader(struct evbuffer* buffer) {
+  const int bytes = evbuffer_drain(buffer, sizeof(T));
+  CHECK_EQ(bytes, 0);
+}
+
+constexpr auto RemoveControlHeader = RemoveHeader<ControlHeader>;
+
+constexpr auto RemoveDataHeader = RemoveHeader<DataHeader>;
+
+//! Serializes a messsage to a buffer, and returns the buffer.
+template <typename MessageType>
+inline struct evbuffer* SerializeMessage(
+    const MessageType& message, struct evbuffer* input_buffer = nullptr) {
+  struct evbuffer* buffer =
+      (input_buffer != nullptr) ? input_buffer : evbuffer_new();
+  {
+    CanaryOutputArchive archive(buffer);
+    archive(message);
+  }
+  return buffer;
+}
+
+//! Serializes a messsage to a buffer, and returns the buffer.
+template <typename MessageType>
+inline struct evbuffer* SerializeControlMessageWithHeader(
+    const MessageType& message, struct evbuffer* input_buffer = nullptr) {
+  struct evbuffer* buffer = SerializeMessage(message, input_buffer);
+  const auto length = evbuffer_get_length(buffer);
+  auto header = AddHeader<ControlHeader>(buffer);
+  header->length = length;
+  header->FillInMessageType(message);
+  return buffer;
+}
+
+//! Serializes a messsage from a buffer, and returns remaining data.
+template <typename MessageType>
+inline void DeserializeMessage(struct evbuffer* buffer, MessageType* message) {
+  {
+    CanaryInputArchive archive(buffer);
+    archive(*message);
+  }
+  CHECK_EQ(evbuffer_get_length(buffer), 0);
+  evbuffer_free(buffer);
+}
+
+//! Tries to segment a message from the buffer.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
+  T* header = ExamineHeader<T>(buffer);
+  if (header == nullptr) {
+    return nullptr;
+  }
+  const auto total_length = header->length + sizeof(T);
+  if (evbuffer_get_length(buffer) < total_length) {
+    return nullptr;
+  }
+  struct evbuffer* result = evbuffer_new();
+  const int bytes = evbuffer_remove_buffer(buffer, result, total_length);
+  CHECK_GE(bytes, 0);
+  CHECK_EQ(static_cast<size_t>(bytes), total_length);
+  return result;
+}
+
+constexpr auto SegmentControlMessage = SegmentMessage<ControlHeader>;
+
+constexpr auto SegmentDataMessage = SegmentMessage<DataHeader>;
+
+//! Check whether it is an integrate message.
+template <typename T, typename = typename HeaderTrait<T>::Type>
+inline bool CheckIsIntegrateMessage(struct evbuffer* buffer) {
+  T* header = ExamineHeader<T>(buffer);
+  if (header == nullptr) {
+    return false;
+  }
+  const auto length = header->length + sizeof(T);
+  return evbuffer_get_length(buffer) == length;
+}
+
+constexpr auto CheckIsIntegrateControlMessage =
+    CheckIsIntegrateMessage<ControlHeader>;
+
+constexpr auto CheckIsIntegrateDataMessage =
+    CheckIsIntegrateMessage<DataHeader>;
 
 }  // namespace message
 }  // namespace canary

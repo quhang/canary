@@ -53,9 +53,8 @@ namespace message {
 
 /*
  * These messages are exchanged between the controller and a worker to control
- * the underlying data plane of Canary. E.g. how data is routed or transmitted
- * between workers, and how worker membership is managed when a worker joins or
- * leaves.
+ * the underlying data plane of Canary. E.g. how data is routed between workers,
+ * and how worker membership is managed when a worker joins or leaves.
  */
 
 /**
@@ -76,10 +75,10 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, ASSIGN_WORKER_ID, AssignWorkerId);
  */
 struct RegisterServicePort {
   WorkerId from_worker_id;
-  std::string route_service, transmit_service;
+  std::string route_service;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(from_worker_id, route_service, transmit_service);
+    archive(from_worker_id, route_service);
   }
 };
 REGISTER_MESSAGE(DATA_PLANE_CONTROL, REGISTER_SERVICE_PORT,
@@ -92,13 +91,15 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, REGISTER_SERVICE_PORT,
 struct UpdatePartitionMapAndWorker {
   PartitionMapVersion version_id;
   PartitionMap* partition_map = nullptr;
-  std::map<WorkerId, std::pair<std::string, std::string>> worker_ports;
+  std::map<WorkerId, std::string> worker_ports;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
+    archive(version_id);
     if (partition_map == nullptr) {
       partition_map = new PartitionMap();
     }
-    archive(version_id, *partition_map);
+    archive(*partition_map);
+    archive(worker_ports);
   }
 };
 REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_AND_WORKER,
@@ -163,10 +164,10 @@ REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_PARTITION_MAP_INCREMENTAL,
  */
 struct UpdateAddedWorker {
   WorkerId added_worker_id;
-  std::string route_service, transmit_service;
+  std::string route_service;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(added_worker_id, route_service, transmit_service);
+    archive(added_worker_id, route_service);
   }
 };
 REGISTER_MESSAGE(DATA_PLANE_CONTROL, UPDATE_ADDED_WORKER, UpdateAddedWorker);

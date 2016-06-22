@@ -46,10 +46,11 @@ void WorkerCommunicationManager::Initialize(
     WorkerReceiveCommandInterface* command_receiver,
     WorkerReceiveDataInterface* data_receiver) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
-  command_receiver_ = command_receiver;
+  command_receiver_ = CHECK_NOTNULL(command_receiver);
+  // TODO
+  // data_receiver_ = CHECK_NOTNULL(data_receiver);
   event_base_ = event_main_thread_->get_event_base();
   route_service_ = FLAGS_worker_service;
-  data_router_.Initialize(event_main_thread_, data_receiver, route_service_);
   // Initialize host and service, and initiate connection.
   controller_record.host = FLAGS_controller_host;
   controller_record.service = FLAGS_controller_service;
@@ -126,12 +127,11 @@ void WorkerCommunicationManager::CallbackReadEvent() {
   struct evbuffer* receive_buffer = controller_record.receive_buffer;
   const int socket_fd = controller_record.socket_fd;
 
-  message::ControlHeader message_header;
   int status = 0;
   while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
     while (struct evbuffer* whole_message =
-               message_header.SegmentMessage(receive_buffer)) {
-      ProcessIncomingMessage(message_header, whole_message);
+               message::SegmentControlMessage(receive_buffer)) {
+      ProcessIncomingMessage(whole_message);
     }
   }
   if (status == 0 || (status == 1 && !network::is_blocked())) {
@@ -159,24 +159,26 @@ void WorkerCommunicationManager::CallbackWriteEvent() {
  * Process incoming messages.
  */
 
-// Macro used to dispatch a message type to a method.
-#define PROCESS_MESSAGE(TYPE, METHOD)                                         \
-  case MessageCategory::TYPE: {                                               \
-    auto message =                                                            \
-        message::ControlHeader::UnpackMessage<MessageCategory::TYPE>(buffer); \
-    METHOD(message);                                                          \
-    break;                                                                    \
+#define PROCESS_MESSAGE(TYPE, METHOD)                                 \
+  case MessageCategory::TYPE: {                                       \
+    auto message =                                                    \
+        new message::get_message_type<MessageCategory::TYPE>::Type(); \
+    message::RemoveControlHeader(buffer);                             \
+    message::DeserializeMessage(buffer, message);                     \
+    METHOD(message);                                                  \
+    break;                                                            \
   }
 void WorkerCommunicationManager::ProcessIncomingMessage(
-    const message::ControlHeader& message_header, struct evbuffer* buffer) {
+    struct evbuffer* buffer) {
+  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
   using message::ControlHeader;
   // If assigned worker_id.
   // Differentiante between control messages and command messages.
-  switch (message_header.get_category_group()) {
+  switch (header->category_group) {
     case MessageCategoryGroup::DATA_PLANE_CONTROL:
-      switch (message_header.get_category()) {
+      switch (header->category) {
         PROCESS_MESSAGE(ASSIGN_WORKER_ID, ProcessAssignWorkerIdMessage);
         PROCESS_MESSAGE(UPDATE_PARTITION_MAP_AND_WORKER,
                         ProcessUpdatePartitionMapAndWorkerMessage);
@@ -211,11 +213,17 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
   message::RegisterServicePort update_message;
   update_message.from_worker_id = controller_record.assigned_worker_id;
   update_message.route_service = route_service_;
-  struct evbuffer* buffer = message::ControlHeader::PackMessage(update_message);
+  struct evbuffer* buffer =
+      message::SerializeControlMessageWithHeader(update_message);
   AppendSendingQueue(buffer, false);
 
+  CHECK(!controller_record.is_ready);
   // The controller channel is ready.
   controller_record.is_ready = true;
+
+  // Initialize the data router.
+  data_router_.Initialize(controller_record.assigned_worker_id,
+                          event_main_thread_, data_receiver_, route_service_);
 
   // Nofity the command receiver.
   command_receiver_->AssignWorkerId(controller_record.assigned_worker_id);
@@ -276,11 +284,9 @@ void WorkerCommunicationManager::AppendSendingQueue(
  */
 void WorkerCommunicationManager::SendCommandToController(
     struct evbuffer* buffer) {
-  message::ControlHeader header;
-  CHECK(header.ExtractHeader(buffer));
-  CHECK(header.get_category_group() ==
+  CHECK(message::CheckIsIntegrateControlMessage(buffer));
+  CHECK(message::ExamineControlHeader(buffer)->category_group ==
         message::MessageCategoryGroup::CONTROLLER_COMMAND);
-  CHECK_EQ(header.kLength + header.get_length(), evbuffer_get_length(buffer));
   event_main_thread_->AddInjectedEvent(
       std::bind(&SelfType::AppendSendingQueue, this, buffer, true));
 }

@@ -42,49 +42,50 @@
 namespace canary {
 
 WorkerId PerApplicationPartitionMap::QueryWorkerId(
-    VariableId variable_id, PartitionId partition_id) const {
-  const auto variable_id_value = get_value(variable_id);
-  CHECK_GE(variable_id_value, 0);
+    VariableGroupId variable_group_id, PartitionId partition_id) const {
+  const auto variable_group_id_value = get_value(variable_group_id);
+  CHECK_GE(variable_group_id_value, 0);
   const auto partition_id_value = get_value(partition_id);
   CHECK_GE(partition_id_value, 0);
-  if (variable_id_value >= static_cast<int>(application_map_.size())) {
+  if (variable_group_id_value >= static_cast<int>(application_map_.size())) {
     return WorkerId::INVALID;
   }
-  const auto& per_variable_map = application_map_[variable_id_value];
+  const auto& per_variable_map = application_map_[variable_group_id_value];
   if (partition_id_value >= static_cast<int>(per_variable_map.size())) {
     return WorkerId::INVALID;
   }
   return per_variable_map[partition_id_value];
 }
 
-int PerApplicationPartitionMap::QueryVariablePartitioning(
-    VariableId variable_id) const {
-  const auto variable_id_value = get_value(variable_id);
-  CHECK_GE(variable_id_value, 0);
-  if (variable_id_value >= static_cast<int>(application_map_.size())) {
+int PerApplicationPartitionMap::QueryPartitioning(
+    VariableGroupId variable_group_id) const {
+  const auto variable_group_id_value = get_value(variable_group_id);
+  CHECK_GE(variable_group_id_value, 0);
+  if (variable_group_id_value >= static_cast<int>(application_map_.size())) {
     return -1;
   }
-  return static_cast<int>(application_map_.at(variable_id_value).size());
+  return static_cast<int>(application_map_.at(variable_group_id_value).size());
 }
 
-void PerApplicationPartitionMap::SetNumVariable(int num_variable) {
+void PerApplicationPartitionMap::SetNumVariableGroup(int num_variable) {
   application_map_.clear();
   application_map_.resize(num_variable);
 }
 
-void PerApplicationPartitionMap::SetVariablePartitioning(VariableId variable_id,
-                                                         int partitioning) {
-  application_map_.at(get_value(variable_id)).clear();
-  application_map_.at(get_value(variable_id))
+void PerApplicationPartitionMap::SetPartitioning(
+    VariableGroupId variable_group_id, int partitioning) {
+  application_map_.at(get_value(variable_group_id)).clear();
+  application_map_.at(get_value(variable_group_id))
       .resize(partitioning, WorkerId::INVALID);
 }
 
-void PerApplicationPartitionMap::SetWorkerId(VariableId variable_id,
+void PerApplicationPartitionMap::SetWorkerId(VariableGroupId variable_group_id,
                                              PartitionId partition_id,
                                              WorkerId worker_id) {
-  const auto variable_id_value = get_value(variable_id);
+  const auto variable_group_id_value = get_value(variable_group_id);
   const auto partition_id_value = get_value(partition_id);
-  application_map_.at(variable_id_value).at(partition_id_value) = worker_id;
+  application_map_.at(variable_group_id_value).at(partition_id_value) =
+      worker_id;
 }
 
 PerApplicationPartitionMap* PartitionMap::GetPerApplicationPartitionMap(
@@ -118,20 +119,20 @@ void PartitionMap::MergeUpdate(const PartitionMapUpdate& update) {
     auto& full_partition_id = pair.first;
     auto& per_application_partition_map =
         partition_map_.at(full_partition_id.application_id);
-    per_application_partition_map.SetWorkerId(full_partition_id.variable_id,
-                                              full_partition_id.partition_id,
-                                              pair.second);
+    per_application_partition_map.SetWorkerId(
+        full_partition_id.variable_group_id, full_partition_id.partition_id,
+        pair.second);
   }
 }
 
 WorkerId PartitionMap::QueryWorkerId(ApplicationId application_id,
-                                     VariableId variable_id,
+                                     VariableGroupId variable_group_id,
                                      PartitionId partition_id) const {
   auto iter = partition_map_.find(application_id);
   if (iter == partition_map_.end()) {
     return WorkerId::INVALID;
   } else {
-    return iter->second.QueryWorkerId(variable_id, partition_id);
+    return iter->second.QueryWorkerId(variable_group_id, partition_id);
   }
 }
 
@@ -141,7 +142,7 @@ WorkerId PartitionMap::QueryWorkerId(
   if (iter == partition_map_.end()) {
     return WorkerId::INVALID;
   } else {
-    return iter->second.QueryWorkerId(full_partition_id.variable_id,
+    return iter->second.QueryWorkerId(full_partition_id.variable_group_id,
                                       full_partition_id.partition_id);
   }
 }

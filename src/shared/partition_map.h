@@ -58,20 +58,20 @@ typedef std::list<std::pair<FullPartitionId, WorkerId>> PartitionMapUpdate;
 class PerApplicationPartitionMap {
  public:
   //! Queries the worker id of a partition. Returns INVALID if not available.
-  WorkerId QueryWorkerId(VariableId variable_id,
+  WorkerId QueryWorkerId(VariableGroupId variable_group_id,
                          PartitionId partition_id) const;
 
-  //! Queries the partitioning of a variable. Returns -1 if not available.
-  int QueryVariablePartitioning(VariableId variable_id) const;
+  //! Queries the partitioning of a variable group. Returns -1 if not available.
+  int QueryPartitioning(VariableGroupId variable_group_id) const;
 
-  //! Sets the number of variables.
-  void SetNumVariable(int num_variable);
+  //! Sets the number of variable groups.
+  void SetNumVariableGroup(int num_variable);
 
   //! Sets the partitioning of a variable.
-  void SetVariablePartitioning(VariableId variable_id, int partitioning);
+  void SetPartitioning(VariableGroupId variable_group_id, int partitioning);
 
   //! Sets the worker id of a partition.
-  void SetWorkerId(VariableId variable_id, PartitionId partition_id,
+  void SetWorkerId(VariableGroupId variable_group_id, PartitionId partition_id,
                    WorkerId worker_id);
 
   template <typename Archive>
@@ -104,7 +104,8 @@ class PartitionMap {
   void MergeUpdate(const PartitionMapUpdate& update);
 
   //! Queries worker id.
-  WorkerId QueryWorkerId(ApplicationId application_id, VariableId variable_id,
+  WorkerId QueryWorkerId(ApplicationId application_id,
+                         VariableGroupId variable_group_id,
                          PartitionId partition_id) const;
 
   //! Queries worker id.
