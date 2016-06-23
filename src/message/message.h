@@ -83,7 +83,8 @@ enum class MessageCategory : int16_t {
   ROUTE_DATA_UNICAST = 400,
   ROUTE_DATA_MULTICAST,
   DIRECT_DATA_MIGRATE = 500,
-  DIRECT_DATA_STORAGE
+  DIRECT_DATA_STORAGE,
+  DIRECT_DATA_HANDSHAKE
 };
 
 struct NetworkAddress {

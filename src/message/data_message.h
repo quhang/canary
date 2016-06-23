@@ -32,16 +32,31 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/message/message_include.h
+ * @file src/message/data_message.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Includes all message types.
+ * @brief Messages related to data.
  */
 
-#ifndef CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
-#define CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
+#ifndef CANARY_SRC_MESSAGE_DATA_MESSAGE_H_
+#define CANARY_SRC_MESSAGE_DATA_MESSAGE_H_
 
-#include "message/data_plane_control_message.h"
-#include "message/command_message.h"
-#include "message/data_message.h"
+#include "shared/internal.h"
 
-#endif  // CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
+#include "message/message.h"
+
+namespace canary {
+namespace message {
+
+struct DirectDataHandshake {
+  WorkerId from_worker_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+  }
+};
+REGISTER_MESSAGE(APPLICATION_DATA_DIRECT, DIRECT_DATA_HANDSHAKE,
+                 DirectDataHandshake);
+
+}  // namespace message
+}  // namespace canary
+#endif  // CANARY_SRC_MESSAGE_DATA_MESSAGE_H_

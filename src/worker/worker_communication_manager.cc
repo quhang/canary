@@ -45,8 +45,7 @@ void WorkerCommunicationManager::Initialize(
     network::EventMainThread* event_main_thread,
     WorkerReceiveCommandInterface* command_receiver,
     WorkerReceiveDataInterface* data_receiver,
-    const std::string& controller_host,
-    const std::string& controller_service,
+    const std::string& controller_host, const std::string& controller_service,
     const std::string& worker_service) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   command_receiver_ = CHECK_NOTNULL(command_receiver);
@@ -238,33 +237,33 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapAndWorkerMessage(
     message::UpdatePartitionMapAndWorker* message) {
-  data_router_->UpdatePartitionMapAndWorker(message);
+  data_router_.UpdatePartitionMapAndWorker(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapAddApplicationMessage(
     message::UpdatePartitionMapAddApplication* message) {
-  data_router_->UpdatePartitionMapAddApplication(message);
+  data_router_.UpdatePartitionMapAddApplication(message);
 }
 
 void WorkerCommunicationManager::
     ProcessUpdatePartitionMapDropApplicationMessage(
         message::UpdatePartitionMapDropApplication* message) {
-  data_router_->UpdatePartitionMapDropApplication(message);
+  data_router_.UpdatePartitionMapDropApplication(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdatePartitionMapIncrementalMessage(
     message::UpdatePartitionMapIncremental* message) {
-  data_router_->UpdatePartitionMapIncremental(message);
+  data_router_.UpdatePartitionMapIncremental(message);
 }
 
 void WorkerCommunicationManager::ProcessUpdateAddedWorkerMessage(
     message::UpdateAddedWorker* message) {
-  data_router_->UpdateAddedWorker(message);
+  data_router_.UpdateAddedWorker(message);
 }
 
 void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
     message::ShutDownWorker* message) {
-  data_router_->ShutDownWorker(message);
+  data_router_.ShutDownWorker(message);
 }
 
 /*

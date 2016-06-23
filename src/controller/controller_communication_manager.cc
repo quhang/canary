@@ -198,10 +198,10 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.version_id = internal_partition_map_version_;
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
-      NetworkAddress network_address;
+      message::NetworkAddress network_address;
       network_address.host = pair.second.host;
       network_address.service = pair.second.route_service;
-      update_message.worker_ports[pair.first] = network_address;
+      update_message.worker_addresses[pair.first] = network_address;
     }
     struct evbuffer* buffer =
         message::SerializeMessageWithControlHeader(update_message);

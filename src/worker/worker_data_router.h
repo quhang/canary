@@ -71,9 +71,8 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     int socket_fd = -1;
     //! Whether the peer is ready.
     bool is_ready = false;
-    //! Whether the router is waiting for the peer to send activation message,
-    // which includes its worker id.
-    bool to_be_activated = false;
+    //! Whether the channel is passive.
+    bool is_passive = false;
     //! Persistent read event.
     struct event* read_event = nullptr;
     //! Write event.
@@ -98,8 +97,13 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   static const int kBacklog = -1;
 
  public:
+  //! Constructor.
   WorkerDataRouter() {}
+
+  //! Destructor.
   virtual ~WorkerDataRouter() {}
+
+  //! Initializes the router.
   void Initialize(WorkerId worker_id,
                   network::EventMainThread* event_main_thread,
                   WorkerReceiveDataInterface* data_receiver,
@@ -123,9 +127,12 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     LOG(INFO) << "Worker data router is initialized.";
   }
 
+  //! Shuts down the router.
+  void Finalize() { LOG(FATAL) << "Not implemented."; }
+
  public:
   /*
-   * Peer channel related.
+   * Public dispatching calls.
    */
 
   //! Dispatches the accept event of the peer channel.
@@ -152,7 +159,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     peer_record->router->CallbackConnectEvent(peer_record);
   }
 
-  //! Dispatches the read event on the peer channel.
+  //! Dispatches the read event when the handshake message is received.
   // Sync call.
   static void DispatchPassiveConnectEvent(int socket_fd, short,  // NOLINT
                                           void* arg) {
@@ -181,6 +188,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   /*
    * Public sending data interface.
    */
+
   //! Routes data to a partition. The header is not added.
   // Async call.
   void SendDataToPartition(ApplicationId application_id,
@@ -208,9 +216,8 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     CHECK(message::CheckIsIntegrateDataMessage(buffer));
     CHECK(message::ExamineDataHeader(buffer)->category_group ==
           message::MessageCategoryGroup::APPLICATION_DATA_DIRECT);
-    event_main_thread_->AddInjectedEvent(
-        std::bind(&SelfType::SendDataToWorkerInternal, this,
-                  worker_id, buffer));
+    event_main_thread_->AddInjectedEvent(std::bind(
+        &SelfType::SendDataToWorkerInternal, this, worker_id, buffer));
   }
 
   //! Broadcasts data to all tasks in a stage.
@@ -219,35 +226,32 @@ class WorkerDataRouter : public WorkerSendDataInterface {
                                 VariableGroupId variable_group_id,
                                 struct evbuffer* buffer) override {
     event_main_thread_->AddInjectedEvent(
-        std::bind(&SelfType::BroadcastDataToPartition, this,
-                  application_id, variable_group_id, buffer));
+        std::bind(&SelfType::BroadcastDataToPartition, this, application_id,
+                  variable_group_id, buffer));
   }
 
  private:
   // Sync call.
   void SendDataToWorkerInternal(WorkerId worker_id, struct evbuffer* buffer) {
-    // TODO(quhang).
+    LOG(FATAL) << "Not implemented.";
   }
 
   // Sync call.
-  void BroadcastDataToPartitionInternal(
-      ApplicationId application_id,
-      VariableGroupId variable_group_id,
-      struct evbuffer* buffer) override {
-    // TODO(quhang).
+  void BroadcastDataToPartitionInternal(ApplicationId application_id,
+                                        VariableGroupId variable_group_id,
+                                        struct evbuffer* buffer) {
+    LOG(FATAL) << "Not implemented.";
   }
-
 
   //! Routes a unicast data message, with its header.
   // Sync call.
   void RouteUnicastData(struct evbuffer* buffer) {
     auto header = message::ExamineDataHeader(buffer);
     const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
-        header->application_id,
-        header->variable_group_id,
-        header->partition_id);
-    header->route_partition_map_version = internal_partition_map_version_;
-    AddPeerSendingQueue(dest_worker_id, buffer);
+        header->to_application_id, header->to_variable_group_id,
+        header->to_partition_id);
+    header->partition_map_version = internal_partition_map_version_;
+    AppendPeerSendingQueue(dest_worker_id, buffer);
   }
 
   //! Adds a data message to the peer sending queue.
@@ -256,7 +260,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     auto peer_record = GetPeerRecordIfReady(worker_id);
     if (peer_record != nullptr) {
       peer_record->send_queue.push_back(buffer);
-      CHECK_EQ(event_add(peer_record->write_event), 0);
+      CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
     } else {
       AddToPendingQueue(buffer);
     }
@@ -268,12 +272,11 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     auto header = message::ExamineDataHeader(buffer);
     CHECK(header->category == message::MessageCategory::ROUTE_DATA_UNICAST)
         << "Not implemented.";
-    pending_queue.push_back(buffer);
+    pending_queue_.push_back(buffer);
   }
 
-  void RefreshPending() {
-    ReexaminePendingQueue();
-  }
+  //! Trigger refreshing, i.e. reroutes apending messages.
+  void TriggerRefresh() { ReexaminePendingQueue(); }
 
   //! Resends messages in the pending queue again.
   // Sync call.
@@ -295,10 +298,10 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     if (iter == worker_id_to_status_.end()) {
       return nullptr;
     }
-    if (!iter->is_ready) {
+    if (!iter->second.is_ready) {
       return nullptr;
     }
-    return std::addressof(*iter);
+    return std::addressof(iter->second);
   }
 
  public:
@@ -330,13 +333,12 @@ class WorkerDataRouter : public WorkerSendDataInterface {
       event_main_thread_->AddDelayInjectedEvent(
           std::bind(&SelfType::CallbackInitiateEvent, this, peer_record));
     } else {
-      InitializeActivePeerRecord(peer_record);
+      ActivateActivePeerRecord(peer_record);
     }
   }
 
-  void InitializeActivePeerRecord(PeerRecord* peer_record) {
-  }
-
+  //! Receives a connection.
+  // Sync call.
   void CallbackAcceptEvent(struct evconnlistener* listener, int socket_fd,
                            struct sockaddr* address, int socklen) {
     CHECK_EQ(listener, listening_event_);
@@ -345,29 +347,51 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     VLOG(1) << host << ":" << service << " reaches the worker routing port.";
     // Handshake protocol:
     // slave -> master: worker_id.
-    auto peer_record = new PeerRecord();
-    InitializePassivePeerRecord(peer_record);
-  }
-
-  void InitializePassivePeerRecord(PeerRecord* peer_record) {
-    peer_record->worker_id = WorkerId::INVALID;
-    peer_record->socket_fd = socket_fd;
-    peer_record->is_ready = false;
-    peer_record->to_be_activated = true;
+    auto peer_record = InitializePassivePeerRecord(socket_fd, host, service);
     CHECK_EQ(event_base_once(event_base_, socket_fd, EV_READ,
-                             DispatchPassiveConnectEvent,
-                             peer_record, nullptr),
+                             DispatchPassiveConnectEvent, peer_record, nullptr),
              0);
-    peer_record->read_event = nullptr;
-    peer_record->write_event = nullptr;
-    peer_record->receive_buffer = evbuffer_new();
-    peer_record->router = this;
   }
 
+  //! Responds to the handshake message.
+  // Sync call.
   void CallbackPassiveConnectEvent(PeerRecord* peer_record) {
-    // Expect sending the worker id.
+    CHECK(peer_record->is_passive);
+    CHECK(!peer_record->is_ready);
+    struct evbuffer* receive_buffer = peer_record->receive_buffer;
+    const int socket_fd = peer_record->socket_fd;
+
+    // Expects handshake message.
+    int status = 0;
+    while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
+      if (struct evbuffer* whole_message =
+              message::SegmentDataMessage(receive_buffer)) {
+        auto header =
+            CHECK_NOTNULL(message::ExamineControlHeader(whole_message));
+        CHECK(header->category ==
+              message::MessageCategory::DIRECT_DATA_HANDSHAKE);
+        message::DirectDataHandshake message;
+        message::RemoveControlHeader(whole_message);
+        message::DeserializeMessage(whole_message, &message);
+        ActivatePassivePeerRecord(message.from_worker_id, peer_record);
+        return;
+      }
+    }
+    if (status == 0 || (status == -1 && !network::is_blocked())) {
+      evbuffer_free(peer_record->receive_buffer);
+      delete peer_record;
+      LOG(WARNING) << "Failed incoming connection!";
+    } else {
+      // Waits for more data.
+      CHECK_EQ(
+          event_base_once(event_base_, socket_fd, EV_READ,
+                          DispatchPassiveConnectEvent, peer_record, nullptr),
+          0);
+    }
   }
 
+  //! Receives data.
+  // Sync call.
   void CallbackReadEvent(PeerRecord* peer_record) {
     struct evbuffer* receive_buffer = peer_record->receive_buffer;
     const int socket_fd = peer_record->socket_fd;
@@ -376,10 +400,6 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     while ((status = evbuffer_read(receive_buffer, socket_fd, -1)) > 0) {
       while (struct evbuffer* whole_message =
                  message::SegmentDataMessage(receive_buffer)) {
-        // For debugging.
-        // auto header = message::ExamineHeader(whole_message);
-        // CHECK_EQ(header->sequence, peer_record->next_receiving_sequence_no);
-        // ++peer_record->next_receiving_sequence_no;
         ProcessIncomingMessage(whole_message);
       }
     }
@@ -388,6 +408,8 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     }
   }
 
+  //! Ready to write data.
+  // Sync call.
   void CallbackWriteEvent(PeerRecord* peer_record) {
     peer_record->send_buffer =
         network::send_as_much(peer_record->socket_fd, peer_record->send_buffer,
@@ -404,6 +426,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   }
 
   //! Deals with write event errors.
+  // Sync call.
   void CheckWriteChannel(PeerRecord* peer_record) {
     if (peer_record->send_buffer != nullptr) {
       // Channel is blocked or has error.
@@ -417,9 +440,12 @@ class WorkerDataRouter : public WorkerSendDataInterface {
 
   void ProcessIncomingMessage(struct evbuffer* buffer) {}
 
+ public:
+  /*
+   * Sync call interfaces invoked by WorkerCommunicationManager.
+   */
 
-  void CleanUpPeerRecord(PeerRecord* peer_record) {}
-
+  //! Sets up partition map and worker peers.
   void UpdatePartitionMapAndWorker(
       message::UpdatePartitionMapAndWorker* message) {
     internal_partition_map_version_ = message->version_id;
@@ -427,46 +453,39 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     delete message->partition_map;
     for (auto& pair : message->worker_addresses) {
       const WorkerId new_worker_id = pair.first;
-      if (new_worker_id < self_worker_id) {
-        InitializeConnectPeer(new_worker_id,
-                              pair.second.host,
-                              pair.second.service);
+      if (new_worker_id < self_worker_id_) {
+        auto peer_record = InitializeActivePeerRecord(
+            new_worker_id, pair.second.host, pair.second.service);
+        CallbackInitiateEvent(peer_record);
       }
     }
     TriggerRefresh();
     delete message;
   }
 
-  void InitializeConnectPeer(WorkerId worker_id,
-                             const std::string& worker_host,
-                             const std::string& worker_service) {
-    CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
-    auto& peer_record = worker_id_to_status[worker_id];
-    peer_record.worker_id = worker_id;
-    peer_record.host = worker_host;
-    peer_record.service = worker_service;
-    peer_record.router = this;
-    CallbackInitiateEvent(&peer_record);
-  }
-
+  //! Updates partition map.
   void UpdatePartitionMapAddApplication(
       message::UpdatePartitionMapAddApplication* message) {
     internal_partition_map_version_ = message->version_id;
     *internal_partition_map_.AddPerApplicationPartitionMap(
-        message->add_application_id)
-        = std::move(*message->per_application_partition_map);
+        message->add_application_id) =
+        std::move(*message->per_application_partition_map);
     delete message->per_application_partition_map;
 
     TriggerRefresh();
     delete message;
   }
+
+  //! Updates partition map.
   void UpdatePartitionMapDropApplication(
       message::UpdatePartitionMapDropApplication* message) {
     internal_partition_map_version_ = message->version_id;
     CHECK(internal_partition_map_.DeletePerApplicationPartitionMap(
-            message->drop_application_id));
+        message->drop_application_id));
     delete message;
   }
+
+  //! Updates partition map.
   void UpdatePartitionMapIncremental(
       message::UpdatePartitionMapIncremental* message) {
     internal_partition_map_version_ = message->version_id;
@@ -476,20 +495,142 @@ class WorkerDataRouter : public WorkerSendDataInterface {
     TriggerRefresh();
     delete message;
   }
+
+  //! Adds a worker.
   void UpdateAddedWorker(message::UpdateAddedWorker* message) {
-    if (message->added_worker_id < self_worker_id) {
-      InitializeConnectPeer(message->added_worker_id,
-                            message->network_address.host,
-                            message->network_address.route_service);
+    if (message->added_worker_id < self_worker_id_) {
+      auto peer_record = InitializeActivePeerRecord(
+          message->added_worker_id, message->network_address.host,
+          message->network_address.service);
+      CallbackInitiateEvent(peer_record);
     }
 
     TriggerRefresh();
     delete message;
   }
+
+  //! Shuts down the worker.
   void ShutDownWorker(message::ShutDownWorker* message) {
-    LOG(FATAL) << "Not implemented.";
+    delete message;
+    Finalize();
   }
 
+ public:
+  /*
+   * Lifetime of a peer record.
+   */
+
+  //! Initializes an active peer record, before connecting to that peer.
+  PeerRecord* InitializeActivePeerRecord(WorkerId worker_id,
+                                         const std::string& worker_host,
+                                         const std::string& worker_service) {
+    CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
+    auto& peer_record = worker_id_to_status_[worker_id];
+    peer_record.worker_id = worker_id;
+    peer_record.host = worker_host;
+    peer_record.route_service = worker_service;
+    peer_record.router = this;
+    peer_record.is_ready = false;
+    peer_record.is_passive = false;
+    return &peer_record;
+  }
+
+  //! Activates the peer record.
+  void ActivateActivePeerRecord(PeerRecord* peer_record) {
+    CHECK_NE(peer_record->socket_fd, -1);
+    peer_record->is_ready = true;
+    CHECK(!peer_record->is_passive);
+    peer_record->read_event = CHECK_NOTNULL(
+        event_new(event_base_, peer_record->socket_fd, EV_READ | EV_PERSIST,
+                  &DispatchReadEvent, peer_record));
+    CHECK_EQ(event_add(peer_record->read_event, nullptr), 0);
+    peer_record->write_event =
+        CHECK_NOTNULL(event_new(event_base_, peer_record->socket_fd, EV_WRITE,
+                                &DispatchWriteEvent, peer_record));
+    CHECK(peer_record->send_buffer == nullptr);
+    peer_record->receive_buffer = evbuffer_new();
+    // Writes handshake message
+    {
+      message::DirectDataHandshake message;
+      message.from_worker_id = peer_record->worker_id;
+      struct evbuffer* buffer = message::SerializeMessage(message);
+      const auto length = evbuffer_get_length(buffer);
+      auto header = message::AddDataHeader(buffer);
+      header->length = length;
+      header->FillInMessageType(message);
+      peer_record->send_queue.push_back(buffer);
+      CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
+    }
+    // Refreshes the pending messages to be routed.
+    TriggerRefresh();
+  }
+
+  //! Initializes a passive peer record, after a connection comes in.
+  PeerRecord* InitializePassivePeerRecord(int socket_fd,
+                                          const std::string& host,
+                                          const std::string& service) {
+    auto peer_record = new PeerRecord();
+    CHECK(peer_record->worker_id == WorkerId::INVALID);
+    peer_record->host = host;
+    peer_record->route_service = service;
+    peer_record->socket_fd = socket_fd;
+    peer_record->is_ready = false;
+    peer_record->is_passive = true;
+    peer_record->receive_buffer = evbuffer_new();
+    peer_record->router = this;
+    return peer_record;
+  }
+
+  //! Activates a peer record, after receiving its worker id.
+  void ActivatePassivePeerRecord(WorkerId from_worker_id,
+                                 PeerRecord* old_peer_record) {
+    CHECK(worker_id_to_status_.find(from_worker_id) ==
+          worker_id_to_status_.end());
+    auto& peer_record = worker_id_to_status_[from_worker_id];
+    peer_record = *old_peer_record;
+    delete old_peer_record;
+    peer_record.worker_id = from_worker_id;
+    CHECK(peer_record.is_passive);
+    peer_record.is_ready = true;
+    peer_record.read_event = CHECK_NOTNULL(
+        event_new(event_base_, peer_record.socket_fd, EV_READ | EV_PERSIST,
+                  &DispatchReadEvent, &peer_record));
+    CHECK_EQ(event_add(peer_record.read_event, nullptr), 0);
+    peer_record.write_event =
+        CHECK_NOTNULL(event_new(event_base_, peer_record.socket_fd, EV_WRITE,
+                                &DispatchWriteEvent, &peer_record));
+    CHECK(peer_record.send_buffer == nullptr);
+    CHECK_NOTNULL(peer_record.receive_buffer);
+    CHECK_EQ(peer_record.router, this);
+    // Refreshes the pending messages to be routed.
+    TriggerRefresh();
+  }
+
+  //! Cleans up a peer record.
+  void CleanUpPeerRecord(PeerRecord* peer_record) {
+    network::close_socket(peer_record->socket_fd);
+    if (peer_record->read_event) {
+      event_free(peer_record->read_event);
+    }
+    if (peer_record->write_event) {
+      event_free(peer_record->write_event);
+    }
+    if (peer_record->send_buffer) {
+      evbuffer_free(peer_record->send_buffer);
+    }
+    if (peer_record->receive_buffer) {
+      evbuffer_free(peer_record->receive_buffer);
+    }
+    for (auto buffer : peer_record->send_queue) {
+      if (buffer) {
+        evbuffer_free(buffer);
+      }
+    }
+    // TODO: Put sending messages into the pending queue.
+    const auto worker_id = peer_record->worker_id;
+    worker_id_to_status_.erase(worker_id);
+    // TODO: Notify the controller that the connection is down.
+  }
 
  private:
   WorkerId self_worker_id_ = WorkerId::INVALID;
