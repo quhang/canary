@@ -40,6 +40,8 @@
 #ifndef CANARY_SRC_MESSAGE_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_MESSAGE_H_
 
+#include <string>
+
 #include "shared/internal.h"
 
 namespace canary {
