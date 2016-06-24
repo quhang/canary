@@ -231,6 +231,8 @@ void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
   const WorkerId shutdown_worker_id = message->disconnected_worker_id;
   auto iter = worker_id_to_status_.find(shutdown_worker_id);
   if (iter != worker_id_to_status_.end()) {
+    // TODO.
+    LOG(FATAL) << "Not implemented.";
     CleanUpWorkerRecord(&iter->second);
   }
   delete message;
@@ -238,10 +240,6 @@ void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
 
 void ControllerCommunicationManager::CleanUpWorkerRecord(
     WorkerRecord* worker_record) {
-  if (worker_record->socket_fd >= 0) {
-    network::close_socket(worker_record->socket_fd);
-    worker_record->socket_fd = -1;
-  }
   if (worker_record->read_event) {
     event_free(worker_record->read_event);
     worker_record->read_event = nullptr;
@@ -249,6 +247,10 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
   if (worker_record->write_event) {
     event_free(worker_record->write_event);
     worker_record->write_event = nullptr;
+  }
+  if (worker_record->socket_fd >= 0) {
+    network::close_socket(worker_record->socket_fd);
+    worker_record->socket_fd = -1;
   }
   if (worker_record->send_buffer) {
     evbuffer_free(worker_record->send_buffer);

@@ -349,10 +349,6 @@ void WorkerDataRouter::ActivatePassivePeerRecord(WorkerId from_worker_id,
 
 //! Cleans up a peer record.
 void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
-  if (peer_record->socket_fd >= 0) {
-    network::close_socket(peer_record->socket_fd);
-    peer_record->socket_fd = -1;
-  }
   if (peer_record->read_event) {
     event_free(peer_record->read_event);
     peer_record->read_event = nullptr;
@@ -360,6 +356,12 @@ void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
   if (peer_record->write_event) {
     event_free(peer_record->write_event);
     peer_record->write_event = nullptr;
+  }
+  // Caution: socket closing must happen after event clearing, otherwise,
+  // libevent might try to poll on invalid socket fd.
+  if (peer_record->socket_fd >= 0) {
+    network::close_socket(peer_record->socket_fd);
+    peer_record->socket_fd = -1;
   }
   if (peer_record->send_buffer) {
     evbuffer_free(peer_record->send_buffer);
