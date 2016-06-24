@@ -131,7 +131,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
                   const std::string& route_service = FLAGS_worker_service);
 
   //! Shuts down the router.
-  void Finalize() { LOG(FATAL) << "Not implemented."; }
+  void Finalize();
 
  public:
   /*
@@ -338,6 +338,8 @@ class WorkerDataRouter : public WorkerSendDataInterface {
  private:
   //! Initialization flag.
   bool is_initialized_ = false;
+  //! Shutdown flag.
+  bool is_shutdown_ = false;
   //! Its own worker id.
   WorkerId self_worker_id_ = WorkerId::INVALID;
 

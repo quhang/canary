@@ -59,7 +59,7 @@ void ControllerCommunicationManager::Initialize(
   evconnlistener_set_error_cb(listening_event_, DispatchAcceptErrorEvent);
   // Sets the initialization flag.
   is_initialized_ = true;
-  LOG(INFO) << "Controller communication manager is initialized.";
+  VLOG(1) << "Controller communication manager is initialized.";
 }
 
 /*
@@ -105,9 +105,9 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   CHECK_EQ(listener, listening_event_);
   std::string host, service;
   network::translate_sockaddr_to_string(address, socklen, &host, &service);
-  VLOG(1) << host << ":" << service << " reaches the controller port.";
   const WorkerId worker_id = worker_id_allocator_++;
-  VLOG(1) << "Allocate worker id (" << get_value(worker_id) << ")";
+  VLOG(1) << host << ":" << service << " is given worker id "
+          << get_value(worker_id) << ".";
   InitializeWorkerRecord(worker_id, socket_fd, host, service);
   // Handshake protocol:
   // controller -> worker: AssignWorkerId.
@@ -198,10 +198,13 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.version_id = internal_partition_map_version_;
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
-      message::NetworkAddress network_address;
-      network_address.host = pair.second.host;
-      network_address.service = pair.second.route_service;
-      update_message.worker_addresses[pair.first] = network_address;
+      // Caution: avoids registering a worker twice.
+      if (worker_record->is_ready) {
+        message::NetworkAddress network_address;
+        network_address.host = pair.second.host;
+        network_address.service = pair.second.route_service;
+        update_message.worker_addresses[pair.first] = network_address;
+      }
     }
     struct evbuffer* buffer =
         message::SerializeMessageWithControlHeader(update_message);
@@ -249,6 +252,7 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
     }
   }
   const auto worker_id = worker_record->worker_id;
+  VLOG(1) << "Lose connection with worker: " << get_value(worker_id) << ".";
   const bool is_ready = worker_record->is_ready;
   worker_id_to_status_.erase(worker_id);
 

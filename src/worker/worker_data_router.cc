@@ -64,7 +64,25 @@ void WorkerDataRouter::Initialize(WorkerId worker_id,
   evconnlistener_set_error_cb(listening_event_, DispatchAcceptErrorEvent);
   // Sets the initialization flag.
   is_initialized_ = true;
-  LOG(INFO) << "Worker data router is initialized.";
+  VLOG(1) << "Worker data router is initialized. (id="
+          << get_value(self_worker_id_) << ")";
+}
+
+void WorkerDataRouter::Finalize() {
+  evconnlistener_free(listening_event_);
+  for (auto& pair : worker_id_to_status_) {
+    auto peer_record = &pair.second;
+    if (peer_record->socket_fd >= 0) {
+      network::close_socket(peer_record->socket_fd);
+    }
+    if (peer_record->read_event) {
+      event_free(peer_record->read_event);
+    }
+    if (peer_record->write_event) {
+      event_free(peer_record->write_event);
+    }
+  }
+  is_shutdown_ = true;
 }
 
 /*
@@ -80,8 +98,8 @@ void WorkerDataRouter::DispatchAcceptEvent(struct evconnlistener* listener,
 }
 
 void WorkerDataRouter::DispatchAcceptErrorEvent(struct evconnlistener*, void*) {
-  LOG(FATAL) << "Failure on the listener: "
-             << network::get_error_message(network::get_last_error_number());
+  LOG(WARNING) << "Failure on the listener: "
+               << network::get_error_message(network::get_last_error_number());
 }
 
 void WorkerDataRouter::DispatchConnectEvent(int socket_fd, short,  // NOLINT
@@ -125,7 +143,7 @@ void WorkerDataRouter::CallbackInitiateEvent(PeerRecord* peer_record) {
   CHECK_GE(peer_record->socket_fd, 0);
   // Triggered when the channel is ready to write.
   CHECK_EQ(event_base_once(event_base_, peer_record->socket_fd, EV_WRITE,
-                           DispatchConnectEvent, this, nullptr),
+                           DispatchConnectEvent, peer_record, nullptr),
            0);
 }
 
@@ -240,6 +258,8 @@ WorkerDataRouter::PeerRecord* WorkerDataRouter::InitializeActivePeerRecord(
     WorkerId worker_id, const std::string& worker_host,
     const std::string& worker_service) {
   CHECK(worker_id != self_worker_id_);
+  VLOG(3) << get_value(self_worker_id_) << " actively connects "
+          << get_value(worker_id);
   CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
   auto& peer_record = worker_id_to_status_[worker_id];
   peer_record.worker_id = worker_id;
@@ -302,6 +322,8 @@ void WorkerDataRouter::ActivatePassivePeerRecord(WorkerId from_worker_id,
   CHECK(from_worker_id != self_worker_id_);
   CHECK(worker_id_to_status_.find(from_worker_id) ==
         worker_id_to_status_.end());
+  VLOG(3) << get_value(self_worker_id_) << " gets connected by "
+          << get_value(from_worker_id);
   auto& peer_record = worker_id_to_status_[from_worker_id];
   peer_record = *old_peer_record;
   delete old_peer_record;
@@ -324,7 +346,9 @@ void WorkerDataRouter::ActivatePassivePeerRecord(WorkerId from_worker_id,
 
 //! Cleans up a peer record.
 void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
-  network::close_socket(peer_record->socket_fd);
+  if (peer_record->socket_fd >= 0) {
+    network::close_socket(peer_record->socket_fd);
+  }
   if (peer_record->read_event) {
     event_free(peer_record->read_event);
   }

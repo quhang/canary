@@ -77,6 +77,8 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
     int socket_fd = -1;
     //! Whether the channel is ready.
     bool is_ready = false;
+    //! Whether the channel is being shutdown.
+    bool is_shutdown = false;
     //! Persistent read event.
     struct event* read_event = nullptr;
     //! Write event.

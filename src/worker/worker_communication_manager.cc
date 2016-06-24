@@ -62,6 +62,7 @@ void WorkerCommunicationManager::Initialize(
       std::bind(&SelfType::CallbackInitiateEvent, this));
   // Sets the initialization flag.
   is_initialized_ = true;
+  VLOG(1) << "Worker communication manager is initialized.";
 }
 
 /*
@@ -136,6 +137,9 @@ void WorkerCommunicationManager::CallbackReadEvent() {
     while (struct evbuffer* whole_message =
                message::SegmentControlMessage(receive_buffer)) {
       ProcessIncomingMessage(whole_message);
+      if (controller_record.is_shutdown) {
+        return;
+      }
     }
   }
   if (status == 0 || (status == -1 && !network::is_blocked())) {
@@ -211,9 +215,6 @@ void WorkerCommunicationManager::ProcessAssignWorkerIdMessage(
     message::AssignWorkerId* message) {
   controller_record.assigned_worker_id = message->assigned_worker_id;
 
-  LOG(INFO) << "Assigned worker id="
-            << get_value(controller_record.assigned_worker_id);
-
   message::RegisterServicePort update_message;
   update_message.from_worker_id = controller_record.assigned_worker_id;
   update_message.route_service = route_service_;
@@ -263,7 +264,17 @@ void WorkerCommunicationManager::ProcessUpdateAddedWorkerMessage(
 
 void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
     message::ShutDownWorker* message) {
+  VLOG(1) << "Worker is asked to shut down. (id="
+          << get_value(controller_record.assigned_worker_id) << ")";
   data_router_.ShutDownWorker(message);
+  if (controller_record.read_event) {
+    event_free(controller_record.read_event);
+  }
+  if (controller_record.write_event) {
+    event_free(controller_record.write_event);
+  }
+  network::close_socket(controller_record.socket_fd);
+  controller_record.is_shutdown = true;
 }
 
 /*

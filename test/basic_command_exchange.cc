@@ -1,4 +1,9 @@
+/**
+ * Tests a controll sending FLAGS_num_command test commands to each of the
+ * worker.
+ */
 #include <cstdlib>
+#include <list>
 #include <thread>
 #include "shared/internal.h"
 #include "shared/initialize.h"
@@ -6,39 +11,50 @@
 #include "controller/controller_communication_manager.h"
 #include "worker/worker_communication_manager.h"
 
-DEFINE_int32(num_worker, 1, "Number of workers.");
+DEFINE_int32(num_worker, 5, "Number of workers.");
+DEFINE_int32(num_command, 10, "Number of commands.");
 
 using namespace canary;  // NOLINT
 
-class ControllerTestReceiver : public ControllerReceiveCommandInterface {
+class TestControllerReceiver : public ControllerReceiveCommandInterface {
  public:
   void ReceiveCommand(struct evbuffer* buffer) override {
-    {
-      auto header = message::StripControlHeader(buffer);
-      CHECK(header->category ==
-            message::MessageCategory::TEST_CONTROLLER_COMMAND);
-      delete header;
+    std::string test_string;
+    WorkerId from_worker_id;
+    ++total_commands_;
+    CHECK_LE(total_commands_, FLAGS_num_worker * FLAGS_num_command);
+    AnalyzeMessage(buffer, &test_string, &from_worker_id);
+    CHECK_EQ(test_string, std::to_string(ongoing_sequence_.at(from_worker_id)))
+        << "Wrong message from worker " << get_value(from_worker_id);
+    ++ongoing_sequence_.at(from_worker_id);
+    if (sent_commands_.at(from_worker_id) == FLAGS_num_command) {
+      LOG(INFO) << "Down W" << get_value(from_worker_id);
+      manager_->ShutDownWorker(from_worker_id);
+    } else {
+      ++sent_commands_.at(from_worker_id);
+      SendMessage(from_worker_id);
+      LOG(INFO) << "C to W" << get_value(from_worker_id)
+          << " : " << ongoing_sequence_[from_worker_id];
     }
-    message::TestControllerCommand in_command;
-    message::DeserializeMessage(buffer, &in_command);
-    const WorkerId from_worker_id = in_command.from_worker_id;
-    CHECK_EQ(in_command.test_string,
-             std::to_string(initial_command_.at(from_worker_id)))
-        << get_value(from_worker_id);
-    ++initial_command_.at(from_worker_id);
-    TestSend(from_worker_id);
-    LOG(INFO) << "Send to:" << get_value(from_worker_id) << " value= " <<
-        initial_command_[from_worker_id];
   }
+
   void NotifyWorkerIsDown(WorkerId worker_id) override {
-    LOG(FATAL);
+    ++done_workers_;
+    if (done_workers_ == FLAGS_num_worker) {
+      CHECK_EQ(FLAGS_num_worker * FLAGS_num_command, total_commands_);
+      LOG(INFO) << "Done";
+      exit(0);
+    }
   }
+
   void NotifyWorkerIsUp(WorkerId worker_id) override {
-    CHECK(initial_command_.find(worker_id) == initial_command_.end());
-    initial_command_[worker_id] = std::rand();
-    TestSend(worker_id);
-    LOG(INFO) << "Controller starts sending to: " << get_value(worker_id)
-        << " value= " << initial_command_[worker_id];
+    CHECK(ongoing_sequence_.find(worker_id) == ongoing_sequence_.end());
+    ongoing_sequence_[worker_id] = std::rand();
+    sent_commands_[worker_id] = 1;
+    SendMessage(worker_id);
+    LOG(INFO) << "Up W" << get_value(worker_id);
+    LOG(INFO) << "C to W" << get_value(worker_id)
+        << " : " << ongoing_sequence_[worker_id];
   }
 
   void set_manager(ControllerCommunicationManager* manager) {
@@ -46,50 +62,67 @@ class ControllerTestReceiver : public ControllerReceiveCommandInterface {
   }
 
  private:
-  void TestSend(WorkerId worker_id) {
+  void AnalyzeMessage(struct evbuffer* buffer,
+                      std::string* result_string,
+                      WorkerId* result_worker_id) {
+    auto header = message::StripControlHeader(buffer);
+    CHECK(header->category ==
+          message::MessageCategory::TEST_CONTROLLER_COMMAND);
+    delete header;
+    message::TestControllerCommand command;
+    message::DeserializeMessage(buffer, &command);
+    *result_string = command.test_string;
+    *result_worker_id = command.from_worker_id;
+  }
+  void SendMessage(WorkerId worker_id) {
     message::TestWorkerCommand command;
-    command.test_string = std::to_string(initial_command_[worker_id]);
+    command.test_string = std::to_string(ongoing_sequence_[worker_id]);
     auto buffer = message::SerializeMessageWithControlHeader(command);
     manager_->SendCommandToWorker(worker_id, buffer);
   }
   ControllerCommunicationManager* manager_ = nullptr;
-  std::map<WorkerId, int> initial_command_;
+  std::map<WorkerId, int> ongoing_sequence_;
+  std::map<WorkerId, int> sent_commands_;
+  int total_commands_ = 0;
+  int done_workers_ = 0;
 };
 
-class WorkerTestReceiver : public WorkerReceiveCommandInterface {
+class TestWorkerReceiver : public WorkerReceiveCommandInterface {
  public:
   void set_manager(WorkerCommunicationManager* manager) {
     manager_ = manager;
   }
   void ReceiveCommandFromController(struct evbuffer* buffer) override {
-    {
-      auto header = message::StripControlHeader(buffer);
-      CHECK(header->category ==
-            message::MessageCategory::TEST_WORKER_COMMAND);
-      delete header;
-    }
-    message::TestWorkerCommand in_command;
-    message::DeserializeMessage(buffer, &in_command);
+    std::string test_string;
+    AnalyzeMessage(buffer, &test_string);
 
     message::TestControllerCommand out_command;
-    out_command.test_string = in_command.test_string;
+    out_command.test_string = test_string;
     out_command.from_worker_id = worker_id_;
-    LOG(INFO) << "Worker " << get_value(worker_id_) << " send "
-        << out_command.test_string;
+    LOG(INFO) << "W" << get_value(worker_id_) << " to C: " << test_string;
 
     auto send_buffer = message::SerializeMessageWithControlHeader(out_command);
     manager_->SendCommandToController(send_buffer);
   }
 
   void AssignWorkerId(WorkerId worker_id) {
-    LOG(INFO) << "Worker get id:" << get_value(worker_id);
     worker_id_ = worker_id;
   }
 
  private:
+  void AnalyzeMessage(struct evbuffer* buffer,
+                      std::string* result_string) {
+    auto header = message::StripControlHeader(buffer);
+    CHECK(header->category ==
+          message::MessageCategory::TEST_WORKER_COMMAND);
+    delete header;
+    message::TestWorkerCommand command;
+    message::DeserializeMessage(buffer, &command);
+    *result_string = command.test_string;
+  }
+
   WorkerCommunicationManager* manager_ = nullptr;
   WorkerId worker_id_ = WorkerId::INVALID;
-  int total_commands = 0;
 };
 
 class TestDataReceiver : public WorkerReceiveDataInterface {
@@ -112,16 +145,17 @@ int main(int argc, char* argv[]) {
   std::thread controller_thread([]{
     network::EventMainThread event_main_thread;
     ControllerCommunicationManager manager;
-    ControllerTestReceiver command_receiver;
+    TestControllerReceiver command_receiver;
     command_receiver.set_manager(&manager);
     manager.Initialize(&event_main_thread, &command_receiver);
     event_main_thread.Run();
   });
 
+  std::list<std::thread> thread_vector;
   for (int i = 0; i < FLAGS_num_worker; ++i) {
-    auto worker_thread = new std::thread([i]{
+    thread_vector.emplace_back([i]{
         WorkerCommunicationManager manager;
-        WorkerTestReceiver command_receiver;
+        TestWorkerReceiver command_receiver;
         TestDataReceiver data_receiver;
         command_receiver.set_manager(&manager);
         network::EventMainThread main_thread;
@@ -130,9 +164,12 @@ int main(int argc, char* argv[]) {
                            FLAGS_controller_service,
                            std::to_string(std::stoi(FLAGS_worker_service) + i));
         main_thread.Run();
+        LOG(INFO) << "Exit worker thread " << i;
     });
   }
-
+  for (auto& thread_handle : thread_vector) {
+    thread_handle.join();
+  }
   controller_thread.join();
 
   return 0;
