@@ -62,6 +62,11 @@ void ControllerCommunicationManager::Initialize(
   VLOG(1) << "Controller communication manager is initialized.";
 }
 
+void ControllerCommunicationManager::Finalize() {
+  CHECK(is_initialized_);
+  CHECK_EQ(event_base_loopbreak(event_base_), 0);
+}
+
 /*
  * Public static methods used to dispatch event callbacks.
  */
@@ -233,24 +238,32 @@ void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
 
 void ControllerCommunicationManager::CleanUpWorkerRecord(
     WorkerRecord* worker_record) {
-  network::close_socket(worker_record->socket_fd);
+  if (worker_record->socket_fd >= 0) {
+    network::close_socket(worker_record->socket_fd);
+    worker_record->socket_fd = -1;
+  }
   if (worker_record->read_event) {
     event_free(worker_record->read_event);
+    worker_record->read_event = nullptr;
   }
   if (worker_record->write_event) {
     event_free(worker_record->write_event);
+    worker_record->write_event = nullptr;
   }
   if (worker_record->send_buffer) {
     evbuffer_free(worker_record->send_buffer);
+    worker_record->send_buffer = nullptr;
   }
   if (worker_record->receive_buffer) {
     evbuffer_free(worker_record->receive_buffer);
+    worker_record->receive_buffer = nullptr;
   }
   for (auto buffer : worker_record->send_queue) {
     if (buffer) {
       evbuffer_free(buffer);
     }
   }
+  worker_record->send_queue.clear();
   const auto worker_id = worker_record->worker_id;
   VLOG(1) << "Lose connection with worker: " << get_value(worker_id) << ".";
   const bool is_ready = worker_record->is_ready;

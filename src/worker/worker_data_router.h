@@ -70,7 +70,7 @@ namespace canary {
  * In case connected peer fails, the router will report to the communication
  * manager with a NotifyDisconnectWorker message.
  *
- * TODO(quhang): broadcast, sequence number, failure, handling.
+ * TODO(quhang): broadcast, sequence number.
  */
 class WorkerDataRouter : public WorkerSendDataInterface {
  private:

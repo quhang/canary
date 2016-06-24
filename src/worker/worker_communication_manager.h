@@ -107,6 +107,9 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
       const std::string& controller_service = FLAGS_controller_service,
       const std::string& worker_service = FLAGS_worker_service);
 
+  //! Shuts dowon the communication manager.
+  void Finalize();
+
  public:
   /*
    * Public static methods used to dispatch event callbacks.

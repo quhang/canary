@@ -65,6 +65,20 @@ void WorkerCommunicationManager::Initialize(
   VLOG(1) << "Worker communication manager is initialized.";
 }
 
+void WorkerCommunicationManager::Finalize() {
+  if (controller_record.read_event) {
+    event_free(controller_record.read_event);
+  }
+  if (controller_record.write_event) {
+    event_free(controller_record.write_event);
+  }
+  if (controller_record.socket_fd >= -1) {
+    network::close_socket(controller_record.socket_fd);
+  }
+  controller_record.is_shutdown = true;
+  CHECK_EQ(event_base_loopbreak(event_base_), 0);
+}
+
 /*
  * Public static methods used to dispatch event callbacks.
  * Controller channel related.
@@ -137,6 +151,7 @@ void WorkerCommunicationManager::CallbackReadEvent() {
     while (struct evbuffer* whole_message =
                message::SegmentControlMessage(receive_buffer)) {
       ProcessIncomingMessage(whole_message);
+      // If the control channel is shut down.
       if (controller_record.is_shutdown) {
         return;
       }
@@ -267,14 +282,7 @@ void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
   VLOG(1) << "Worker is asked to shut down. (id="
           << get_value(controller_record.assigned_worker_id) << ")";
   data_router_.ShutDownWorker(message);
-  if (controller_record.read_event) {
-    event_free(controller_record.read_event);
-  }
-  if (controller_record.write_event) {
-    event_free(controller_record.write_event);
-  }
-  network::close_socket(controller_record.socket_fd);
-  controller_record.is_shutdown = true;
+  Finalize();
 }
 
 /*

@@ -80,7 +80,7 @@ class ControllerSendCommandInterface {
   // structure is transferred.
   virtual void UpdatePartitionMap(PartitionMapUpdate* partition_map_update) = 0;
 
-  //! Shuts down a worker. TODO(quhang): sematic not clear.
+  //! Shuts down a worker, which is notified up.
   virtual void ShutDownWorker(WorkerId worker_id) = 0;
 };
 
@@ -154,6 +154,9 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
       network::EventMainThread* event_main_thread,
       ControllerReceiveCommandInterface* command_receiver,
       const std::string& controller_service = FLAGS_controller_service);
+
+  //! Shuts down the listener.
+  void Finalize();
 
  public:
   /*

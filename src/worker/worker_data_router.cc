@@ -72,14 +72,17 @@ void WorkerDataRouter::Finalize() {
   evconnlistener_free(listening_event_);
   for (auto& pair : worker_id_to_status_) {
     auto peer_record = &pair.second;
-    if (peer_record->socket_fd >= 0) {
-      network::close_socket(peer_record->socket_fd);
-    }
     if (peer_record->read_event) {
       event_free(peer_record->read_event);
+      peer_record->read_event = nullptr;
     }
     if (peer_record->write_event) {
       event_free(peer_record->write_event);
+      peer_record->write_event = nullptr;
+    }
+    if (peer_record->socket_fd >= 0) {
+      network::close_socket(peer_record->socket_fd);
+      peer_record->socket_fd = -1;
     }
   }
   is_shutdown_ = true;
@@ -348,24 +351,30 @@ void WorkerDataRouter::ActivatePassivePeerRecord(WorkerId from_worker_id,
 void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
   if (peer_record->socket_fd >= 0) {
     network::close_socket(peer_record->socket_fd);
+    peer_record->socket_fd = -1;
   }
   if (peer_record->read_event) {
     event_free(peer_record->read_event);
+    peer_record->read_event = nullptr;
   }
   if (peer_record->write_event) {
     event_free(peer_record->write_event);
+    peer_record->write_event = nullptr;
   }
   if (peer_record->send_buffer) {
     evbuffer_free(peer_record->send_buffer);
+    peer_record->send_buffer = nullptr;
   }
   if (peer_record->receive_buffer) {
     evbuffer_free(peer_record->receive_buffer);
+    peer_record->receive_buffer = nullptr;
   }
   for (auto buffer : peer_record->send_queue) {
     // Put sending messages into the pending queue.
     // TODO(quhang): resend un-acknowledged message as well.
     route_pending_queue_.push_back(buffer);
   }
+  peer_record->send_queue.clear();
   const auto worker_id = peer_record->worker_id;
   worker_id_to_status_.erase(worker_id);
   // Triggers resending.

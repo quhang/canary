@@ -2,6 +2,7 @@
  * Tests a controll sending FLAGS_num_command test commands to each of the
  * worker.
  */
+#include <gtest/gtest.h>
 #include <cstdlib>
 #include <list>
 #include <thread>
@@ -11,8 +12,8 @@
 #include "controller/controller_communication_manager.h"
 #include "worker/worker_communication_manager.h"
 
-DEFINE_int32(num_worker, 5, "Number of workers.");
-DEFINE_int32(num_command, 10, "Number of commands.");
+DEFINE_int32(num_worker, 10, "Number of workers.");
+DEFINE_int32(num_command, 100, "Number of commands.");
 
 using namespace canary;  // NOLINT
 
@@ -26,6 +27,7 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
     AnalyzeMessage(buffer, &test_string, &from_worker_id);
     CHECK_EQ(test_string, std::to_string(ongoing_sequence_.at(from_worker_id)))
         << "Wrong message from worker " << get_value(from_worker_id);
+
     ++ongoing_sequence_.at(from_worker_id);
     if (sent_commands_.at(from_worker_id) == FLAGS_num_command) {
       LOG(INFO) << "Down W" << get_value(from_worker_id);
@@ -42,8 +44,8 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
     ++done_workers_;
     if (done_workers_ == FLAGS_num_worker) {
       CHECK_EQ(FLAGS_num_worker * FLAGS_num_command, total_commands_);
-      LOG(INFO) << "Done";
-      exit(0);
+      manager_->Finalize();
+      success_ = true;
     }
   }
 
@@ -59,6 +61,10 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
 
   void set_manager(ControllerCommunicationManager* manager) {
     manager_ = manager;
+  }
+
+  bool get_success() {
+    return success_;
   }
 
  private:
@@ -85,6 +91,7 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
   std::map<WorkerId, int> sent_commands_;
   int total_commands_ = 0;
   int done_workers_ = 0;
+  bool success_ = false;
 };
 
 class TestWorkerReceiver : public WorkerReceiveCommandInterface {
@@ -139,31 +146,34 @@ class TestDataReceiver : public WorkerReceiveDataInterface {
   void ReceiveDirectData(struct evbuffer* buffer) override {};
 };
 
-int main(int argc, char* argv[]) {
-  InitializeCanaryWorker(&argc, &argv);
-
+TEST(basic, basic_command_exchange) {
+  // Pointers are used to avoid deallocation.
   std::thread controller_thread([]{
-    network::EventMainThread event_main_thread;
-    ControllerCommunicationManager manager;
-    TestControllerReceiver command_receiver;
-    command_receiver.set_manager(&manager);
-    manager.Initialize(&event_main_thread, &command_receiver);
-    event_main_thread.Run();
+    auto event_main_thread = new network::EventMainThread();
+    auto manager = new ControllerCommunicationManager();
+    auto command_receiver = new TestControllerReceiver();
+    command_receiver->set_manager(manager);
+    manager->Initialize(event_main_thread, command_receiver);
+    event_main_thread->Run();
+    LOG(INFO) << "Exits controller thread.";
+    EXPECT_TRUE(command_receiver->get_success());
   });
 
   std::list<std::thread> thread_vector;
   for (int i = 0; i < FLAGS_num_worker; ++i) {
     thread_vector.emplace_back([i]{
-        WorkerCommunicationManager manager;
-        TestWorkerReceiver command_receiver;
-        TestDataReceiver data_receiver;
-        command_receiver.set_manager(&manager);
-        network::EventMainThread main_thread;
-        manager.Initialize(&main_thread, &command_receiver, &data_receiver,
-                           FLAGS_controller_host,
-                           FLAGS_controller_service,
-                           std::to_string(std::stoi(FLAGS_worker_service) + i));
-        main_thread.Run();
+        auto event_main_thread = new network::EventMainThread();
+        auto manager = new WorkerCommunicationManager();
+        auto command_receiver = new TestWorkerReceiver();
+        auto data_receiver = new TestDataReceiver();
+        command_receiver->set_manager(manager);
+        manager->Initialize(event_main_thread,
+                            command_receiver, data_receiver,
+                            FLAGS_controller_host,
+                            FLAGS_controller_service,
+                            std::to_string(
+                                std::stoi(FLAGS_worker_service) + i));
+        event_main_thread->Run();
         LOG(INFO) << "Exit worker thread " << i;
     });
   }
@@ -171,6 +181,10 @@ int main(int argc, char* argv[]) {
     thread_handle.join();
   }
   controller_thread.join();
+}
 
-  return 0;
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  ::canary::InitializeCanaryWorker(&argc, &argv);
+  return RUN_ALL_TESTS();
 }
