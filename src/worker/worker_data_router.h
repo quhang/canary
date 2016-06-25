@@ -75,6 +75,7 @@ namespace canary {
 class WorkerDataRouter : public WorkerSendDataInterface {
  private:
   typedef WorkerDataRouter SelfType;
+  typedef std::vector<PartitionId> PartitionIdVector;
 
   /**
    * The data structure associated with a peer worker.
@@ -281,19 +282,24 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Sync call.
   void SendUnicastData(struct evbuffer* buffer);
 
-  //! Adds a unicast/multicast message to the sending queue.
-  // Sync call.
-  void AppendSendingQueue(WorkerId worker_id, struct evbuffer* buffer);
-
   //! Sends a multicast message.
+  // Sync call
   void AddHeaderAndSendMulticastData(ApplicationId application_id,
                                      VariableGroupId variable_group_id,
                                      struct evbuffer* buffer);
 
+  //! Fills in the receiver of a multicast.
+  // Sync call
+  void FillInMulticastReceiver(
+      ApplicationId application_id, VariableGroupId variable_group_id,
+      std::map<WorkerId, PartitionIdVector>* receiver_map);
+
   //! Sends a direct message. The header is included.
+  // Sync call
   void SendDirectData(WorkerId worker_id, struct evbuffer* buffer);
 
   //! Adds a direct message to the low priority sending queue.
+  // Sync call
   void AppendLowPrioritySendingQueue(WorkerId worker_id,
                                      struct evbuffer* buffer);
 
@@ -326,6 +332,12 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   void AddUnicastHeader(ApplicationId application_id,
                         VariableGroupId variable_group_id,
                         PartitionId partition_id, struct evbuffer* buffer);
+
+  //! Adds multicast header.
+  // Sync call.
+  void AddMulticastHeader(ApplicationId application_id,
+                          VariableGroupId variable_group_id,
+                          struct evbuffer* buffer);
 
   //! Returns the peer record if it is ready.
   // Sync call.
