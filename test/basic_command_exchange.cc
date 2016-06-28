@@ -140,6 +140,7 @@ class TestDataReceiver : public WorkerReceiveDataInterface {
   bool ReceiveRoutedData(ApplicationId application_id,
                          VariableGroupId variable_group_id,
                          PartitionId partition_id,
+                         StageId stage_id,
                          struct evbuffer* buffer) override {};
   //! Called when receiving data from a worker, which is sent directly. The
   // header is stripped.

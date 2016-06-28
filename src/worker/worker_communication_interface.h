@@ -52,7 +52,7 @@ class WorkerSendDataInterface {
   //! Routes data to a partition. The header is not added.
   virtual void SendDataToPartition(ApplicationId application_id,
                                    VariableGroupId variable_group_id,
-                                   PartitionId partition_id,
+                                   PartitionId partition_id, StageId stage_id,
                                    struct evbuffer* buffer) = 0;
   //! Sends data to a worker. Used for data partition migration, or restoring
   // data partitions from storage. The header is added.
@@ -61,6 +61,7 @@ class WorkerSendDataInterface {
   //! Broadcasts data to all tasks in a stage.
   virtual void BroadcastDataToPartition(ApplicationId application_id,
                                         VariableGroupId variable_group_id,
+                                        StageId stage_id,
                                         struct evbuffer* buffer) = 0;
 };
 
@@ -75,7 +76,7 @@ class WorkerReceiveDataInterface {
   // stripped.
   virtual bool ReceiveRoutedData(ApplicationId application_id,
                                  VariableGroupId variable_group_id,
-                                 PartitionId partition_id,
+                                 PartitionId partition_id, StageId stage_id,
                                  struct evbuffer* buffer) = 0;
   //! Called when receiving data from a worker, which is sent directly. The
   // header is stripped.

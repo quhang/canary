@@ -79,8 +79,21 @@ enum class MessageCategory : int16_t {
   SHUT_DOWN_WORKER,
   // Worker commands (from the controller).
   TEST_WORKER_COMMAND = 200,
+  WORKER_LOAD_APPLICATION,
+  WORKER_UNLOAD_APPLICATION,
+  WORKER_LOAD_PARTITIONS,
+  WORKER_UNLOAD_PARTITIONS,
+  WORKER_MIGRATE_IN_PARTITIONS,
+  WORKER_MIGRATE_OUT_PARTITIONS,
+  WORKER_REPORT_STATUS_OF_PARTITIONS,
+  WORKER_REPORT_STATUS_OF_WORKER,
+  WORKER_CONTROL_PARTITIONS,
   // Controller commands (from a worker).
   TEST_CONTROLLER_COMMAND = 300,
+  CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
+  CONTROLLER_RESPOND_MIGRATION_IN_DONE,
+  CONTROLLER_RESPOND_STATUS_OF_PARTITION,
+  CONTROLLER_RESPOND_STATUS_OF_WORKER,
   // Application data.
   ROUTE_DATA_UNICAST = 400,
   ROUTE_DATA_MULTICAST,
@@ -206,6 +219,7 @@ struct DataHeader {
   ApplicationId to_application_id;
   VariableGroupId to_variable_group_id;
   PartitionId to_partition_id;
+  StageId to_stage_id;
 
   template <typename MessageType>
   void FillInMessageType() {

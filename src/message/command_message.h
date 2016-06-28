@@ -40,7 +40,9 @@
 #ifndef CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 
+#include <list>
 #include <string>
+#include <utility>
 
 #include "shared/internal.h"
 
@@ -68,6 +70,185 @@ struct TestControllerCommand {
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, TEST_CONTROLLER_COMMAND,
                  TestControllerCommand);
+
+/*
+ * Controller to worker commands.
+ */
+
+//! Loads an application.
+struct WorkerLoadApplication {
+  ApplicationId application_id;
+  std::string binary_location;
+  std::string application_parameter;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, binary_location, application_parameter);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_APPLICATION,
+                 WorkerLoadApplication);
+
+//! Unloads an application.
+struct WorkerUnloadApplication {
+  ApplicationId application_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_APPLICATION,
+                 WorkerUnloadApplication);
+
+//! Loads one or many partitions.
+struct WorkerLoadPartitions {
+  ApplicationId application_id;
+  StageId next_barrier_stage;
+  std::list<std::pair<VariableGroupId, PartitionId>> load_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, next_barrier_stage);
+    archive(load_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_PARTITIONS, WorkerLoadPartitions);
+
+//! Unloads one or many partitions.
+struct WorkerUnloadPartitions {
+  ApplicationId application_id;
+  std::list<std::pair<VariableGroupId, PartitionId>> unload_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, unload_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_PARTITIONS,
+                 WorkerUnloadPartitions);
+
+//! Gets prepared of migrated in partitions.
+struct WorkerMigrateInPartitions {
+  ApplicationId application_id;
+  std::list<std::pair<VariableGroupId, PartitionId>> migrate_in_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, migrate_in_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_MIGRATE_IN_PARTITIONS,
+                 WorkerMigrateInPartitions);
+
+//! Starts migrating out partitions.
+struct WorkerMigrateOutPartitions {
+  struct PartitionMigrateRecord {
+    VariableGroupId variable_group_id;
+    PartitionId partition_id;
+    WorkerId to_worker_id;
+  };
+  ApplicationId application_id;
+  std::list<PartitionMigrateRecord> migrate_out_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, migrate_out_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_MIGRATE_OUT_PARTITIONS,
+                 WorkerMigrateOutPartitions);
+
+//! Asks to report running status of partitions.
+struct WorkerReportStatusOfPartitions {
+  ApplicationId application_id;
+  std::list<std::pair<VariableGroupId, PartitionId>> report_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, report_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
+                 WorkerReportStatusOfPartitions);
+
+//! Asks to report running status of the worker.
+struct WorkerReportStatusOfWorker {
+  template <typename Archive>
+  void serialize(Archive&) {  // NOLINT
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_WORKER,
+                 WorkerReportStatusOfWorker);
+
+//! Controls the behavior of partitions.
+struct WorkerControlPartitions {
+  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  StageId next_barrier_stage;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(control_partitions, next_barrier_stage);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_CONTROL_PARTITIONS,
+                 WorkerControlPartitions);
+
+/*
+ * Worker to controller commands.
+ */
+
+//! Responds that migration in is prepared.
+struct ControllerRespondMigrationInPrepared {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
+                 ControllerRespondMigrationInPrepared);
+
+//! Responds that migration in is completed.
+struct ControllerRespondMigrationInDone {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_MIGRATION_IN_DONE,
+                 ControllerRespondMigrationInDone);
+
+//! Responds with the running status of a partition.
+struct ControllerRespondStatusOfPartition {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  // Cycles.
+  // Barrier reached.
+  // Critical breakpoint.
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_PARTITION,
+                 ControllerRespondStatusOfPartition);
+
+//! Responds with the running status of a worker.
+struct ControllerRespondStatusOfWorker {
+  WorkerId from_worker_id;
+  // CPU utilization.
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_WORKER,
+                 ControllerRespondStatusOfWorker);
 
 }  // namespace message
 }  // namespace canary

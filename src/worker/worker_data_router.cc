@@ -390,8 +390,10 @@ void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
 void WorkerDataRouter::SendDataToPartition(ApplicationId application_id,
                                            VariableGroupId variable_group_id,
                                            PartitionId partition_id,
+                                           StageId stage_id,
                                            struct evbuffer* buffer) {
-  AddUnicastHeader(application_id, variable_group_id, partition_id, buffer);
+  AddUnicastHeader(application_id, variable_group_id, partition_id, stage_id,
+                   buffer);
   event_main_thread_->AddInjectedEvent(
       std::bind(&SelfType::SendUnicastData, this, buffer));
 }
@@ -407,10 +409,10 @@ void WorkerDataRouter::SendDataToWorker(WorkerId worker_id,
 
 void WorkerDataRouter::BroadcastDataToPartition(
     ApplicationId application_id, VariableGroupId variable_group_id,
-    struct evbuffer* buffer) {
+    StageId stage_id, struct evbuffer* buffer) {
   event_main_thread_->AddInjectedEvent(
       std::bind(&SelfType::AddHeaderAndSendMulticastData, this, application_id,
-                variable_group_id, buffer));
+                variable_group_id, stage_id, buffer));
 }
 
 /*
@@ -508,7 +510,7 @@ void WorkerDataRouter::SendUnicastData(struct evbuffer* buffer) {
 
 void WorkerDataRouter::AddHeaderAndSendMulticastData(
     ApplicationId application_id, VariableGroupId variable_group_id,
-    struct evbuffer* buffer) {
+    StageId stage_id, struct evbuffer* buffer) {
   std::map<WorkerId, PartitionIdVector> receiver_map;
   FillInMulticastReceiver(application_id, variable_group_id, &receiver_map);
   for (auto& pair : receiver_map) {
@@ -524,7 +526,8 @@ void WorkerDataRouter::AddHeaderAndSendMulticastData(
       }
       CHECK_EQ(evbuffer_add_buffer_reference(send_buffer, buffer), 0);
       // Version is filled in as well.
-      AddMulticastHeader(application_id, variable_group_id, send_buffer);
+      AddMulticastHeader(application_id, variable_group_id, stage_id,
+                         send_buffer);
       peer_record->send_queue.push_back(send_buffer);
       CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
     } else {
@@ -532,7 +535,7 @@ void WorkerDataRouter::AddHeaderAndSendMulticastData(
         struct evbuffer* send_buffer = evbuffer_new();
         CHECK_EQ(evbuffer_add_buffer_reference(send_buffer, buffer), 0);
         AddUnicastHeader(application_id, variable_group_id, to_partition_id,
-                         send_buffer);
+                         stage_id, send_buffer);
         SendUnicastData(send_buffer);
       }
     }
@@ -613,6 +616,7 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
   const auto application_id = header->to_application_id;
   const auto variable_group_id = header->to_variable_group_id;
   const auto partition_id = header->to_partition_id;
+  const auto stage_id = header->to_stage_id;
   if (header->partition_map_version < internal_partition_map_version_ &&
       self_worker_id_ !=
           internal_partition_map_.QueryWorkerId(
@@ -621,8 +625,14 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
   } else {
     // Normal routine.
     message::RemoveDataHeader(buffer);
-    data_receiver_->ReceiveRoutedData(application_id, variable_group_id,
-                                      partition_id, buffer);
+    const bool accepted = data_receiver_->ReceiveRoutedData(
+        application_id, variable_group_id, partition_id, stage_id, buffer);
+    if (!accepted) {
+      // Rejected messages are put into pending queue.
+      AddUnicastHeader(application_id, variable_group_id, partition_id,
+                       stage_id, buffer);
+      route_pending_queue_.push_back(buffer);
+    }
   }
 }
 
@@ -635,6 +645,7 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
   }
   const auto application_id = header->to_application_id;
   const auto variable_group_id = header->to_variable_group_id;
+  const auto stage_id = header->to_stage_id;
   for (auto partition_id : partition_id_vector) {
     // Makes a copy of the buffer.
     struct evbuffer* deliver_buffer = evbuffer_new();
@@ -644,12 +655,19 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
             internal_partition_map_.QueryWorkerId(
                 application_id, variable_group_id, partition_id)) {
       AddUnicastHeader(application_id, variable_group_id, partition_id,
-                       deliver_buffer);
+                       stage_id, deliver_buffer);
       SendUnicastData(deliver_buffer);
     } else {
       // Normal routine.
-      data_receiver_->ReceiveRoutedData(application_id, variable_group_id,
-                                        partition_id, deliver_buffer);
+      const bool accepted = data_receiver_->ReceiveRoutedData(
+          application_id, variable_group_id, partition_id, stage_id,
+          deliver_buffer);
+      if (!accepted) {
+        // Rejected messages are put into pending queue.
+        AddUnicastHeader(application_id, variable_group_id, partition_id,
+                         stage_id, deliver_buffer);
+        route_pending_queue_.push_back(deliver_buffer);
+      }
     }
   }
   evbuffer_free(buffer);
@@ -666,6 +684,7 @@ void WorkerDataRouter::ProcessDirectMessage(struct evbuffer* buffer) {
 void WorkerDataRouter::AddUnicastHeader(ApplicationId application_id,
                                         VariableGroupId variable_group_id,
                                         PartitionId partition_id,
+                                        StageId stage_id,
                                         struct evbuffer* buffer) {
   // Add header to the message.
   const auto length = evbuffer_get_length(buffer);
@@ -678,10 +697,12 @@ void WorkerDataRouter::AddUnicastHeader(ApplicationId application_id,
   header->to_application_id = application_id;
   header->to_variable_group_id = variable_group_id;
   header->to_partition_id = partition_id;
+  header->to_stage_id = stage_id;
 }
 
 void WorkerDataRouter::AddMulticastHeader(ApplicationId application_id,
                                           VariableGroupId variable_group_id,
+                                          StageId stage_id,
                                           struct evbuffer* buffer) {
   // Add header to the message.
   const auto length = evbuffer_get_length(buffer);
@@ -695,6 +716,7 @@ void WorkerDataRouter::AddMulticastHeader(ApplicationId application_id,
   header->to_application_id = application_id;
   header->to_variable_group_id = variable_group_id;
   header->to_partition_id = PartitionId::INVALID;
+  header->to_stage_id = stage_id;
 }
 
 WorkerDataRouter::PeerRecord* WorkerDataRouter::GetPeerRecordIfReady(

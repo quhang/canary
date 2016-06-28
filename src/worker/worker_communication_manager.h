@@ -199,10 +199,10 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
 
   void SendDataToPartition(ApplicationId application_id,
                            VariableGroupId variable_group_id,
-                           PartitionId partition_id,
+                           PartitionId partition_id, StageId stage_id,
                            struct evbuffer* buffer) override {
     data_router_.SendDataToPartition(application_id, variable_group_id,
-                                     partition_id, buffer);
+                                     partition_id, stage_id, buffer);
   }
 
   void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {
@@ -211,9 +211,10 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
 
   void BroadcastDataToPartition(ApplicationId application_id,
                                 VariableGroupId variable_group_id,
+                                StageId stage_id,
                                 struct evbuffer* buffer) override {
     data_router_.BroadcastDataToPartition(application_id, variable_group_id,
-                                          buffer);
+                                          stage_id, buffer);
   }
 
  private:

@@ -20,6 +20,7 @@ cxx_static_library(canary_core "${cxx_default}"
     controller/controller_communication_manager.cc
     worker/worker_communication_manager.cc
     worker/worker_data_router.cc
+    worker/worker_scheduler.cc
     )
 add_dependencies(canary_core project_cereal)
 # Library linking order matters. Dependency libraries are public so that built

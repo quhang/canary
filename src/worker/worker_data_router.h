@@ -231,7 +231,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Async call.
   void SendDataToPartition(ApplicationId application_id,
                            VariableGroupId variable_group_id,
-                           PartitionId partition_id,
+                           PartitionId partition_id, StageId stage_id,
                            struct evbuffer* buffer) override;
 
   //! Sends data to a worker. The header is included in the buffer.
@@ -243,6 +243,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Async call.
   void BroadcastDataToPartition(ApplicationId application_id,
                                 VariableGroupId variable_group_id,
+                                StageId stage_id,
                                 struct evbuffer* buffer) override;
 
  public:
@@ -286,7 +287,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Sync call
   void AddHeaderAndSendMulticastData(ApplicationId application_id,
                                      VariableGroupId variable_group_id,
-                                     struct evbuffer* buffer);
+                                     StageId stage_id, struct evbuffer* buffer);
 
   //! Fills in the receiver of a multicast.
   // Sync call
@@ -331,12 +332,13 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Async call.
   void AddUnicastHeader(ApplicationId application_id,
                         VariableGroupId variable_group_id,
-                        PartitionId partition_id, struct evbuffer* buffer);
+                        PartitionId partition_id, StageId stage_id,
+                        struct evbuffer* buffer);
 
   //! Adds multicast header.
   // Sync call.
   void AddMulticastHeader(ApplicationId application_id,
-                          VariableGroupId variable_group_id,
+                          VariableGroupId variable_group_id, StageId stage_id,
                           struct evbuffer* buffer);
 
   //! Returns the peer record if it is ready.
