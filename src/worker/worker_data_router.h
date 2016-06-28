@@ -45,6 +45,7 @@
 #include <list>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "shared/internal.h"
 #include "shared/partition_map.h"

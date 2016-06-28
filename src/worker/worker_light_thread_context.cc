@@ -32,11 +32,11 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/worker/worker_scheduler.cc
+ * @file src/worker/worker_light_thread_context.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class WorkerScheduler.
+ * @brief Class WorkerLightThreadContext.
  */
 
-#include "worker/worker_scheduler.h"
+#include "worker/worker_light_thread_context.h"
 
 namespace canary {}  // namespace canary

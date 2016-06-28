@@ -40,221 +40,222 @@
 #ifndef CANARY_SRC_WORKER_WORKER_SCHEDULER_H_
 #define CANARY_SRC_WORKER_WORKER_SCHEDULER_H_
 
+#include <list>
+#include <map>
+#include <string>
+#include <vector>
+
+#include "shared/internal.h"
+#include "shared/partition_map.h"
 #include "worker/worker_communication_interface.h"
+#include "worker/worker_light_thread_context.h"
+#include "message/message_include.h"
 
 namespace canary {
 
-// WorkerMigrationThreadContext.
-// WorkerFileServiceThreadContext.
-// WorkerPartitionExecutionThreadContext.
-
-class WorkerLightThreadContext {
- private:
-  struct StageBuffer {
-    std::list<struct evbuffer*> buffers;
-    int expected_buffer = -1;
-  };
-  struct CommandBuffer {
-    StageId stage_id;
-    struct evbuffer* command;
-  };
-
- public:
-  WorkerLightThreadContext() {
-    PCHECK(pthread_mutex_init(&internal_lock_, nullptr) == 0);
-    running_ = false;
-  }
-
-  virtual ~WorkerLightThreadContext() {
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    CHECK(!running_);
-    pthread_mutex_unlock(&internal_lock_);
-    pthread_mutex_destroy(internal_lock_);
-  }
-
-  // Initializes the light thread.
-  virtual void Initialize() = 0;
-  // Finalizes the light thread.
-  virtual void Finalize() = 0;
-
-  //! Delivers a message.
-  void DeliverMessage(StageId stage_id, struct evbuffer* buffer) {
-    bool to_activate = false;
-    if (stage_id >= StageId::FIRST) {
-      // Normal message.
-      PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-      auto& stage_buffer = stage_buffer_map[stage_id];
-      stage_buffer.buffers.push_back(buffer);
-      // If enough messages are received for the stage.
-      if (stage_buffer.expected_buffer ==
-          static_cast<int>(stage_buffer.buffers.size())) {
-        ready_stages_.push_back(stage_id);
-        if (!running_) {
-          to_activate = true;
-        }
-      }
-      pthread_mutex_unlock(&internal_lock_);
-    } else {
-      // A special command that needs special attention.
-      PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-      command_list_.resize(command_list_.size() + 1);
-      auto& command_buffer = command_list_.back();
-      command_buffer.stage_id = stage_id;
-      command_bufer.command = buffer;
-      to_activate = !running_;
-      pthread_mutex_unlock(&internal_lock_);
-    }
-
-    if (to_activate) {
-      Activate();
-    }
-  }
-
-  //! Tries to enter the execution context of the thread. Returns true if there
-  // is data to process.
-  bool Enter() {
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    const bool success =
-        (!running_) && (!ready_stages_.empty() || !command_list_.empty());
-    running_ = true;
-    pthread_mutex_unlock(&internal_lock_);
-    return success;
-  }
-
-  //! Tries to exit the execution context of the thread. Returns true if there
-  // is no data to process.
-  bool Exit() {
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    const bool success = (ready_stages_.empty() && command_list_.empty());
-    if (success) {
-      running_ = false;
-    }
-    pthread_mutex_unlock(&internal_lock_);
-    return success;
-  }
-
-  //! Forces the execution context to exit.
-  void ForceExit() {
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    const bool to_activate = (ready_stages_.empty() && command_list_.empty());
-    running_ = false;
-    pthread_mutex_unlock(&internal_lock_);
-
-    if (to_activate) {
-      Activate();
-    }
-  }
-
-  //! Registers how many messages are expected for a message.
-  void RegisterReceivingMessage(StageId stage_id, int num_message) {
-    CHECK(stage_id >= StageId::FIRST);
-    bool to_activate = false;
-
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    auto& stage_buffer = received_stage_buffers_[stage_id];
-    stage_buffer.expected_buffer = num_message;
-    if (num_message == static_cast<int>(stage_buffer.buffers.size())) {
-      ready_stages_.push_back(stage_id);
-      if (!running_) {
-        to_activate = true;
-      }
-    }
-    pthread_mutex_unlock(&internal_lock_);
-
-    if (to_activate) {
-      Activate();
-    }
-  }
-
-  bool RetrieveCommand(StageId* stage_id, struct evbuffer** command) {
-    // TODO(quhang): gets a command.
-  }
-
-  bool RetrieveStageBuffer(StageId* stage_id,
-                           std::list<struct evbuffer*>* buffer_list) {
-    // TODO(quhang): gets a stage data.
-  }
-
-  virtual void Run() = 0;
-
- private:
-  void Activate() {
-    // Adds itself to the scheduler.
-  }
-
-  pthread_mutex_t internal_lock_;
-  bool runnning_ = false;
-
-  std::map<StageId, StageBuffer> stage_buffer_map_;
-  std::list<StageId> ready_stages_;
-
-  std::list<CommandBuffer> command_list_;
-};
-
 class WorkerScheduler : public WorkerReceiveCommandInterface,
                         public WorkerReceiveDataInterface {
- public:
-  WorkerScheduler() {}
-  virtual ~WorkerScheduler() {}
+ private:
+  //! The record of an application.
+  struct ApplicationRecord {
+    ApplicationId application_id = ApplicationId::INVALID;
+    std::string binary_location;
+    std::string application_parameter;
+    int local_partitions = 0;
+  };
 
+ public:
+  //! Constructor.
+  WorkerScheduler() {
+    PCHECK(pthread_mutex_init(&scheduling_lock_, nullptr) == 0);
+    PCHECK(pthread_cond_init(&scheduling_cond_, nullptr) == 0);
+  }
+  //! Destroctor.
+  virtual ~WorkerScheduler() {
+    pthread_mutex_destroy(&scheduling_lock_);
+    pthread_cond_destroy(&scheduling_cond_);
+  }
+
+  // Initializes the worker scheduler.
   void Initialize(WorkerSendCommandInterface* send_command_interface,
                   WorkerSendDataInterface* send_data_interface) {
     send_command_interface_ = CHECK_NOTNULL(send_command_interface);
     send_data_interface_ = CHECK_NOTNULL(send_data_interface);
   }
 
+  //! Delivers the routed data to a thread context, and returns false if no
+  // thread context is found.
   bool ReceiveRoutedData(ApplicationId application_id,
                          VariableGroupId variable_group_id,
                          PartitionId partition_id, StageId stage_id,
                          struct evbuffer* buffer) override {
     auto iter = thread_map_.find(
-        FullPartitionId(application_id, variable_group_id, partition_id));
+        FullPartitionId{application_id, variable_group_id, partition_id});
     if (iter == thread_map_.end()) {
       return false;
     }
-    WorkerLightThreadContext* thread_context = *iter;
+    WorkerLightThreadContext* thread_context = iter->second;
     thread_context->DeliverMessage(stage_id, buffer);
     return true;
   }
 
+  //! Delivers direct data.
   void ReceiveDirectData(struct evbuffer* buffer) override {
-    // If it is a migrated partition, delivers to the partition migration
-    // manager.
-    // If it is file system traffic, delivers to the file system manager thread.
+    LOG(FATAL) << "Not implemented.";
+    // TODO(quhang): fill in.
+    // Migrated partitions.
+    // File system traffic.
   }
 
+#define PROCESS_MESSAGE(TYPE, METHOD)                               \
+  case MessageCategory::TYPE: {                                     \
+    message::get_message_type<MessageCategory::TYPE>::Type message; \
+    message::RemoveControlHeader(buffer);                           \
+    message::DeserializeMessage(buffer, &message);                  \
+    METHOD(message);                                                \
+    break;                                                          \
+  }
+  //! Processes worker commands.
   void ReceiveCommandFromController(struct evbuffer* buffer) override {
-    // LoadApplication.
-    // LoadPartitions.
-    // UnloadPartitions.
-    // UnloadApplication.
-
-    // MigrateInPartitions.
-    // MigrateOutPartitions.
-
-    // ReportPartitionStatus.
-    // ReportWorkerStatus.
-    auto partition_execution = new WorkerPartitionExecutionThreadContext();
-    // Add the execution context.
+    auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+    using message::MessageCategoryGroup;
+    using message::MessageCategory;
+    using message::ControlHeader;
+    CHECK(header->category_group == MessageCategoryGroup::WORKER_COMMAND);
+    // If assigned worker_id.
+    // Differentiante between control messages and command messages.
+    switch (header->category) {
+      PROCESS_MESSAGE(WORKER_LOAD_APPLICATION, ProcessLoadApplication);
+      PROCESS_MESSAGE(WORKER_UNLOAD_APPLICATION, ProcessUnloadApplication);
+      PROCESS_MESSAGE(WORKER_LOAD_PARTITIONS, ProcessLoadPartitions);
+      PROCESS_MESSAGE(WORKER_UNLOAD_PARTITIONS, ProcessUnloadPartitions);
+      PROCESS_MESSAGE(WORKER_MIGRATE_IN_PARTITIONS, ProcessMigrateInPartitions);
+      PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS,
+                      ProcessMigrateOutPartitions);
+      PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
+                      ProcessReportStatusOfPartitions);
+      PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_WORKER,
+                      ProcessReportStatusOfWorker);
+      PROCESS_MESSAGE(WORKER_CONTROL_PARTITIONS, ProcessControlPartitions);
+      default:
+        LOG(FATAL) << "Unexpected message category!";
+    }
   }
+#undef PROCESS_MESSAGE
 
+  //! Assigns a worker id.
   void AssignWorkerId(WorkerId worker_id) override {
     is_initialized_ = true;
     self_worker_id_ = worker_id;
-    // TODO(quhang): responds back to the controller.
-    // TODO(quhang): starts execution routine.
+    thread_handle_list_.resize(FLAGS_worker_threads);
+    for (auto& handle : thread_handle_list_) {
+      PCHECK(pthread_create(
+              &handle, nullptr, &WorkerScheduler::ExecutionRoutine, this) == 0);
+    }
   }
 
-  void PushActivatedThreadQueue(WorkerLightThreadContext* thread_context) {
-    PCHECK(pthread_mutex_lock(&scheduling_lock_), 0);
+ private:
+  //! Loads an application.
+  void ProcessLoadApplication(
+      const message::WorkerLoadApplication& worker_command) {
+    const auto launch_application_id = worker_command.application_id;
+    CHECK(application_record_map_.find(launch_application_id) ==
+          application_record_map_.end());
+    auto& application_record = application_record_map_[launch_application_id];
+    application_record.application_id = launch_application_id;
+    application_record.binary_location = worker_command.binary_location;
+    application_record.application_parameter =
+        worker_command.application_parameter;
+    application_record.local_partitions = 0;
+    LOG(INFO) << "Load application.";
+    // TODO(quhang): dynamically load the application binary.
+  }
+
+  //! Unloads an application.
+  void ProcessUnloadApplication(
+      const message::WorkerUnloadApplication& worker_command) {
+    const auto remove_application_id = worker_command.application_id;
+    auto iter = application_record_map_.find(remove_application_id);
+    CHECK(iter != application_record_map_.end());
+    CHECK_EQ(iter->second.local_partitions, 0);
+    application_record_map_.erase(iter);
+    LOG(INFO) << "Unload application.";
+  }
+
+  // Loads partitions.
+  void ProcessLoadPartitions(
+      const message::WorkerLoadPartitions& worker_command) {
+    const auto application_id = worker_command.application_id;
+    for (const auto& pair : worker_command.load_partitions) {
+      const auto full_partition_id =
+          FullPartitionId{application_id, pair.first, pair.second};
+      CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
+      ++application_record_map_.at(application_id).local_partitions;
+      auto thread_context = new WorkerExecutionContext();
+      thread_context->set_application_id(application_id);
+      thread_context->set_variable_group_id(pair.first);
+      thread_context->set_partition_id(pair.second);
+      thread_context->set_priority_level(PriorityLevel::FIRST);
+      thread_context->set_activate_callback(std::bind(
+          &WorkerScheduler::ActivateThreadQueue, this, thread_context));
+      thread_context->set_send_command_interface(send_command_interface_);
+      thread_context->set_send_data_interface(send_data_interface_);
+      thread_context->Initialize();
+      thread_map_[full_partition_id] = thread_context;
+      thread_context->DeliverMessage(StageId::INIT, nullptr);
+    }
+  }
+
+  // Unloads partitions.
+  void ProcessUnloadPartitions(
+      const message::WorkerUnloadPartitions& worker_command) {
+    const auto application_id = worker_command.application_id;
+    for (const auto& pair : worker_command.unload_partitions) {
+      const auto full_partition_id =
+          FullPartitionId{application_id, pair.first, pair.second};
+      auto iter = thread_map_.find(full_partition_id);
+      CHECK(iter != thread_map_.end());
+      --application_record_map_.at(application_id).local_partitions;
+      // TODO(quhang): checks the thread context is not active and cleans up the
+      // partition.
+      thread_map_.erase(iter);
+    }
+  }
+
+  void ProcessMigrateInPartitions(
+      const message::WorkerMigrateInPartitions& worker_command) {
+    LOG(FATAL) << "WORKER_MIGRATE_IN_PARTITIONS";
+  }
+  void ProcessMigrateOutPartitions(
+      const message::WorkerMigrateOutPartitions& worker_command) {
+    LOG(FATAL) << "WORKER_MIGRATE_OUT_PARTITIONS";
+  }
+  void ProcessReportStatusOfPartitions(
+      const message::WorkerReportStatusOfPartitions& worker_command) {
+    LOG(FATAL) << "WORKER_REPORT_STATUS_OF_PARTITIONS";
+  }
+  void ProcessReportStatusOfWorker(
+      const message::WorkerReportStatusOfWorker& worker_command) {
+    LOG(FATAL) << "WORKER_REPORT_STATUS_OF_WORKER";
+  }
+  void ProcessControlPartitions(
+      const message::WorkerControlPartitions& worker_command) {
+    LOG(FATAL) << "WORKER_CONTROL_PARTITIONS";
+  }
+
+ private:
+  //! Activates a thread context.
+  void ActivateThreadQueue(WorkerLightThreadContext* thread_context) {
+    PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
     activated_thread_queue_.push_back(thread_context);
-    PCHECK(pthread_mutex_unlock(&scheduling_lock_), 0);
+    PCHECK(pthread_mutex_unlock(&scheduling_lock_) == 0);
     PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
   }
 
+  //! Retrieves an activated thread context.
   WorkerLightThreadContext* GetActivatedThreadQueue() {
     WorkerLightThreadContext* result = nullptr;
-    PCHECK(pthread_mutex_lock(&scheduling_lock_), 0);
+    PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
     while (!activated_thread_queue_.empty()) {
       PCHECK(pthread_cond_wait(&scheduling_cond_, &scheduling_lock_) == 0);
     }
@@ -264,7 +265,9 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
     return result;
   }
 
-  static void ExecutionRoutine(WorkerScheduler* scheduler) {
+  //! Execution routine.
+  static void* ExecutionRoutine(void* arg) {
+    auto scheduler = reinterpret_cast<WorkerScheduler*>(arg);
     auto thread_context = scheduler->GetActivatedThreadQueue();
     while (thread_context != nullptr) {
       if (thread_context->Enter()) {
@@ -275,22 +278,29 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
       thread_context = scheduler->GetActivatedThreadQueue();
     }
     LOG(WARNING) << "Execution thread exits.";
+    return nullptr;
   }
 
  private:
+  //! Thread scheduling sychronization lock and condition variable.
   pthread_mutex_t scheduling_lock_;
   pthread_cond_t scheduling_cond_;
 
+  //! All thread contexts.
   std::map<FullPartitionId, WorkerLightThreadContext*> thread_map_;
-  phread_mutex_t internal_lock_;
+  //! Activated thread contexts.
+  std::list<WorkerLightThreadContext*> activated_thread_queue_;
 
-  std::list<LightThreadContext*> activated_thread_queue_;
+  //! All application records.
+  std::map<ApplicationId, ApplicationRecord> application_record_map_;
 
-  bool is_initialized_ = false;
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
   WorkerSendDataInterface* send_data_interface_ = nullptr;
 
+  bool is_initialized_ = false;
   WorkerId self_worker_id_ = WorkerId::INVALID;
+
+  std::vector<pthread_t> thread_handle_list_;
 };
 
 }  // namespace canary

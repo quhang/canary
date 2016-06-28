@@ -44,3 +44,5 @@ DEFINE_string(controller_service, "29992",
               "The port for worker to connect to the controller.");
 DEFINE_string(worker_service, "39993",
               "The port for workers to connect to each other..");
+
+DEFINE_int32(worker_threads, 2, "The number of execution threads.");

@@ -75,7 +75,8 @@ REGISTER_MESSAGE(CONTROLLER_COMMAND, TEST_CONTROLLER_COMMAND,
  * Controller to worker commands.
  */
 
-//! Loads an application.
+//! Loads an application, and saves its booting information at the worker
+// scheduler.
 struct WorkerLoadApplication {
   ApplicationId application_id;
   std::string binary_location;
@@ -88,7 +89,7 @@ struct WorkerLoadApplication {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_APPLICATION,
                  WorkerLoadApplication);
 
-//! Unloads an application.
+//! Unloads an application, and removes its booting information.
 struct WorkerUnloadApplication {
   ApplicationId application_id;
   template <typename Archive>
@@ -99,7 +100,7 @@ struct WorkerUnloadApplication {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_APPLICATION,
                  WorkerUnloadApplication);
 
-//! Loads one or many partitions.
+//! Loads one or many partitions, and prepares them for receiving data.
 struct WorkerLoadPartitions {
   ApplicationId application_id;
   StageId next_barrier_stage;
@@ -112,7 +113,7 @@ struct WorkerLoadPartitions {
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_PARTITIONS, WorkerLoadPartitions);
 
-//! Unloads one or many partitions.
+//! Unloads one or many partitions, and cleans up their data.
 struct WorkerUnloadPartitions {
   ApplicationId application_id;
   std::list<std::pair<VariableGroupId, PartitionId>> unload_partitions;
@@ -124,7 +125,8 @@ struct WorkerUnloadPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_PARTITIONS,
                  WorkerUnloadPartitions);
 
-//! Gets prepared of migrated in partitions.
+//! Gets prepared of migrated in partitions, such that they are ready to receive
+// data. Responds when the preparation is ready and when the migrating is done.
 struct WorkerMigrateInPartitions {
   ApplicationId application_id;
   std::list<std::pair<VariableGroupId, PartitionId>> migrate_in_partitions;
@@ -142,6 +144,10 @@ struct WorkerMigrateOutPartitions {
     VariableGroupId variable_group_id;
     PartitionId partition_id;
     WorkerId to_worker_id;
+    template <typename Archive>
+    void serialize(Archive& archive) {  // NOLINT
+      archive(variable_group_id, partition_id, to_worker_id);
+    }
   };
   ApplicationId application_id;
   std::list<PartitionMigrateRecord> migrate_out_partitions;
@@ -153,7 +159,7 @@ struct WorkerMigrateOutPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_MIGRATE_OUT_PARTITIONS,
                  WorkerMigrateOutPartitions);
 
-//! Asks to report running status of partitions.
+//! Asks a worker to report running status of partitions.
 struct WorkerReportStatusOfPartitions {
   ApplicationId application_id;
   std::list<std::pair<VariableGroupId, PartitionId>> report_partitions;
@@ -165,7 +171,7 @@ struct WorkerReportStatusOfPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
 
-//! Asks to report running status of the worker.
+//! Asks a worker to report running status of the worker.
 struct WorkerReportStatusOfWorker {
   template <typename Archive>
   void serialize(Archive&) {  // NOLINT

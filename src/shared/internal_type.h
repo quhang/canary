@@ -49,7 +49,8 @@
   inline std::underlying_type<T>::type get_value(T t) {                      \
     return static_cast<std::underlying_type<T>::type>(t);                    \
   }                                                                          \
-  inline T get_next(const T& t) { return static_cast<T>(get_value(t) + 1); } \
+  inline T get_next(const T& t, int inc = 1) {                               \
+    return static_cast<T>(get_value(t) + inc); }                             \
   inline T get_prev(const T& t) { return static_cast<T>(get_value(t) - 1); } \
   inline T operator++(T & t) {                                               \
     t = get_next(t);                                                         \
@@ -105,7 +106,7 @@ COUNTABLE_ENUM(PartitionId);
 /**
  * The id of a stage.
  */
-enum class StageId : int32_t { INVALID = -1, FIRST = 0 };
+enum class StageId : int32_t { INIT = -2, INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(StageId);
 
 /**
@@ -113,6 +114,12 @@ COUNTABLE_ENUM(StageId);
  */
 enum class PartitionMapVersion : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionMapVersion);
+
+/**
+ * The priority level.
+ */
+enum class PriorityLevel : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(PriorityLevel);
 
 typedef uint64_t SequenceNumber;
 
@@ -123,6 +130,14 @@ struct FullPartitionId {
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(application_id, variable_group_id, partition_id);
+  }
+  bool operator<(const FullPartitionId& rhs) const {
+    if (application_id < rhs.application_id) return true;
+    if (application_id > rhs.application_id) return false;
+    if (variable_group_id > rhs.variable_group_id) return true;
+    if (variable_group_id < rhs.variable_group_id) return false;
+    if (partition_id < rhs.partition_id) return true;
+    return false;
   }
 };
 
@@ -139,6 +154,16 @@ class hash {
   size_t operator()(const T& e) const {
     return std::hash<typename std::underlying_type<T>::type>()(
         canary::get_value(e));
+  }
+};
+
+template <>
+class hash<canary::FullPartitionId> {
+ public:
+  size_t operator()(const canary::FullPartitionId& e) const {
+    return (std::hash<canary::ApplicationId>()(e.application_id) << 16) +
+           (std::hash<canary::VariableGroupId>()(e.variable_group_id) << 8) +
+           std::hash<canary::PartitionId>()(e.partition_id);
   }
 };
 

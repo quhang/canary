@@ -45,5 +45,6 @@
 DECLARE_string(controller_host);
 DECLARE_string(controller_service);
 DECLARE_string(worker_service);
+DECLARE_int32(worker_threads);
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_FLAG_H_

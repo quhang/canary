@@ -247,6 +247,7 @@ inline T* ExamineHeader(struct evbuffer* buffer) {
   return reinterpret_cast<T*>(evbuffer_pullup(buffer, sizeof(T)));
 }
 
+// "const" also works because of its local linkage.
 constexpr auto ExamineControlHeader = ExamineHeader<ControlHeader>;
 constexpr auto ExamineDataHeader = ExamineHeader<DataHeader>;
 
