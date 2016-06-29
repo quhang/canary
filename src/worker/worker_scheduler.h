@@ -53,6 +53,10 @@
 
 namespace canary {
 
+/**
+ * A worker scheduler runs in the same thread as the worker communication
+ * manager for reduce sychronization overhead, and schedules the execution.
+ */
 class WorkerScheduler : public WorkerReceiveCommandInterface,
                         public WorkerReceiveDataInterface {
  private:
@@ -143,10 +147,11 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
   }
 #undef PROCESS_MESSAGE
 
-  //! Assigns a worker id.
+  //! Assigns a worker id, and starts execution.
   void AssignWorkerId(WorkerId worker_id) override {
     is_initialized_ = true;
     self_worker_id_ = worker_id;
+    // Reads global variable: the number of worker threads.
     thread_handle_list_.resize(FLAGS_worker_threads);
     for (auto& handle : thread_handle_list_) {
       PCHECK(pthread_create(

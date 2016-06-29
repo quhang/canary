@@ -490,22 +490,7 @@ void WorkerDataRouter::ShutDownWorker(message::ShutDownWorker* message) {
  */
 
 void WorkerDataRouter::SendUnicastData(struct evbuffer* buffer) {
-  auto header = message::ExamineDataHeader(buffer);
-  CHECK(header->partition_map_version < internal_partition_map_version_)
-      << "A higher-version message must come from other peers,"
-      << " and should have be routed!";
-  header->partition_map_version = internal_partition_map_version_;
-  const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
-      header->to_application_id, header->to_variable_group_id,
-      header->to_partition_id);
-  auto peer_record = GetPeerRecordIfReady(dest_worker_id);
-  if (peer_record != nullptr) {
-    // Normal routing.
-    peer_record->send_queue.push_back(buffer);
-    CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
-  } else {
-    route_pending_queue_.push_back(buffer);
-  }
+  ProcessUnicastMessage(buffer);
 }
 
 void WorkerDataRouter::AddHeaderAndSendMulticastData(
@@ -617,13 +602,11 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
   const auto variable_group_id = header->to_variable_group_id;
   const auto partition_id = header->to_partition_id;
   const auto stage_id = header->to_stage_id;
-  if (header->partition_map_version < internal_partition_map_version_ &&
-      self_worker_id_ !=
-          internal_partition_map_.QueryWorkerId(
-              application_id, variable_group_id, partition_id)) {
-    SendUnicastData(buffer);
-  } else {
-    // Normal routine.
+  const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
+      application_id, variable_group_id, partition_id);
+  if (header->partition_map_version >= internal_partition_map_version_
+      || dest_worker_id == self_worker_id_) {
+    // Delivers locally.
     message::RemoveDataHeader(buffer);
     const bool accepted = data_receiver_->ReceiveRoutedData(
         application_id, variable_group_id, partition_id, stage_id, buffer);
@@ -631,6 +614,16 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
       // Rejected messages are put into pending queue.
       AddUnicastHeader(application_id, variable_group_id, partition_id,
                        stage_id, buffer);
+      route_pending_queue_.push_back(buffer);
+    }
+  } else {
+    header->partition_map_version = internal_partition_map_version_;
+    auto peer_record = GetPeerRecordIfReady(dest_worker_id);
+    if (peer_record != nullptr) {
+      // Normal routing.
+      peer_record->send_queue.push_back(buffer);
+      CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
+    } else {
       route_pending_queue_.push_back(buffer);
     }
   }
@@ -650,24 +643,25 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
     // Makes a copy of the buffer.
     struct evbuffer* deliver_buffer = evbuffer_new();
     CHECK_EQ(evbuffer_add_buffer_reference(deliver_buffer, buffer), 0);
-    if (header->partition_map_version < internal_partition_map_version_ &&
-        self_worker_id_ !=
-            internal_partition_map_.QueryWorkerId(
-                application_id, variable_group_id, partition_id)) {
-      AddUnicastHeader(application_id, variable_group_id, partition_id,
-                       stage_id, deliver_buffer);
-      SendUnicastData(deliver_buffer);
-    } else {
-      // Normal routine.
+    const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
+        application_id, variable_group_id, partition_id);
+    if (header->partition_map_version >= internal_partition_map_version_
+        || dest_worker_id == self_worker_id_) {
+      // Delivers locally.
+      // Header is already removed.
+      // message::RemoveDataHeader(buffer);
       const bool accepted = data_receiver_->ReceiveRoutedData(
-          application_id, variable_group_id, partition_id, stage_id,
-          deliver_buffer);
+          application_id, variable_group_id, partition_id, stage_id, buffer);
       if (!accepted) {
         // Rejected messages are put into pending queue.
         AddUnicastHeader(application_id, variable_group_id, partition_id,
-                         stage_id, deliver_buffer);
-        route_pending_queue_.push_back(deliver_buffer);
+                         stage_id, buffer);
+        route_pending_queue_.push_back(buffer);
       }
+    } else {
+      AddUnicastHeader(application_id, variable_group_id, partition_id,
+                       stage_id, deliver_buffer);
+      SendUnicastData(deliver_buffer);
     }
   }
   evbuffer_free(buffer);
@@ -741,14 +735,17 @@ void WorkerDataRouter::TriggerRefresh() {
   for (auto buffer : buffer_queue) {
     SendUnicastData(buffer);
   }
-  for (auto& pair : direct_pending_queue_) {
-    auto peer_record = GetPeerRecordIfReady(pair.first);
+  auto iter = direct_pending_queue_.begin();
+  while (iter != direct_pending_queue_.end()) {
+    auto peer_record = GetPeerRecordIfReady(iter->first);
     if (peer_record != nullptr) {
-      for (auto buffer : pair.second) {
+      for (auto buffer : iter->second) {
         peer_record->low_priority_send_queue.push_back(buffer);
       }
-      direct_pending_queue_.erase(pair.first);
+      iter = direct_pending_queue_.erase(iter);
       CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
+    } else {
+      ++iter;
     }
   }
 }

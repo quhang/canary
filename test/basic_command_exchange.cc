@@ -40,7 +40,7 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
     }
   }
 
-  void NotifyWorkerIsDown(WorkerId worker_id) override {
+  void NotifyWorkerIsDown(WorkerId) override {
     ++done_workers_;
     if (done_workers_ == FLAGS_num_worker) {
       CHECK_EQ(FLAGS_num_worker * FLAGS_num_command, total_commands_);
@@ -137,14 +137,19 @@ class TestDataReceiver : public WorkerReceiveDataInterface {
   //! Called when receiving data from a partition. The routed data might be
   // rejected, which means this is not the right destination. The header is
   // stripped.
-  bool ReceiveRoutedData(ApplicationId application_id,
-                         VariableGroupId variable_group_id,
-                         PartitionId partition_id,
-                         StageId stage_id,
-                         struct evbuffer* buffer) override {};
+  bool ReceiveRoutedData(ApplicationId,
+                         VariableGroupId,
+                         PartitionId,
+                         StageId,
+                         struct evbuffer* buffer) override {
+    evbuffer_free(buffer);
+    return true;
+  };
   //! Called when receiving data from a worker, which is sent directly. The
   // header is stripped.
-  void ReceiveDirectData(struct evbuffer* buffer) override {};
+  void ReceiveDirectData(struct evbuffer* buffer) override {
+    evbuffer_free(buffer);
+  };
 };
 
 TEST(basic, basic_command_exchange) {

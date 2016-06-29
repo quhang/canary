@@ -60,7 +60,7 @@ class WorkerLightThreadContext {
  private:
   //! The buffer storing received data of a stage.
   struct StageBuffer {
-    std::list<struct evbuffer*> buffers;
+    std::list<struct evbuffer*> buffer_list;
     int expected_buffer = -1;
   };
   //! The buffer storing a command.
@@ -150,7 +150,7 @@ class WorkerLightThreadContext {
   //! Forces the execution context to exit.
   void ForceExit() {
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    const bool to_activate = (ready_stages_.empty() && command_list_.empty());
+    const bool to_activate = (!ready_stages_.empty() || command_list_.empty());
     running_ = false;
     pthread_mutex_unlock(&internal_lock_);
 
@@ -166,10 +166,10 @@ class WorkerLightThreadContext {
       // Normal data routed to a stage.
       PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
       auto& stage_buffer = stage_buffer_map_[stage_id];
-      stage_buffer.buffers.push_back(buffer);
+      stage_buffer.buffer_list.push_back(buffer);
       // If enough messages are received for the stage.
       if (stage_buffer.expected_buffer ==
-          static_cast<int>(stage_buffer.buffers.size())) {
+          static_cast<int>(stage_buffer.buffer_list.size())) {
         ready_stages_.push_back(stage_id);
         if (!running_) {
           to_activate = true;
@@ -201,7 +201,7 @@ class WorkerLightThreadContext {
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
     auto& stage_buffer = stage_buffer_map_[stage_id];
     stage_buffer.expected_buffer = num_message;
-    if (num_message == static_cast<int>(stage_buffer.buffers.size())) {
+    if (num_message == static_cast<int>(stage_buffer.buffer_list.size())) {
       ready_stages_.push_back(stage_id);
       if (!running_) {
         to_activate = true;
@@ -214,13 +214,14 @@ class WorkerLightThreadContext {
     }
   }
 
+  //! Retrieves a command.
   bool RetrieveCommand(StageId* stage_id, struct evbuffer** command) {
     bool result = false;
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
     if (!command_list_.empty()) {
       auto& command_buffer = command_list_.front();
       *stage_id = command_buffer.stage_id;
-      if (command_buffer.command != nullptr) {
+      if (command != nullptr) {
         *command = command_buffer.command;
       }
       command_list_.pop_front();
@@ -230,6 +231,7 @@ class WorkerLightThreadContext {
     return result;
   }
 
+  //! Retrieves the buffer of a stage.
   bool RetrieveStageBuffer(StageId* stage_id,
                            std::list<struct evbuffer*>* buffer_list) {
     bool result = false;
@@ -240,7 +242,7 @@ class WorkerLightThreadContext {
       auto iter = stage_buffer_map_.find(ready_stage);
       CHECK(iter != stage_buffer_map_.end());
       *stage_id = ready_stage;
-      buffer_list->swap(iter->second.buffers);
+      buffer_list->swap(iter->second.buffer_list);
       stage_buffer_map_.erase(iter);
       result = true;
     }
@@ -348,7 +350,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
       out_archive(get_next(stage_id));
       get_send_data_interface()->SendDataToPartition(
           get_application_id(), get_variable_group_id(),
-          get_next(PartitionId::FIRST), get_next(stage_id), send_buffer);
+          PartitionId::FIRST, get_next(stage_id), send_buffer);
       RegisterReceivingMessage(get_next(stage_id, 2), 1);
     }
 
