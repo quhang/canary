@@ -18,6 +18,7 @@ cxx_static_library(canary_core "${cxx_default}"
     shared/partition_map.cc
     message/message.cc
     controller/controller_communication_manager.cc
+    controller/controller_scheduler.cc
     worker/worker_communication_manager.cc
     worker/worker_data_router.cc
     worker/worker_light_thread_context.cc

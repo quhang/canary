@@ -302,55 +302,69 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
     CHECK(command_stage_id < StageId::INVALID);
     switch (command_stage_id) {
       case StageId::INIT:
+        VLOG(3) << "INIT command.";
         if (get_partition_id() == PartitionId::FIRST) {
+          VLOG(3) << "First partition waits for stage_id=0";
           RegisterReceivingMessage(StageId::FIRST, 1);
         } else {
           struct evbuffer* buffer = evbuffer_new();
-          CanaryOutputArchive archive(buffer);
-          archive(StageId::FIRST);
+          {
+            CanaryOutputArchive archive(buffer);
+            archive(StageId::FIRST);
+          }
+          VLOG(3) << "Second partition sends to first partition stage_id=0";
           get_send_data_interface()->SendDataToPartition(
               get_application_id(), get_variable_group_id(), PartitionId::FIRST,
               StageId::FIRST, buffer);
+          VLOG(3) << "Second partition waits for stage_id=1";
+          RegisterReceivingMessage(get_next(StageId::FIRST), 1);
         }
-        LOG(INFO) << "INIT command.";
         break;
       default:
         LOG(FATAL) << "Unknown command stage id!";
     }
-    evbuffer_free(command);
+    // The command might be empty.
+    if (command) {
+      evbuffer_free(command);
+    }
   }
   void ProcessData(StageId stage_id, std::list<struct evbuffer*>* buffer_list) {
+    LOG(INFO) << "Process Data. stage_id=" << get_value(stage_id);
     if (get_partition_id() == PartitionId::FIRST) {
-      CHECK_EQ(buffer_list->size(), 1u);
-      CanaryInputArchive archive(buffer_list->front());
-      StageId in_message_stage_id;
-      archive(in_message_stage_id);
-      LOG(INFO) << "First partition receives: " <<
-          get_value(in_message_stage_id);
-      CHECK(in_message_stage_id == stage_id);
-
-      struct evbuffer* send_buffer = evbuffer_new();
-      CanaryOutputArchive out_archive(send_buffer);
-      out_archive(get_next(stage_id));
-      get_send_data_interface()->SendDataToPartition(
-          get_application_id(), get_variable_group_id(),
-          get_next(PartitionId::FIRST), get_next(stage_id), send_buffer);
+      {
+        CHECK_EQ(buffer_list->size(), 1u);
+        StageId in_message_stage_id;
+        CanaryInputArchive archive(buffer_list->front());
+        archive(in_message_stage_id);
+        CHECK(in_message_stage_id == stage_id);
+      }
+      LOG(INFO) << "First partition receives: " << get_value(stage_id);
+      {
+        struct evbuffer* send_buffer = evbuffer_new();
+        CanaryOutputArchive archive(send_buffer);
+        archive(get_next(stage_id));
+        get_send_data_interface()->SendDataToPartition(
+            get_application_id(), get_variable_group_id(),
+            get_next(PartitionId::FIRST), get_next(stage_id), send_buffer);
+      }
       RegisterReceivingMessage(get_next(stage_id, 2), 1);
     } else {
       CHECK_EQ(buffer_list->size(), 1u);
-      CanaryInputArchive archive(buffer_list->front());
-      StageId in_message_stage_id;
-      archive(in_message_stage_id);
-      LOG(INFO) << "Second partition receives: " <<
-          get_value(in_message_stage_id);
-      CHECK(in_message_stage_id == stage_id);
-
-      struct evbuffer* send_buffer = evbuffer_new();
-      CanaryOutputArchive out_archive(send_buffer);
-      out_archive(get_next(stage_id));
-      get_send_data_interface()->SendDataToPartition(
-          get_application_id(), get_variable_group_id(),
-          PartitionId::FIRST, get_next(stage_id), send_buffer);
+      {
+        CanaryInputArchive archive(buffer_list->front());
+        StageId in_message_stage_id;
+        archive(in_message_stage_id);
+        CHECK(in_message_stage_id == stage_id);
+      }
+      LOG(INFO) << "Second partition receives: " << get_value(stage_id);
+      {
+        struct evbuffer* send_buffer = evbuffer_new();
+        CanaryOutputArchive archive(send_buffer);
+        archive(get_next(stage_id));
+        get_send_data_interface()->SendDataToPartition(
+            get_application_id(), get_variable_group_id(), PartitionId::FIRST,
+            get_next(stage_id), send_buffer);
+      }
       RegisterReceivingMessage(get_next(stage_id, 2), 1);
     }
 

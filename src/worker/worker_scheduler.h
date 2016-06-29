@@ -154,8 +154,8 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
     // Reads global variable: the number of worker threads.
     thread_handle_list_.resize(FLAGS_worker_threads);
     for (auto& handle : thread_handle_list_) {
-      PCHECK(pthread_create(
-              &handle, nullptr, &WorkerScheduler::ExecutionRoutine, this) == 0);
+      PCHECK(pthread_create(&handle, nullptr,
+                            &WorkerScheduler::ExecutionRoutine, this) == 0);
     }
   }
 
@@ -251,6 +251,7 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
  private:
   //! Activates a thread context.
   void ActivateThreadQueue(WorkerLightThreadContext* thread_context) {
+    VLOG(3) << "Activates a thread.";
     PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
     activated_thread_queue_.push_back(thread_context);
     PCHECK(pthread_mutex_unlock(&scheduling_lock_) == 0);
@@ -261,12 +262,13 @@ class WorkerScheduler : public WorkerReceiveCommandInterface,
   WorkerLightThreadContext* GetActivatedThreadQueue() {
     WorkerLightThreadContext* result = nullptr;
     PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-    while (!activated_thread_queue_.empty()) {
+    while (activated_thread_queue_.empty()) {
       PCHECK(pthread_cond_wait(&scheduling_cond_, &scheduling_lock_) == 0);
     }
     result = activated_thread_queue_.back();
     activated_thread_queue_.pop_back();
     pthread_mutex_unlock(&scheduling_lock_);
+    VLOG(3) << "Retrieves a thread.";
     return result;
   }
 

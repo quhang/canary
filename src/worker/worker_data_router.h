@@ -340,6 +340,7 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Sync call.
   void AddMulticastHeader(ApplicationId application_id,
                           VariableGroupId variable_group_id, StageId stage_id,
+                          PartitionMapVersion partition_map_version,
                           struct evbuffer* buffer);
 
   //! Returns the peer record if it is ready.

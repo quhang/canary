@@ -32,29 +32,14 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/controller/canary_controller.cc
+ * @file src/controller/controller_scheduler.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Canary controller.
+ * @brief Class ControllerScheduler.
  */
 
-#include <thread>
-
-#include "shared/initialize.h"
-#include "controller/controller_communication_manager.h"
 #include "controller/controller_scheduler.h"
 
-int main(int argc, char* argv[]) {
-  using namespace canary;
+namespace canary {
 
-  InitializeCanaryController(&argc, &argv);
 
-  network::EventMainThread event_main_thread;
-  ControllerCommunicationManager manager;
-  ControllerScheduler scheduler;
-  manager.Initialize(&event_main_thread, &scheduler);
-  scheduler.Initialize(&event_main_thread, &manager);
-
-  event_main_thread.Run();
-
-  return 0;
-}
+}  // namespace canary

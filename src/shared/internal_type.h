@@ -50,7 +50,8 @@
     return static_cast<std::underlying_type<T>::type>(t);                    \
   }                                                                          \
   inline T get_next(const T& t, int inc = 1) {                               \
-    return static_cast<T>(get_value(t) + inc); }                             \
+    return static_cast<T>(get_value(t) + inc);                               \
+  }                                                                          \
   inline T get_prev(const T& t) { return static_cast<T>(get_value(t) - 1); } \
   inline T operator++(T & t) {                                               \
     t = get_next(t);                                                         \
