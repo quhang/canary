@@ -521,7 +521,7 @@ void WorkerDataRouter::AddHeaderAndSendMulticastData(
         // PartitionIdVector.
         archive(pair.second);
       }
-      CHECK_EQ(evbuffer_add_buffer_reference(send_buffer, buffer), 0);
+      CHECK_EQ(evbuffer_deep_copy(send_buffer, buffer), 0);
       AddMulticastHeader(application_id, variable_group_id, stage_id,
                          internal_partition_map_version_, send_buffer);
       peer_record->send_queue.push_back(send_buffer);
@@ -530,7 +530,7 @@ void WorkerDataRouter::AddHeaderAndSendMulticastData(
       // Multicast fails, and degrades to unicast.
       for (auto to_partition_id : pair.second) {
         struct evbuffer* send_buffer = evbuffer_new();
-        CHECK_EQ(evbuffer_add_buffer_reference(send_buffer, buffer), 0);
+        CHECK_EQ(evbuffer_deep_copy(send_buffer, buffer), 0);
         AddUnicastHeader(application_id, variable_group_id, to_partition_id,
                          stage_id, send_buffer);
         ProcessUnicastMessage(send_buffer);
@@ -654,7 +654,7 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
   for (auto partition_id : partition_id_vector) {
     // Makes a copy of the buffer.
     struct evbuffer* deliver_buffer = evbuffer_new();
-    CHECK_EQ(evbuffer_add_buffer_reference(deliver_buffer, buffer), 0);
+    CHECK_EQ(evbuffer_deep_copy(deliver_buffer, buffer), 0);
     const auto dest_worker_id = internal_partition_map_.QueryWorkerId(
         application_id, variable_group_id, partition_id);
     if (header->partition_map_version >= internal_partition_map_version_ ||
@@ -677,6 +677,7 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
     }
   }
   evbuffer_free(buffer);
+  delete header;
 }
 
 void WorkerDataRouter::ProcessDirectMessage(struct evbuffer* buffer) {

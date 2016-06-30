@@ -52,6 +52,11 @@ struct sockaddr;
 struct event_base;
 struct timeval;
 
+inline int evbuffer_deep_copy(struct evbuffer* dst, struct evbuffer* src) {
+  auto length = evbuffer_get_length(src);
+  return evbuffer_add(dst, evbuffer_pullup(src, length), length);
+}
+
 namespace canary {
 
 namespace network {
