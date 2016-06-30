@@ -44,7 +44,7 @@
 #include "controller/controller_scheduler.h"
 
 int main(int argc, char* argv[]) {
-  using namespace canary;
+  using namespace canary;  // NOLINT
 
   InitializeCanaryController(&argc, &argv);
 

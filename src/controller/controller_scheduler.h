@@ -62,21 +62,21 @@ class ControllerScheduler : public ControllerReceiveCommandInterface {
   //! Called when receiving a command. The message header is kept, and the
   // buffer ownership is transferred.
   void ReceiveCommand(struct evbuffer* buffer) override {
-    event_main_thread_->AddInjectedEvent(std::bind(
-            &ControllerScheduler::InternalReceiveCommand, this, buffer));
+    event_main_thread_->AddInjectedEvent(
+        std::bind(&ControllerScheduler::InternalReceiveCommand, this, buffer));
   }
 
   //! Called when a worker is down, even if it is shut down by the controller.
   void NotifyWorkerIsDown(WorkerId worker_id) override {
     event_main_thread_->AddInjectedEvent(std::bind(
-            &ControllerScheduler::InternalNotifyWorkerIsDown, this, worker_id));
+        &ControllerScheduler::InternalNotifyWorkerIsDown, this, worker_id));
   }
 
   //! Called when a worker is up. The up notification and down notification are
   // paired.
   void NotifyWorkerIsUp(WorkerId worker_id) override {
     event_main_thread_->AddInjectedEvent(std::bind(
-            &ControllerScheduler::InternalNotifyWorkerIsUp, this, worker_id));
+        &ControllerScheduler::InternalNotifyWorkerIsUp, this, worker_id));
   }
 
  private:
@@ -85,8 +85,7 @@ class ControllerScheduler : public ControllerReceiveCommandInterface {
   }
 
   //! Called when a worker is down, even if it is shut down by the controller.
-  void InternalNotifyWorkerIsDown(WorkerId worker_id) {
-  }
+  void InternalNotifyWorkerIsDown(WorkerId worker_id) {}
 
   //! Called when a worker is up. The up notification and down notification are
   // paired.
@@ -112,13 +111,13 @@ class ControllerScheduler : public ControllerReceiveCommandInterface {
         load_partitions.application_id = application_id;
         load_partitions.load_partitions.clear();
         load_partitions.load_partitions.emplace_back(VariableGroupId::FIRST,
-                                                      first_partition);
+                                                     first_partition);
         send_command_interface_->SendCommandToWorker(
             first_worker,
             message::SerializeMessageWithControlHeader(load_partitions));
         load_partitions.load_partitions.clear();
         load_partitions.load_partitions.emplace_back(VariableGroupId::FIRST,
-                                                      second_partition);
+                                                     second_partition);
         send_command_interface_->SendCommandToWorker(
             second_worker,
             message::SerializeMessageWithControlHeader(load_partitions));
@@ -126,8 +125,8 @@ class ControllerScheduler : public ControllerReceiveCommandInterface {
       auto per_application_partition_map = new PerApplicationPartitionMap();
       per_application_partition_map->SetNumVariableGroup(1);
       per_application_partition_map->SetPartitioning(VariableGroupId::FIRST, 2);
-      per_application_partition_map->SetWorkerId(
-          VariableGroupId::FIRST, first_partition, first_worker);
+      per_application_partition_map->SetWorkerId(VariableGroupId::FIRST,
+                                                 first_partition, first_worker);
       per_application_partition_map->SetWorkerId(
           VariableGroupId::FIRST, second_partition, second_worker);
       send_command_interface_->AddApplication(application_id,

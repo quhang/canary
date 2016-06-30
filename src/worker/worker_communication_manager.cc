@@ -50,9 +50,6 @@ void WorkerCommunicationManager::Initialize(
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   command_receiver_ = CHECK_NOTNULL(command_receiver);
   data_receiver_ = CHECK_NOTNULL(data_receiver);
-  if (data_receiver_ == nullptr) {
-    LOG(WARNING) << "No data receiver registerred!";
-  }
   event_base_ = event_main_thread_->get_event_base();
   route_service_ = worker_service;
   // Initialize host and service, and initiate connection.
@@ -214,7 +211,7 @@ void WorkerCommunicationManager::ProcessIncomingMessage(
         PROCESS_MESSAGE(UPDATE_ADDED_WORKER, ProcessUpdateAddedWorkerMessage);
         PROCESS_MESSAGE(SHUT_DOWN_WORKER, ProcessShutDownWorkerMessage);
         default:
-          LOG(FATAL) << "Unexpected message type.";
+          LOG(FATAL) << "Unexpected message type!";
       }  // switch category.
       break;
     case MessageCategoryGroup::WORKER_COMMAND:
@@ -279,7 +276,7 @@ void WorkerCommunicationManager::ProcessUpdateAddedWorkerMessage(
 
 void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
     message::ShutDownWorker* message) {
-  VLOG(1) << "Worker is asked to shut down. (id="
+  VLOG(1) << "Worker shutdown is requested. (id="
           << get_value(controller_record.assigned_worker_id) << ")";
   data_router_.ShutDownWorker(message);
   Finalize();
@@ -291,7 +288,8 @@ void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
 
 void WorkerCommunicationManager::AppendSendingQueue(
     struct evbuffer* buffer, bool enforce_controller_ready) {
-  CHECK(controller_record.is_ready || !enforce_controller_ready);
+  CHECK(controller_record.is_ready || !enforce_controller_ready)
+      << "Cannot send command when the controller is not ready!";
   controller_record.send_queue.push_back(buffer);
   CHECK_EQ(event_add(controller_record.write_event, nullptr), 0);
 }

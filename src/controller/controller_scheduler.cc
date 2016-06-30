@@ -39,7 +39,4 @@
 
 #include "controller/controller_scheduler.h"
 
-namespace canary {
-
-
-}  // namespace canary
+namespace canary {}  // namespace canary

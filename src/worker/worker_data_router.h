@@ -63,15 +63,14 @@ namespace canary {
  * Once the partition map indicates that a data message should be routed to the
  * worker itself, the router will deliver the message to the user. It is
  * possible that the partition map is stale, and the message is delivered to the
- * user incorrectly. In this case, the user can send the message again. The
- * router will hold such message (whose destination seems to be itself) until
- * the partition map is further updated.
+ * user incorrectly. In this case, the user can reject the message. Rejected
+ * message will be sent again once the partition map is updated.
  *
  * The router can only be used after it is initialized, otherwise it will panic.
  * In case connected peer fails, the router will report to the communication
  * manager with a NotifyDisconnectWorker message.
  *
- * TODO(quhang): broadcast, sequence number.
+ * TODO(quhang): sequence number.
  */
 class WorkerDataRouter : public WorkerSendDataInterface {
  private:

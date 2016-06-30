@@ -103,11 +103,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_APPLICATION,
 //! Loads one or many partitions, and prepares them for receiving data.
 struct WorkerLoadPartitions {
   ApplicationId application_id;
-  StageId next_barrier_stage;
   std::list<std::pair<VariableGroupId, PartitionId>> load_partitions;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, next_barrier_stage);
+    archive(application_id);
     archive(load_partitions);
   }
 };

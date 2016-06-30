@@ -80,6 +80,7 @@ void WorkerDataRouter::Finalize() {
       event_free(peer_record->write_event);
       peer_record->write_event = nullptr;
     }
+    // Caution: socket closing happens at last.
     if (peer_record->socket_fd >= 0) {
       network::close_socket(peer_record->socket_fd);
       peer_record->socket_fd = -1;
@@ -101,8 +102,9 @@ void WorkerDataRouter::DispatchAcceptEvent(struct evconnlistener* listener,
 }
 
 void WorkerDataRouter::DispatchAcceptErrorEvent(struct evconnlistener*, void*) {
-  LOG(WARNING) << "Failure on the listener: "
-               << network::get_error_message(network::get_last_error_number());
+  LOG(WARNING) << "Accepting connection failed ("
+               << network::get_error_message(network::get_last_error_number())
+               << ")";
 }
 
 void WorkerDataRouter::DispatchConnectEvent(int socket_fd, short,  // NOLINT
@@ -173,7 +175,6 @@ void WorkerDataRouter::CallbackAcceptEvent(struct evconnlistener* listener,
   CHECK_EQ(listener, listening_event_);
   std::string host, service;
   network::translate_sockaddr_to_string(address, socklen, &host, &service);
-  VLOG(1) << host << ":" << service << " reaches the worker routing port.";
   // Handshake protocol:
   // slave -> master: worker_id.
   auto peer_record = InitializePassivePeerRecord(socket_fd, host, service);
@@ -207,7 +208,7 @@ void WorkerDataRouter::CallbackPassiveConnectEvent(PeerRecord* peer_record) {
     evbuffer_free(peer_record->receive_buffer);
     network::close_socket(socket_fd);
     delete peer_record;
-    LOG(WARNING) << "Failed incoming connection!";
+    LOG(WARNING) << "Handshake fails between workers!";
   } else {
     // Waits for more data.
     CHECK_EQ(event_base_once(event_base_, socket_fd, EV_READ,
@@ -261,7 +262,7 @@ WorkerDataRouter::PeerRecord* WorkerDataRouter::InitializeActivePeerRecord(
     WorkerId worker_id, const std::string& worker_host,
     const std::string& worker_service) {
   CHECK(worker_id != self_worker_id_);
-  VLOG(3) << get_value(self_worker_id_) << " actively connects "
+  VLOG(3) << get_value(self_worker_id_) << " actively connects to "
           << get_value(worker_id);
   CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
   auto& peer_record = worker_id_to_status_[worker_id];
@@ -325,7 +326,7 @@ void WorkerDataRouter::ActivatePassivePeerRecord(WorkerId from_worker_id,
   CHECK(from_worker_id != self_worker_id_);
   CHECK(worker_id_to_status_.find(from_worker_id) ==
         worker_id_to_status_.end());
-  VLOG(3) << get_value(self_worker_id_) << " gets connected by "
+  VLOG(3) << get_value(self_worker_id_) << " is passively connected by "
           << get_value(from_worker_id);
   auto& peer_record = worker_id_to_status_[from_worker_id];
   peer_record = *old_peer_record;
@@ -379,6 +380,8 @@ void WorkerDataRouter::CleanUpPeerRecord(PeerRecord* peer_record) {
   peer_record->send_queue.clear();
   const auto worker_id = peer_record->worker_id;
   worker_id_to_status_.erase(worker_id);
+  VLOG(3) << get_value(self_worker_id_) << " loses connection with "
+          << get_value(worker_id);
   // Triggers resending.
   TriggerRefresh();
 }
@@ -453,6 +456,7 @@ void WorkerDataRouter::UpdatePartitionMapAddApplication(
 
 void WorkerDataRouter::UpdatePartitionMapDropApplication(
     message::UpdatePartitionMapDropApplication* message) {
+  VLOG(3) << "UpdatePartitionMapDropApplication";
   CHECK(is_initialized_);
   internal_partition_map_version_ = message->version_id;
   CHECK(internal_partition_map_.DeletePerApplicationPartitionMap(
@@ -462,6 +466,7 @@ void WorkerDataRouter::UpdatePartitionMapDropApplication(
 
 void WorkerDataRouter::UpdatePartitionMapIncremental(
     message::UpdatePartitionMapIncremental* message) {
+  VLOG(3) << "UpdatePartitionMapIncremental";
   CHECK(is_initialized_);
   internal_partition_map_version_ = message->version_id;
   internal_partition_map_.MergeUpdate(*message->partition_map_update);
@@ -539,8 +544,8 @@ void WorkerDataRouter::FillInMulticastReceiver(
   auto per_app_partition_map =
       internal_partition_map_.GetPerApplicationPartitionMap(application_id);
   CHECK(per_app_partition_map != nullptr)
-      << "Should be handled, but for now, "
-      << "please update the partition map before doing multicast.";
+      << "The partition map must be complete before doing multicast, "
+      << "i.e. the number of receivers should be well defined.";
   const int num_partition =
       per_app_partition_map->QueryPartitioning(variable_group_id);
   for (int id = 0; id < num_partition; ++id) {
@@ -590,19 +595,18 @@ void WorkerDataRouter::ProcessIncomingMessage(struct evbuffer* buffer) {
           ProcessMulticastMessage(buffer);
           break;
         default:
-          LOG(FATAL) << "Unknown message category.";
+          LOG(FATAL) << "Unknown message category!";
       }
       break;
     case MessageCategoryGroup::APPLICATION_DATA_DIRECT:
       ProcessDirectMessage(buffer);
       break;
     default:
-      LOG(FATAL) << "Unknown message category group.";
+      LOG(FATAL) << "Unknown message category group!";
   }
 }
 
 void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
-  VLOG(3) << "Process unicast message.";
   auto header = CHECK_NOTNULL(message::ExamineDataHeader(buffer));
   const auto application_id = header->to_application_id;
   const auto variable_group_id = header->to_variable_group_id;
@@ -612,13 +616,11 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
       application_id, variable_group_id, partition_id);
   if (header->partition_map_version >= internal_partition_map_version_ ||
       dest_worker_id == self_worker_id_) {
-    VLOG(3) << "Tries to deliver locally.";
     // Delivers locally.
     message::RemoveDataHeader(buffer);
     const bool accepted = data_receiver_->ReceiveRoutedData(
         application_id, variable_group_id, partition_id, stage_id, buffer);
     if (!accepted) {
-      VLOG(3) << "Rejected.";
       // Rejected messages are put into pending queue.
       AddUnicastHeader(application_id, variable_group_id, partition_id,
                        stage_id, buffer);
@@ -628,12 +630,10 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
     header->partition_map_version = internal_partition_map_version_;
     auto peer_record = GetPeerRecordIfReady(dest_worker_id);
     if (peer_record != nullptr) {
-      VLOG(3) << "Routes a unicast message.";
       // Normal routing of unicast message.
       peer_record->send_queue.push_back(buffer);
       CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
     } else {
-      VLOG(3) << "Fails to routes a unicast message: pending.";
       route_pending_queue_.push_back(buffer);
     }
   }
@@ -738,7 +738,6 @@ WorkerDataRouter::PeerRecord* WorkerDataRouter::GetPeerRecordIfReady(
 }
 
 void WorkerDataRouter::TriggerRefresh() {
-  LOG(INFO) << "Trigger refresh.";
   std::list<struct evbuffer*> buffer_queue;
   std::swap(buffer_queue, route_pending_queue_);
   for (auto buffer : buffer_queue) {

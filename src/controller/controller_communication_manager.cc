@@ -51,7 +51,8 @@ void ControllerCommunicationManager::Initialize(
   // Registers the listening port.
   listening_socket_ =
       network::allocate_and_bind_listen_socket(controller_service);
-  CHECK_NE(listening_socket_, -1);
+  CHECK_NE(listening_socket_, -1) << "Cannot listen on port "
+                                  << controller_service << "!";
   // Starts the listening service.
   listening_event_ = CHECK_NOTNULL(
       evconnlistener_new(event_base_, &DispatchAcceptEvent, this,
@@ -63,7 +64,6 @@ void ControllerCommunicationManager::Initialize(
 }
 
 void ControllerCommunicationManager::Finalize() {
-  CHECK(is_initialized_);
   CHECK_EQ(event_base_loopbreak(event_base_), 0);
 }
 
@@ -80,8 +80,9 @@ void ControllerCommunicationManager::DispatchAcceptEvent(
 
 void ControllerCommunicationManager::DispatchAcceptErrorEvent(
     struct evconnlistener*, void*) {
-  LOG(FATAL) << "Failure on the listener: "
-             << network::get_error_message(network::get_last_error_number());
+  LOG(FATAL) << "Failed to accept connection ("
+             << network::get_error_message(network::get_last_error_number())
+             << ").";
 }
 
 void ControllerCommunicationManager::DispatchReadEvent(int socket_fd,
@@ -111,8 +112,8 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   std::string host, service;
   network::translate_sockaddr_to_string(address, socklen, &host, &service);
   const WorkerId worker_id = worker_id_allocator_++;
-  VLOG(1) << host << ":" << service << " is given worker id "
-          << get_value(worker_id) << ".";
+  VLOG(1) << "Assigned worker id " << get_value(worker_id) << " to " << host
+          << ":" << service;
   InitializeWorkerRecord(worker_id, socket_fd, host, service);
   // Handshake protocol:
   // controller -> worker: AssignWorkerId.
@@ -163,7 +164,8 @@ void ControllerCommunicationManager::CallbackWriteEvent(
 void ControllerCommunicationManager::InitializeWorkerRecord(
     WorkerId worker_id, int socket_fd, const std::string& host,
     const std::string& service) {
-  CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end());
+  CHECK(worker_id_to_status_.find(worker_id) == worker_id_to_status_.end())
+      << "Invalid worker id!";
   auto& worker_record = worker_id_to_status_[worker_id];
   worker_record.worker_id = worker_id;
   worker_record.host = host;
@@ -183,6 +185,9 @@ void ControllerCommunicationManager::InitializeWorkerRecord(
 
 void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     message::RegisterServicePort* message) {
+  CHECK(worker_id_to_status_.find(message->from_worker_id) !=
+        worker_id_to_status_.end())
+      << "Invalid worker id!";
   auto worker_record = &worker_id_to_status_.at(message->from_worker_id);
   worker_record->route_service = message->route_service;
 
@@ -204,7 +209,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     update_message.partition_map = &internal_partition_map_;
     for (auto& pair : worker_id_to_status_) {
       // Caution: avoids registering a worker twice.
-      if (worker_record->is_ready) {
+      if (pair.second.is_ready) {
         message::NetworkAddress network_address;
         network_address.host = pair.second.host;
         network_address.service = pair.second.route_service;
@@ -216,7 +221,7 @@ void ControllerCommunicationManager::ProcessRegisterServicePortMessage(
     AppendWorkerSendingQueue(worker_record->worker_id, buffer);
   }
 
-  CHECK(!worker_record->is_ready);
+  CHECK(!worker_record->is_ready) << "Incorrect handshake procedure!";
   // The worker is now ready.
   worker_record->is_ready = true;
 
@@ -231,8 +236,8 @@ void ControllerCommunicationManager::ProcessNotifyWorkerDisconnect(
   const WorkerId shutdown_worker_id = message->disconnected_worker_id;
   auto iter = worker_id_to_status_.find(shutdown_worker_id);
   if (iter != worker_id_to_status_.end()) {
-    // TODO.
-    LOG(FATAL) << "Not implemented.";
+    LOG(WARNING) << "Shuts down worker id " << get_value(shutdown_worker_id)
+                 << " due to worker-to-worker disconnection.";
     CleanUpWorkerRecord(&iter->second);
   }
   delete message;
@@ -248,6 +253,7 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
     event_free(worker_record->write_event);
     worker_record->write_event = nullptr;
   }
+  // Caution socket must be closed after events are freed.
   if (worker_record->socket_fd >= 0) {
     network::close_socket(worker_record->socket_fd);
     worker_record->socket_fd = -1;
@@ -267,7 +273,8 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
   }
   worker_record->send_queue.clear();
   const auto worker_id = worker_record->worker_id;
-  VLOG(1) << "Lose connection with worker: " << get_value(worker_id) << ".";
+  VLOG(1) << "Shuts down connection with worker: " << get_value(worker_id)
+          << ".";
   const bool is_ready = worker_record->is_ready;
   worker_id_to_status_.erase(worker_id);
 
@@ -427,7 +434,8 @@ void ControllerCommunicationManager::AppendWorkerSendingQueueWithFlag(
   auto iter = worker_id_to_status_.find(worker_id);
   if (iter == worker_id_to_status_.end()) {
     evbuffer_free(buffer);
-    LOG(WARNING) << "Message is dropped because a worker is down!";
+    LOG(WARNING) << "Message is dropped because worker ("
+                 << get_value(worker_id) << ") is down!";
     return;
   } else {
     WorkerRecord* worker_record = &iter->second;

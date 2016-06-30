@@ -44,7 +44,7 @@
 #include "worker/worker_scheduler.h"
 
 int main(int argc, char** argv) {
-  using namespace canary;
+  using namespace canary;  // NOLINT
   InitializeCanaryWorker(&argc, &argv);
 
   network::EventMainThread event_main_thread;
