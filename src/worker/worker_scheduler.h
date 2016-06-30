@@ -96,20 +96,21 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
 
  protected:
   //! Starts execution threads.
-  virtual void StartExecution();
+  virtual void StartExecution() = 0;
 
   //! Loads the application binary.
-  virtual void LoadApplicationBinary(ApplicationRecord* application_record);
+  virtual void LoadApplicationBinary(ApplicationRecord* application_record) = 0;
 
   //! Unloads the application binary.
-  virtual void UnloadApplicationBinary(ApplicationRecord* application_record);
+  virtual void UnloadApplicationBinary(
+      ApplicationRecord* application_record) = 0;
 
   //! Loads a partition and returns its thread context.
   virtual WorkerLightThreadContext* LoadPartition(
-      FullPartitionId full_partition_id);
+      FullPartitionId full_partition_id) = 0;
 
   //! Unloads a partition and wraps up its thread context.
-  void UnloadPartition(WorkerLightThreadContext* thread_context);
+  virtual void UnloadPartition(WorkerLightThreadContext* thread_context) = 0;
 
  private:
   //! Loads an application.
@@ -121,34 +122,34 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
       const message::WorkerUnloadApplication& worker_command);
 
   //! Loads partitions.
-  virtual void ProcessLoadPartitions(
+  void ProcessLoadPartitions(
       const message::WorkerLoadPartitions& worker_command);
 
   //! Unloads partitions.
-  virtual void ProcessUnloadPartitions(
+  void ProcessUnloadPartitions(
       const message::WorkerUnloadPartitions& worker_command);
 
   //! TODO(quhang): not implemented.
-  virtual void ProcessMigrateInPartitions(
+  void ProcessMigrateInPartitions(
       const message::WorkerMigrateInPartitions& worker_command);
 
   //! TODO(quhang): not implemented.
-  virtual void ProcessMigrateOutPartitions(
+  void ProcessMigrateOutPartitions(
       const message::WorkerMigrateOutPartitions& worker_command);
 
   //! TODO(quhang): not implemented.
-  virtual void ProcessReportStatusOfPartitions(
+  void ProcessReportStatusOfPartitions(
       const message::WorkerReportStatusOfPartitions& worker_command);
 
   //! TODO(quhang): not implemented.
-  virtual void ProcessReportStatusOfWorker(
+  void ProcessReportStatusOfWorker(
       const message::WorkerReportStatusOfWorker& worker_command);
 
   //! TODO(quhang): not implemented.
-  virtual void ProcessControlPartitions(
+  void ProcessControlPartitions(
       const message::WorkerControlPartitions& worker_command);
 
- private:
+ protected:
   //! Activates a thread context.
   void ActivateThreadContext(WorkerLightThreadContext* thread_context);
 
@@ -158,7 +159,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Execution routine.
   static void* ExecutionRoutine(void* arg);
 
- private:
+ protected:
   //! Thread scheduling sychronization lock and condition variable.
   pthread_mutex_t scheduling_lock_;
   pthread_cond_t scheduling_cond_;
@@ -182,7 +183,28 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   WorkerId self_worker_id_ = WorkerId::INVALID;
 };
 
-class WorkerScheduler : public WorkerSchedulerBase {};
+class WorkerScheduler : public WorkerSchedulerBase {
+ public:
+  WorkerScheduler() {}
+  virtual ~WorkerScheduler() {}
+
+ protected:
+  //! Starts execution threads.
+  void StartExecution() override;
+
+  //! Loads the application binary.
+  void LoadApplicationBinary(ApplicationRecord* application_record) override;
+
+  //! Unloads the application binary.
+  void UnloadApplicationBinary(ApplicationRecord* application_record) override;
+
+  //! Loads a partition and returns its thread context.
+  WorkerLightThreadContext* LoadPartition(FullPartitionId full_partition_id)
+      override;
+
+  //! Unloads a partition and wraps up its thread context.
+  void UnloadPartition(WorkerLightThreadContext* thread_context) override;
+};
 
 }  // namespace canary
 #endif  // CANARY_SRC_WORKER_WORKER_SCHEDULER_H_

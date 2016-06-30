@@ -350,6 +350,10 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   // Sync call.
   void TriggerRefresh();
 
+  //! Refreshing routine.
+  // Sync call.
+  void RefreshRoutine();
+
  private:
   //! Initialization flag.
   bool is_initialized_ = false;

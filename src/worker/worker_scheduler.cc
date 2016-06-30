@@ -77,6 +77,7 @@ bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
 
 void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
   CHECK(is_initialized_);
+  CHECK_NOTNULL(buffer);
   LOG(FATAL) << "Not implemented.";
   // TODO(quhang): fill in.
   // Migrated partitions.
@@ -121,40 +122,6 @@ void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
   is_initialized_ = true;
   self_worker_id_ = worker_id;
   StartExecution();
-}
-
-void WorkerSchedulerBase::StartExecution() {
-  // Reads global variable: the number of worker threads.
-  thread_handle_list_.resize(FLAGS_worker_threads);
-  for (auto& handle : thread_handle_list_) {
-    // TODO(quhang): set thread priority.
-    PCHECK(pthread_create(&handle, nullptr,
-                          &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
-  }
-}
-
-void WorkerSchedulerBase::LoadApplicationBinary(
-    ApplicationRecord* application_record) {
-  // TODO(quhang): dynamically load the application binary.
-  CHECK_NOTNULL(application_record);
-  LOG(INFO) << "Load application binary.";
-}
-
-void WorkerSchedulerBase::UnloadApplicationBinary(
-    ApplicationRecord* application_record) {
-  // TODO(quhang): dynamically unload the application binary.
-  CHECK_NOTNULL(application_record);
-  LOG(INFO) << "Unload application binary.";
-}
-
-WorkerLightThreadContext* WorkerSchedulerBase::LoadPartition(FullPartitionId) {
-  return new WorkerExecutionContext();
-}
-
-void WorkerSchedulerBase::UnloadPartition(
-    WorkerLightThreadContext* thread_context) {
-  CHECK_NOTNULL(thread_context);
-  return;
 }
 
 void WorkerSchedulerBase::ProcessLoadApplication(
@@ -276,5 +243,40 @@ void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
   LOG(WARNING) << "Execution thread exits.";
   return nullptr;
 }
+
+void WorkerScheduler::StartExecution() {
+  // Reads global variable: the number of worker threads.
+  thread_handle_list_.resize(FLAGS_worker_threads);
+  for (auto& handle : thread_handle_list_) {
+    // TODO(quhang): set thread priority.
+    PCHECK(pthread_create(&handle, nullptr,
+                          &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
+  }
+}
+
+void WorkerScheduler::LoadApplicationBinary(
+    ApplicationRecord* application_record) {
+  // TODO(quhang): dynamically load the application binary.
+  CHECK_NOTNULL(application_record);
+  LOG(INFO) << "Load application binary.";
+}
+
+void WorkerScheduler::UnloadApplicationBinary(
+    ApplicationRecord* application_record) {
+  // TODO(quhang): dynamically unload the application binary.
+  CHECK_NOTNULL(application_record);
+  LOG(INFO) << "Unload application binary.";
+}
+
+WorkerLightThreadContext* WorkerScheduler::LoadPartition(FullPartitionId) {
+  return new WorkerExecutionContext();
+}
+
+void WorkerScheduler::UnloadPartition(
+    WorkerLightThreadContext* thread_context) {
+  CHECK_NOTNULL(thread_context);
+  return;
+}
+
 
 }  // namespace canary

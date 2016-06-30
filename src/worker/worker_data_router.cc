@@ -66,6 +66,8 @@ void WorkerDataRouter::Initialize(WorkerId worker_id,
   is_initialized_ = true;
   VLOG(1) << "Worker data router is initialized. (id="
           << get_value(self_worker_id_) << ")";
+  event_main_thread->AddDelayInjectedEvent(std::bind(
+          &WorkerDataRouter::RefreshRoutine, this));
 }
 
 void WorkerDataRouter::Finalize() {
@@ -658,14 +660,15 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
     if (header->partition_map_version >= internal_partition_map_version_ ||
         dest_worker_id == self_worker_id_) {
       // Delivers locally.
-      // Header is already removed. No need: message::RemoveDataHeader(buffer);
+      // Header is already removed. No need: message::RemoveDataHeader();
       const bool accepted = data_receiver_->ReceiveRoutedData(
-          application_id, variable_group_id, partition_id, stage_id, buffer);
+          application_id, variable_group_id, partition_id, stage_id,
+          deliver_buffer);
       if (!accepted) {
         // Rejected messages are put into pending queue.
         AddUnicastHeader(application_id, variable_group_id, partition_id,
-                         stage_id, buffer);
-        route_pending_queue_.push_back(buffer);
+                         stage_id, deliver_buffer);
+        route_pending_queue_.push_back(deliver_buffer);
       }
     } else {
       AddUnicastHeader(application_id, variable_group_id, partition_id,
@@ -756,6 +759,12 @@ void WorkerDataRouter::TriggerRefresh() {
       ++iter;
     }
   }
+}
+
+void WorkerDataRouter::RefreshRoutine() {
+  TriggerRefresh();
+  event_main_thread_->AddDelayInjectedEvent(std::bind(
+          &WorkerDataRouter::RefreshRoutine, this));
 }
 
 }  // namespace canary

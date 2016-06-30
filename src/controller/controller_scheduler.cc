@@ -39,4 +39,29 @@
 
 #include "controller/controller_scheduler.h"
 
-namespace canary {}  // namespace canary
+namespace canary {
+
+void ControllerSchedulerBase::Initialize(
+    network::EventMainThread* event_main_thread,
+    ControllerSendCommandInterface* send_command_interface) {
+  event_main_thread_ = CHECK_NOTNULL(event_main_thread);
+  send_command_interface_ = CHECK_NOTNULL(send_command_interface);
+}
+
+void ControllerSchedulerBase::ReceiveCommand(struct evbuffer* buffer) {
+  event_main_thread_->AddInjectedEvent(std::bind(
+          &ControllerSchedulerBase::InternalReceiveCommand, this, buffer));
+}
+
+void ControllerSchedulerBase::NotifyWorkerIsDown(WorkerId worker_id) {
+  event_main_thread_->AddInjectedEvent(std::bind(
+          &ControllerSchedulerBase::InternalNotifyWorkerIsDown,
+          this, worker_id));
+}
+
+void ControllerSchedulerBase::NotifyWorkerIsUp(WorkerId worker_id) {
+  event_main_thread_->AddInjectedEvent(std::bind(
+          &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
+}
+
+}  // namespace canary

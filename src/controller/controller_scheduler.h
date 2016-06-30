@@ -48,96 +48,66 @@
 
 namespace canary {
 
-class ControllerScheduler : public ControllerReceiveCommandInterface {
+class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
+ public:
+  //! Constructor.
+  ControllerSchedulerBase() {}
+
+  //! Destructor.
+  virtual ~ControllerSchedulerBase() {}
+
+  //! Initialize.
+  void Initialize(network::EventMainThread* event_main_thread,
+                  ControllerSendCommandInterface* send_command_interface);
+
+  //! Called when receiving a command. The message header is kept, and the
+  // buffer ownership is transferred.
+  void ReceiveCommand(struct evbuffer* buffer) override;
+
+  //! Called when a worker is down, even if it is shut down by the controller.
+  void NotifyWorkerIsDown(WorkerId worker_id) override;
+
+  //! Called when a worker is up. The up notification and down notification are
+  // paired.
+  void NotifyWorkerIsUp(WorkerId worker_id) override;
+
+ protected:
+  //! Called when receiving commands from a worker.
+  virtual void InternalReceiveCommand(struct evbuffer* buffer) = 0;
+
+  //! Called when a worker is down, even if it is shut down by the controller.
+  virtual void InternalNotifyWorkerIsDown(WorkerId worker_id) = 0;
+
+  //! Called when a worker is up. The up notification and down notification are
+  // paired.
+  virtual void InternalNotifyWorkerIsUp(WorkerId worker_id) = 0;
+
+ protected:
+  network::EventMainThread* event_main_thread_ = nullptr;
+  ControllerSendCommandInterface* send_command_interface_ = nullptr;
+};
+
+class ControllerScheduler : public ControllerSchedulerBase {
  public:
   ControllerScheduler() {}
   virtual ~ControllerScheduler() {}
 
-  void Initialize(network::EventMainThread* event_main_thread,
-                  ControllerSendCommandInterface* send_command_interface) {
-    event_main_thread_ = CHECK_NOTNULL(event_main_thread);
-    send_command_interface_ = CHECK_NOTNULL(send_command_interface);
-  }
-
-  //! Called when receiving a command. The message header is kept, and the
-  // buffer ownership is transferred.
-  void ReceiveCommand(struct evbuffer* buffer) override {
-    event_main_thread_->AddInjectedEvent(
-        std::bind(&ControllerScheduler::InternalReceiveCommand, this, buffer));
+ protected:
+  //! Called when receiving commands from a worker.
+  void InternalReceiveCommand(struct evbuffer* buffer) override {
+    CHECK_NOTNULL(buffer);
   }
 
   //! Called when a worker is down, even if it is shut down by the controller.
-  void NotifyWorkerIsDown(WorkerId worker_id) override {
-    event_main_thread_->AddInjectedEvent(std::bind(
-        &ControllerScheduler::InternalNotifyWorkerIsDown, this, worker_id));
+  void InternalNotifyWorkerIsDown(WorkerId worker_id) override {
+    CHECK(worker_id != WorkerId::INVALID);
   }
 
   //! Called when a worker is up. The up notification and down notification are
   // paired.
-  void NotifyWorkerIsUp(WorkerId worker_id) override {
-    event_main_thread_->AddInjectedEvent(std::bind(
-        &ControllerScheduler::InternalNotifyWorkerIsUp, this, worker_id));
+  void InternalNotifyWorkerIsUp(WorkerId worker_id) override {
+    CHECK(worker_id != WorkerId::INVALID);
   }
-
- private:
-  void InternalReceiveCommand(struct evbuffer* buffer) {
-    LOG(INFO) << "Controller receives command.";
-  }
-
-  //! Called when a worker is down, even if it is shut down by the controller.
-  void InternalNotifyWorkerIsDown(WorkerId worker_id) {}
-
-  //! Called when a worker is up. The up notification and down notification are
-  // paired.
-  void InternalNotifyWorkerIsUp(WorkerId worker_id) {
-    if (++num_workers_ == 2) {
-      WorkerId first_worker = WorkerId::FIRST;
-      WorkerId second_worker = get_next(first_worker);
-      PartitionId first_partition = PartitionId::FIRST;
-      PartitionId second_partition = get_next(first_partition);
-      ApplicationId application_id = ApplicationId::FIRST;
-      {
-        message::WorkerLoadApplication load_application;
-        load_application.application_id = application_id;
-        send_command_interface_->SendCommandToWorker(
-            first_worker,
-            message::SerializeMessageWithControlHeader(load_application));
-        send_command_interface_->SendCommandToWorker(
-            second_worker,
-            message::SerializeMessageWithControlHeader(load_application));
-      }
-      {
-        message::WorkerLoadPartitions load_partitions;
-        load_partitions.application_id = application_id;
-        load_partitions.load_partitions.clear();
-        load_partitions.load_partitions.emplace_back(VariableGroupId::FIRST,
-                                                     first_partition);
-        send_command_interface_->SendCommandToWorker(
-            first_worker,
-            message::SerializeMessageWithControlHeader(load_partitions));
-        load_partitions.load_partitions.clear();
-        load_partitions.load_partitions.emplace_back(VariableGroupId::FIRST,
-                                                     second_partition);
-        send_command_interface_->SendCommandToWorker(
-            second_worker,
-            message::SerializeMessageWithControlHeader(load_partitions));
-      }
-      auto per_application_partition_map = new PerApplicationPartitionMap();
-      per_application_partition_map->SetNumVariableGroup(1);
-      per_application_partition_map->SetPartitioning(VariableGroupId::FIRST, 2);
-      per_application_partition_map->SetWorkerId(VariableGroupId::FIRST,
-                                                 first_partition, first_worker);
-      per_application_partition_map->SetWorkerId(
-          VariableGroupId::FIRST, second_partition, second_worker);
-      send_command_interface_->AddApplication(application_id,
-                                              per_application_partition_map);
-    }
-  }
-
- private:
-  network::EventMainThread* event_main_thread_ = nullptr;
-  ControllerSendCommandInterface* send_command_interface_ = nullptr;
-  int num_workers_ = 0;
 };
 
 }  // namespace canary

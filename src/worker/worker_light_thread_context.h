@@ -170,100 +170,15 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   virtual ~WorkerExecutionContext() {}
 
   //! Initializes the light thread.
-  void Initialize() override { LOG(INFO) << "Initialized!"; }
+  void Initialize() override {}
 
   //! Finalizes the light thread.
-  void Finalize() override { LOG(INFO) << "Finalized!"; }
+  void Finalize() override {}
 
   //! Runs the thread.
   void Run() override {
-    struct evbuffer* command;
-    StageId command_stage_id;
-    if (RetrieveCommand(&command_stage_id, &command)) {
-      ProcessCommand(command_stage_id, command);
-      return;
-    }
-    std::list<struct evbuffer*> buffer_list;
-    StageId stage_id;
-    if (RetrieveData(&stage_id, &buffer_list)) {
-      ProcessData(stage_id, &buffer_list);
-      return;
-    }
-  }
-
- private:
-  void ProcessCommand(StageId command_stage_id, struct evbuffer* command) {
-    CHECK(command_stage_id < StageId::INVALID);
-    switch (command_stage_id) {
-      case StageId::INIT:
-        VLOG(3) << "INIT command.";
-        if (get_partition_id() == PartitionId::FIRST) {
-          VLOG(3) << "First partition waits for stage_id=0";
-          RegisterReceivingData(StageId::FIRST, 1);
-        } else {
-          struct evbuffer* buffer = evbuffer_new();
-          {
-            CanaryOutputArchive archive(buffer);
-            archive(StageId::FIRST);
-          }
-          VLOG(3) << "Second partition sends to first partition stage_id=0";
-          get_send_data_interface()->SendDataToPartition(
-              get_application_id(), get_variable_group_id(), PartitionId::FIRST,
-              StageId::FIRST, buffer);
-          VLOG(3) << "Second partition waits for stage_id=1";
-          RegisterReceivingData(get_next(StageId::FIRST), 1);
-        }
-        break;
-      default:
-        LOG(FATAL) << "Unknown command stage id!";
-    }
-    // The command might be empty.
-    if (command) {
-      evbuffer_free(command);
-    }
-  }
-  void ProcessData(StageId stage_id, std::list<struct evbuffer*>* buffer_list) {
-    LOG(INFO) << "Process Data. stage_id=" << get_value(stage_id);
-    if (get_partition_id() == PartitionId::FIRST) {
-      {
-        CHECK_EQ(buffer_list->size(), 1u);
-        StageId in_message_stage_id;
-        CanaryInputArchive archive(buffer_list->front());
-        archive(in_message_stage_id);
-        CHECK(in_message_stage_id == stage_id);
-      }
-      LOG(INFO) << "First partition receives: " << get_value(stage_id);
-      {
-        struct evbuffer* send_buffer = evbuffer_new();
-        CanaryOutputArchive archive(send_buffer);
-        archive(get_next(stage_id));
-        get_send_data_interface()->SendDataToPartition(
-            get_application_id(), get_variable_group_id(),
-            get_next(PartitionId::FIRST), get_next(stage_id), send_buffer);
-      }
-      RegisterReceivingData(get_next(stage_id, 2), 1);
-    } else {
-      CHECK_EQ(buffer_list->size(), 1u);
-      {
-        CanaryInputArchive archive(buffer_list->front());
-        StageId in_message_stage_id;
-        archive(in_message_stage_id);
-        CHECK(in_message_stage_id == stage_id);
-      }
-      LOG(INFO) << "Second partition receives: " << get_value(stage_id);
-      {
-        struct evbuffer* send_buffer = evbuffer_new();
-        CanaryOutputArchive archive(send_buffer);
-        archive(get_next(stage_id));
-        get_send_data_interface()->SendDataToPartition(
-            get_application_id(), get_variable_group_id(), PartitionId::FIRST,
-            get_next(stage_id), send_buffer);
-      }
-      RegisterReceivingData(get_next(stage_id, 2), 1);
-    }
-
-    for (auto buffer_to_delete : *buffer_list) {
-      evbuffer_free(buffer_to_delete);
+    while (true) {
+      continue;
     }
   }
 };
