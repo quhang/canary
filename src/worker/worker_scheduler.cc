@@ -169,6 +169,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     thread_context->Initialize();
     thread_map_[full_partition_id] = thread_context;
     thread_context->DeliverMessage(StageId::INIT, nullptr);
+    send_data_interface_->RefreshRouting();
   }
 }
 
@@ -277,6 +278,5 @@ void WorkerScheduler::UnloadPartition(
   CHECK_NOTNULL(thread_context);
   return;
 }
-
 
 }  // namespace canary

@@ -199,8 +199,8 @@ class WorkerScheduler : public WorkerSchedulerBase {
   void UnloadApplicationBinary(ApplicationRecord* application_record) override;
 
   //! Loads a partition and returns its thread context.
-  WorkerLightThreadContext* LoadPartition(FullPartitionId full_partition_id)
-      override;
+  WorkerLightThreadContext* LoadPartition(
+      FullPartitionId full_partition_id) override;
 
   //! Unloads a partition and wraps up its thread context.
   void UnloadPartition(WorkerLightThreadContext* thread_context) override;

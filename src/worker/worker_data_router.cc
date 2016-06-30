@@ -66,8 +66,6 @@ void WorkerDataRouter::Initialize(WorkerId worker_id,
   is_initialized_ = true;
   VLOG(1) << "Worker data router is initialized. (id="
           << get_value(self_worker_id_) << ")";
-  event_main_thread->AddDelayInjectedEvent(std::bind(
-          &WorkerDataRouter::RefreshRoutine, this));
 }
 
 void WorkerDataRouter::Finalize() {
@@ -420,6 +418,11 @@ void WorkerDataRouter::BroadcastDataToPartition(
                 variable_group_id, stage_id, buffer));
 }
 
+void WorkerDataRouter::RefreshRouting() {
+  event_main_thread_->AddInjectedEvent(
+      std::bind(&WorkerDataRouter::TriggerRefresh, this));
+}
+
 /*
  * Synchronous call interfaces invoked by WorkerCommunicationManager.
  */
@@ -622,20 +625,30 @@ void WorkerDataRouter::ProcessUnicastMessage(struct evbuffer* buffer) {
     message::RemoveDataHeader(buffer);
     const bool accepted = data_receiver_->ReceiveRoutedData(
         application_id, variable_group_id, partition_id, stage_id, buffer);
+    // VLOG_IF(3, accepted) << "Delivered."
+    //     << get_value(variable_group_id) << "/" << get_value(partition_id);
     if (!accepted) {
       // Rejected messages are put into pending queue.
       AddUnicastHeader(application_id, variable_group_id, partition_id,
                        stage_id, buffer);
+      // VLOG(3) << "Rejected."
+      //     << get_value(variable_group_id) << "/" << get_value(partition_id);
+      // Caution: rejected message will be triggered rerouted.
       route_pending_queue_.push_back(buffer);
     }
   } else {
-    header->partition_map_version = internal_partition_map_version_;
     auto peer_record = GetPeerRecordIfReady(dest_worker_id);
     if (peer_record != nullptr) {
+      // VLOG(3) << "Routed.";
+      header->partition_map_version = internal_partition_map_version_;
       // Normal routing of unicast message.
       peer_record->send_queue.push_back(buffer);
       CHECK_EQ(event_add(peer_record->write_event, nullptr), 0);
     } else {
+      // VLOG(3) << "Pending."
+      //     << get_value(variable_group_id) << "/" << get_value(partition_id);
+      // Caution: gives a lower version, so a rerouting will be tried later.
+      header->partition_map_version = PartitionMapVersion::INVALID;
       route_pending_queue_.push_back(buffer);
     }
   }
@@ -664,13 +677,16 @@ void WorkerDataRouter::ProcessMulticastMessage(struct evbuffer* buffer) {
       const bool accepted = data_receiver_->ReceiveRoutedData(
           application_id, variable_group_id, partition_id, stage_id,
           deliver_buffer);
+      // VLOG_IF(3, accepted) << "Multicast delivered.";
       if (!accepted) {
+        // VLOG_IF(3, accepted) << "Multicast rejected.";
         // Rejected messages are put into pending queue.
         AddUnicastHeader(application_id, variable_group_id, partition_id,
                          stage_id, deliver_buffer);
         route_pending_queue_.push_back(deliver_buffer);
       }
     } else {
+      // VLOG(3) << "Split mulcicast.";
       AddUnicastHeader(application_id, variable_group_id, partition_id,
                        stage_id, deliver_buffer);
       ProcessUnicastMessage(deliver_buffer);
@@ -742,6 +758,7 @@ WorkerDataRouter::PeerRecord* WorkerDataRouter::GetPeerRecordIfReady(
 }
 
 void WorkerDataRouter::TriggerRefresh() {
+  // VLOG(3) << "Refresh.";
   std::list<struct evbuffer*> buffer_queue;
   std::swap(buffer_queue, route_pending_queue_);
   for (auto buffer : buffer_queue) {
@@ -760,12 +777,6 @@ void WorkerDataRouter::TriggerRefresh() {
       ++iter;
     }
   }
-}
-
-void WorkerDataRouter::RefreshRoutine() {
-  TriggerRefresh();
-  event_main_thread_->AddDelayInjectedEvent(std::bind(
-          &WorkerDataRouter::RefreshRoutine, this));
 }
 
 }  // namespace canary

@@ -59,8 +59,7 @@ namespace canary {
  *
  * @see src/worker/worker_communication_interface.h
  */
-class WorkerCommunicationManager : public WorkerSendCommandInterface,
-                                   public WorkerSendDataInterface {
+class WorkerCommunicationManager : public WorkerSendCommandInterface {
  private:
   typedef WorkerCommunicationManager SelfType;
   /**
@@ -197,25 +196,7 @@ class WorkerCommunicationManager : public WorkerSendCommandInterface,
    * @see src/worker/worker_data_router.h
    */
 
-  void SendDataToPartition(ApplicationId application_id,
-                           VariableGroupId variable_group_id,
-                           PartitionId partition_id, StageId stage_id,
-                           struct evbuffer* buffer) override {
-    data_router_.SendDataToPartition(application_id, variable_group_id,
-                                     partition_id, stage_id, buffer);
-  }
-
-  void SendDataToWorker(WorkerId worker_id, struct evbuffer* buffer) override {
-    data_router_.SendDataToWorker(worker_id, buffer);
-  }
-
-  void BroadcastDataToPartition(ApplicationId application_id,
-                                VariableGroupId variable_group_id,
-                                StageId stage_id,
-                                struct evbuffer* buffer) override {
-    data_router_.BroadcastDataToPartition(application_id, variable_group_id,
-                                          stage_id, buffer);
-  }
+  WorkerSendDataInterface* GetDataRouter() { return &data_router_; }
 
  private:
   network::EventMainThread* event_main_thread_ = nullptr;

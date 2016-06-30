@@ -50,18 +50,17 @@ void ControllerSchedulerBase::Initialize(
 
 void ControllerSchedulerBase::ReceiveCommand(struct evbuffer* buffer) {
   event_main_thread_->AddInjectedEvent(std::bind(
-          &ControllerSchedulerBase::InternalReceiveCommand, this, buffer));
+      &ControllerSchedulerBase::InternalReceiveCommand, this, buffer));
 }
 
 void ControllerSchedulerBase::NotifyWorkerIsDown(WorkerId worker_id) {
   event_main_thread_->AddInjectedEvent(std::bind(
-          &ControllerSchedulerBase::InternalNotifyWorkerIsDown,
-          this, worker_id));
+      &ControllerSchedulerBase::InternalNotifyWorkerIsDown, this, worker_id));
 }
 
 void ControllerSchedulerBase::NotifyWorkerIsUp(WorkerId worker_id) {
   event_main_thread_->AddInjectedEvent(std::bind(
-          &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
+      &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
 }
 
 }  // namespace canary

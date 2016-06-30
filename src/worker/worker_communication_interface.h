@@ -63,6 +63,9 @@ class WorkerSendDataInterface {
                                         VariableGroupId variable_group_id,
                                         StageId stage_id,
                                         struct evbuffer* buffer) = 0;
+
+  //! Refreshes the routing layer to resend pending data.
+  virtual void RefreshRouting() = 0;
 };
 
 /**

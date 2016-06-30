@@ -45,31 +45,33 @@
 /**
  * Makes a scoped enumerator countable.
  */
-#define COUNTABLE_ENUM(T)                                                    \
-  inline std::underlying_type<T>::type get_value(T t) {                      \
-    return static_cast<std::underlying_type<T>::type>(t);                    \
-  }                                                                          \
-  inline T get_next(const T& t, int inc = 1) {                               \
-    return static_cast<T>(get_value(t) + inc);                               \
-  }                                                                          \
-  inline T get_prev(const T& t) { return static_cast<T>(get_value(t) - 1); } \
-  inline T operator++(T & t) {                                               \
-    t = get_next(t);                                                         \
-    return t;                                                                \
-  }                                                                          \
-  inline T operator++(T & t, int) {                                          \
-    T result = t;                                                            \
-    ++t;                                                                     \
-    return result;                                                           \
-  }                                                                          \
-  inline T operator--(T & t) {                                               \
-    t = get_prev(t);                                                         \
-    return t;                                                                \
-  }                                                                          \
-  inline T operator--(T & t, int) {                                          \
-    T result = t;                                                            \
-    --t;                                                                     \
-    return result;                                                           \
+#define COUNTABLE_ENUM(T)                                         \
+  inline constexpr std::underlying_type<T>::type get_value(T t) { \
+    return static_cast<std::underlying_type<T>::type>(t);         \
+  }                                                               \
+  inline constexpr T get_next(const T& t, int inc = 1) {          \
+    return static_cast<T>(get_value(t) + inc);                    \
+  }                                                               \
+  inline constexpr T get_prev(const T& t) {                       \
+    return static_cast<T>(get_value(t) - 1);                      \
+  }                                                               \
+  inline T operator++(T & t) {                                    \
+    t = get_next(t);                                              \
+    return t;                                                     \
+  }                                                               \
+  inline T operator++(T & t, int) {                               \
+    T result = t;                                                 \
+    ++t;                                                          \
+    return result;                                                \
+  }                                                               \
+  inline T operator--(T & t) {                                    \
+    t = get_prev(t);                                              \
+    return t;                                                     \
+  }                                                               \
+  inline T operator--(T & t, int) {                               \
+    T result = t;                                                 \
+    --t;                                                          \
+    return result;                                                \
   }  // NOLINT
 
 namespace canary {

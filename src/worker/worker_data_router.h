@@ -246,6 +246,9 @@ class WorkerDataRouter : public WorkerSendDataInterface {
                                 StageId stage_id,
                                 struct evbuffer* buffer) override;
 
+  //! Refreshes the routing layer to resend pending data.
+  void RefreshRouting() override;
+
  public:
   /*
    * Synchronous call interfaces invoked by WorkerCommunicationManager.
@@ -349,10 +352,6 @@ class WorkerDataRouter : public WorkerSendDataInterface {
   //! Trigger refreshing, i.e. sending pending messages.
   // Sync call.
   void TriggerRefresh();
-
-  //! Refreshing routine.
-  // Sync call.
-  void RefreshRoutine();
 
  private:
   //! Initialization flag.

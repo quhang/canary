@@ -56,8 +56,8 @@ int main(int argc, char** argv) {
                      &scheduler,  // data receiver.
                      FLAGS_controller_host, FLAGS_controller_service,
                      FLAGS_worker_service);
-  scheduler.Initialize(&manager,   // command sender.
-                       &manager);  // data sender.
+  scheduler.Initialize(&manager,                  // command sender.
+                       manager.GetDataRouter());  // data sender.
 
   // The main thread runs both the manager and the scheduler.
   event_main_thread.Run();
