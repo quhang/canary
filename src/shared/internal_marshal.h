@@ -171,6 +171,35 @@ namespace canary {
 using cereal::CanaryInputArchive;
 using cereal::CanaryOutputArchive;
 
+//! Wrapper for evbuffer, to be serialized/deserialized.
+struct RawEvbuffer {
+  struct evbuffer* buffer;
+};
+
 }  // namespace canary
+
+namespace cereal {
+
+//! Serialization will delete the buffer.
+inline void save(CanaryOutputArchive& ar,  // NOLINT
+                 const struct canary::RawEvbuffer& buffer) {
+  CHECK_NOTNULL(buffer.buffer);
+  const size_t length = evbuffer_get_length(buffer.buffer);
+  ar(length);
+  CHECK_EQ(evbuffer_add_buffer(ar.get_buffer(), buffer.buffer), 0);
+  evbuffer_free(buffer.buffer);
+}
+
+//! Deserialization will allocate the buffer.
+inline void load(CanaryInputArchive& ar,                // NOLINT
+                 struct canary::RawEvbuffer& buffer) {  // NOLINT
+  size_t length;
+  ar(length);
+  buffer.buffer = evbuffer_new();
+  CHECK_EQ(static_cast<int>(length),
+           evbuffer_remove_buffer(ar.get_buffer(), buffer.buffer, length));
+}
+
+}  // namespace cereal
 
 #endif  // CANARY_SRC_SHARED_INTERNAL_MARSHAL_H_

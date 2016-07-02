@@ -39,11 +39,20 @@ TEST(id, basic_marshal_test) {
   EXPECT_NE(a2, a3);
   {
     CanaryOutputArchive output_archive(buffer);
+    RawEvbuffer raw_evbuffer{evbuffer_new()};
+    evbuffer_add_printf(raw_evbuffer.buffer, "hello");
+    output_archive(raw_evbuffer);
     output_archive(a1, a2, a3);
   }
   ApplicationId b1, b2, b3;
   {
     CanaryInputArchive input_archive(buffer);
+    RawEvbuffer raw_evbuffer;
+    input_archive(raw_evbuffer);
+    auto length = evbuffer_get_length(raw_evbuffer.buffer);
+    std::string result_string(reinterpret_cast<const char*>(
+            evbuffer_pullup(raw_evbuffer.buffer, length)), length);
+    CHECK_EQ(result_string, std::string("hello"));
     input_archive(b1, b2, b3);
   }
   EXPECT_EQ(a1, b1);
