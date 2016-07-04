@@ -43,7 +43,8 @@
 #include <list>
 #include <map>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
+
 #include "worker/worker_communication_interface.h"
 
 namespace canary {

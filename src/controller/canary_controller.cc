@@ -40,6 +40,7 @@
 #include <thread>
 
 #include "shared/initialize.h"
+
 #include "controller/controller_communication_manager.h"
 #include "controller/controller_scheduler.h"
 

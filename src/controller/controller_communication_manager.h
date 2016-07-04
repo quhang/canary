@@ -42,17 +42,16 @@
 #ifndef CANARY_SRC_CONTROLLER_CONTROLLER_COMMUNICATION_MANAGER_H_
 #define CANARY_SRC_CONTROLLER_CONTROLLER_COMMUNICATION_MANAGER_H_
 
-#include <event2/listener.h>
-
 #include <list>
 #include <map>
 #include <string>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "controller/controller_communication_interface.h"
-#include "shared/partition_map.h"
 #include "message/message_include.h"
+#include "shared/partition_map.h"
+#include "shared/network.h"
 
 namespace canary {
 

@@ -1,8 +1,9 @@
 #include <event2/event.h>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "shared/initialize.h"
+#include "shared/network.h"
 
 DEFINE_string(server_host, "localhost", "The server host name.");
 DEFINE_string(server_service, "19991", "The server service name.");

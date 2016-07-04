@@ -44,7 +44,7 @@
 #include <string>
 #include <utility>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "message/message.h"
 

@@ -42,7 +42,7 @@
 
 #include <string>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 namespace canary {
 namespace message {

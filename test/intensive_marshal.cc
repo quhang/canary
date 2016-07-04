@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
+#include <cereal/archives/binary.hpp>
 
-#include "shared/internal_marshal.h"
+#include "shared/canary_internal.h"
 #include "shared/initialize.h"
 TEST(normal, intensive_marshal_test) {
   using namespace canary;

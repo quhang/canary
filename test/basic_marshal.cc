@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 
-#include "shared/internal_marshal.h"
+#include "shared/canary_internal.h"
 #include "shared/initialize.h"
 
 TEST(multi_types, basic_marshal_test) {

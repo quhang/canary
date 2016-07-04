@@ -40,7 +40,7 @@
 #ifndef CANARY_SRC_MESSAGE_DATA_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_DATA_MESSAGE_H_
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "message/message.h"
 

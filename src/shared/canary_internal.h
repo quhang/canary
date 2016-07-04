@@ -32,19 +32,15 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal_flag.h
+ * @file src/shared/canary_internal.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal command line flags.
+ * @brief Canary top level header file.
+ * @see include/canary/canary_include.h
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_FLAG_H_
-#define CANARY_SRC_SHARED_INTERNAL_FLAG_H_
+#ifndef CANARY_SRC_SHARED_CANARY_INTERNAL_H_
+#define CANARY_SRC_SHARED_CANARY_INTERNAL_H_
 
-#include "shared/internal_header.h"
+#include "canary/canary_internal.h"
 
-DECLARE_string(controller_host);
-DECLARE_string(controller_service);
-DECLARE_string(worker_service);
-DECLARE_int32(worker_threads);
-
-#endif  // CANARY_SRC_SHARED_INTERNAL_FLAG_H_
+#endif  // CANARY_SRC_SHARED_CANARY_INTERNAL_H_

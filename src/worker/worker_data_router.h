@@ -40,17 +40,16 @@
 #ifndef CANARY_SRC_WORKER_WORKER_DATA_ROUTER_H_
 #define CANARY_SRC_WORKER_WORKER_DATA_ROUTER_H_
 
-#include <event2/event.h>
-#include <event2/listener.h>
 #include <list>
 #include <map>
 #include <string>
 #include <vector>
 
-#include "shared/internal.h"
-#include "shared/partition_map.h"
-#include "message/message_include.h"
+#include "shared/canary_internal.h"
 
+#include "message/message_include.h"
+#include "shared/network.h"
+#include "shared/partition_map.h"
 #include "worker/worker_communication_interface.h"
 
 namespace canary {

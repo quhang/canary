@@ -32,19 +32,19 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal.h
+ * @file src/shared/canary_application.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal functionalities.
+ * @brief Class CanaryApplication.
+ * @see include/canary/canary_application.h
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_H_
-#define CANARY_SRC_SHARED_INTERNAL_H_
+#ifndef CANARY_SRC_SHARED_CANARY_APPLICATION_H_
+#define CANARY_SRC_SHARED_CANARY_APPLICATION_H_
 
-#include "shared/internal_flag.h"
-#include "shared/internal_header.h"
-#include "shared/internal_marshal.h"
-#include "shared/internal_network.h"
-#include "shared/internal_time.h"
-#include "shared/internal_type.h"
+namespace canary {
 
-#endif  // CANARY_SRC_SHARED_INTERNAL_H_
+class CanaryApplication {};
+
+}  // namespace canary
+
+#endif  // CANARY_SRC_SHARED_CANARY_APPLICATION_H_

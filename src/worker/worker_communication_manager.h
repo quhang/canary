@@ -46,9 +46,12 @@
 #include <list>
 #include <string>
 
+#include "shared/canary_internal.h"
+
+#include "message/message_include.h"
+#include "shared/network.h"
 #include "worker/worker_communication_interface.h"
 #include "worker/worker_data_router.h"
-#include "message/message_include.h"
 
 namespace canary {
 

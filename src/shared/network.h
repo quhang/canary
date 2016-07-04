@@ -32,33 +32,41 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal_network.h
+ * @file src/shared/network.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Networking facilities.
+ * @brief Networking facility.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
-#define CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
+#ifndef CANARY_SRC_SHARED_NETWORK_H_
+#define CANARY_SRC_SHARED_NETWORK_H_
 
-#include <event2/event.h>
+// Libevent header files.
 #include <event2/buffer.h>
+#include <event2/event.h>
+#include <event2/listener.h>
+
+// Networking related header files.
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <string>
 
-#include "shared/internal_header.h"
+#include "shared/canary_internal.h"
 
-// Forward declaration.
-struct addrinfo;
-struct sockaddr;
-struct event_base;
-struct timeval;
-
+//! Adds one function to libevent: deep copy a buffer.
 inline int evbuffer_deep_copy(struct evbuffer* dst, struct evbuffer* src) {
   auto length = evbuffer_get_length(src);
   return evbuffer_add(dst, evbuffer_pullup(src, length), length);
 }
 
 namespace canary {
-
 namespace network {
 
 /**
@@ -237,4 +245,5 @@ class EventMainThread {
 
 }  // namespace network
 }  // namespace canary
-#endif  // CANARY_SRC_SHARED_INTERNAL_NETWORK_H_
+
+#endif  // CANARY_SRC_SHARED_NETWORK_H_

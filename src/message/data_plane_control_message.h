@@ -44,8 +44,9 @@
 #include <utility>
 #include <string>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
+#include "shared/partition_map.h"
 #include "message/message.h"
 
 namespace canary {

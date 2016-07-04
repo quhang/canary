@@ -34,11 +34,11 @@
 /**
  * @file canary/canary_internal.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class CanaryInternal.
+ * @brief Canary top level header file.
  */
 
-#ifndef CANARY_CANARY_CANARY_INTERNAL_H_
-#define CANARY_CANARY_CANARY_INTERNAL_H_
+#ifndef CANARY_INCLUDE_CANARY_CANARY_INTERNAL_H_
+#define CANARY_INCLUDE_CANARY_CANARY_INTERNAL_H_
 
 // Gflags library for managing command line flags.
 #include <gflags/gflags.h>
@@ -66,6 +66,9 @@
 
 // Fixed-width integer types.
 #include <cinttypes>
+
+// Time facility.
+#include <chrono>
 
 // C++ library related to function objects and type support.
 #include <functional>
@@ -99,7 +102,6 @@ struct RawEvbuffer {
 }  // namespace canary
 
 namespace cereal {
-
 /**
  * Canary serialization helper.
  */
@@ -196,8 +198,9 @@ inline void CEREAL_LOAD_FUNCTION_NAME(CanaryInputArchive& ar,  // NOLINT
 }
 
 //! Serialization will delete the buffer.
-inline void CEREAL_SAVE_FUNCTION_NAME(CanaryOutputArchive& ar,  // NOLINT
-                 const struct canary::RawEvbuffer& buffer) {
+inline void CEREAL_SAVE_FUNCTION_NAME(
+    CanaryOutputArchive& ar,  // NOLINT
+    const struct canary::RawEvbuffer& buffer) {
   CHECK_NOTNULL(buffer.buffer);
   const size_t length = evbuffer_get_length(buffer.buffer);
   ar(length);
@@ -206,27 +209,35 @@ inline void CEREAL_SAVE_FUNCTION_NAME(CanaryOutputArchive& ar,  // NOLINT
 }
 
 //! Deserialization will allocate the buffer.
-inline void CEREAL_LOAD_FUNCTION_NAME(CanaryInputArchive& ar,                // NOLINT
-                 struct canary::RawEvbuffer& buffer) {  // NOLINT
+inline void CEREAL_LOAD_FUNCTION_NAME(
+    CanaryInputArchive& ar,                // NOLINT
+    struct canary::RawEvbuffer& buffer) {  // NOLINT
   size_t length;
   ar(length);
   buffer.buffer = evbuffer_new();
   CHECK_EQ(static_cast<int>(length),
            evbuffer_remove_buffer(ar.get_buffer(), buffer.buffer, length));
 }
-
 }  // namespace cereal
+
+// Registers archives for polymorphic support.
+CEREAL_REGISTER_ARCHIVE(cereal::CanaryOutputArchive);
+CEREAL_REGISTER_ARCHIVE(cereal::CanaryInputArchive);
+
+// Ties input and output archives together.
+CEREAL_SETUP_ARCHIVE_TRAITS(cereal::CanaryInputArchive,
+                            cereal::CanaryOutputArchive);
 
 namespace canary {
 
-// Imports names to Canary name space.
+// Imports names to Canary namespace.
 using cereal::CanaryInputArchive;
 using cereal::CanaryOutputArchive;
 
-}  // namespace;
+}  // namespace canary
 
 /**
- * Makes a scoped enumerator countable.
+ * Makes a scoped enumeration type countable.
  */
 #define COUNTABLE_ENUM(T)                                         \
   inline constexpr std::underlying_type<T>::type get_value(T t) { \
@@ -258,6 +269,23 @@ using cereal::CanaryOutputArchive;
   }  // NOLINT
 
 namespace canary {
+
+//! SFAINE version of the hash function.
+template <typename T, bool>
+struct enum_hash {
+ private:
+  enum_hash(enum_hash&&);
+  ~enum_hash();
+};
+
+//! Hash function of enumeration types.
+template <typename T>
+struct enum_hash<T, true> {
+  size_t operator()(const T& e) const noexcept {
+    using value_type = typename std::underlying_type<T>::type;
+    return std::hash<value_type>{}(static_cast<value_type>(e));
+  }
+};
 
 /**
  * The id of a worker.
@@ -296,6 +324,12 @@ enum class StageId : int32_t { INIT = -2, INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(StageId);
 
 /**
+ * The id of a statement.
+ */
+enum class StatementId : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(StatementId);
+
+/**
  * The version of the partition map.
  */
 enum class PartitionMapVersion : int32_t { INVALID = -1, FIRST = 0 };
@@ -307,8 +341,14 @@ COUNTABLE_ENUM(PartitionMapVersion);
 enum class PriorityLevel : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PriorityLevel);
 
+/**
+ * Message sequence number.
+ */
 typedef uint64_t SequenceNumber;
 
+/**
+ * The full id of a partition.
+ */
 struct FullPartitionId {
   ApplicationId application_id;
   VariableGroupId variable_group_id;
@@ -320,8 +360,8 @@ struct FullPartitionId {
   bool operator<(const FullPartitionId& rhs) const {
     if (application_id < rhs.application_id) return true;
     if (application_id > rhs.application_id) return false;
-    if (variable_group_id > rhs.variable_group_id) return true;
-    if (variable_group_id < rhs.variable_group_id) return false;
+    if (variable_group_id < rhs.variable_group_id) return true;
+    if (variable_group_id > rhs.variable_group_id) return false;
     if (partition_id < rhs.partition_id) return true;
     return false;
   }
@@ -331,34 +371,23 @@ struct FullPartitionId {
 
 namespace std {
 
-//! Hash function for enumeration values.
+//! Hash function for enumeration types. This is a bug in gcc-4.9, that the hash
+// function for enumeration types is not implemented. Later version standard
+// library fixes this, so this hash function can be removed.
 template <typename T>
-class hash {
-  using sfinae = typename std::enable_if<std::is_enum<T>::value, T>::type;
+struct hash : canary::enum_hash<T, is_enum<T>::value> {};
 
- public:
-  size_t operator()(const T& e) const {
-    return std::hash<typename std::underlying_type<T>::type>()(
-        canary::get_value(e));
-  }
-};
-
+//! Hash function for full partition id.
 template <>
-class hash<canary::FullPartitionId> {
- public:
-  size_t operator()(const canary::FullPartitionId& e) const {
-    return (std::hash<canary::ApplicationId>()(e.application_id) << 16) +
-           (std::hash<canary::VariableGroupId>()(e.variable_group_id) << 8) +
-           std::hash<canary::PartitionId>()(e.partition_id);
+struct hash<::canary::FullPartitionId> {
+  size_t operator()(const ::canary::FullPartitionId& e) const {
+    return (std::hash<::canary::ApplicationId>()(e.application_id) << 16) +
+           (std::hash<::canary::VariableGroupId>()(e.variable_group_id) << 8) +
+           std::hash<::canary::PartitionId>()(e.partition_id);
   }
 };
 
 }  // namespace std
-
-
-
-
-}  // namespace canary
 
 namespace canary {
 namespace time {
@@ -372,15 +401,15 @@ namespace time {
  *   std::cout << to_double(duration);
  */
 typedef std::chrono::steady_clock Clock;
-/// @brief Time point type.
+//! Time point type.
 typedef Clock::time_point Timepoint;
-/// @brief Time duration type.
+//! Time duration type.
 typedef Clock::duration Duration;
-/// @brief Convert a time duration to double.
+//! Convert a time duration to double.
 inline double to_double(const Duration& input) {
   return std::chrono::duration<double>(input).count();
 }
 
 }  // namespace time
 }  // namespace canary
-#endif  // CANARY_CANARY_CANARY_INTERNAL_H_
+#endif  // CANARY_INCLUDE_CANARY_CANARY_INTERNAL_H_

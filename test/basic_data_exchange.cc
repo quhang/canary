@@ -5,7 +5,7 @@
 #include <list>
 #include <thread>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "shared/initialize.h"
 #include "controller/controller_communication_manager.h"

@@ -32,27 +32,14 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal_network.cc
+ * @file src/shared/network.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Networking facilities.
+ * @brief Networking facility.
  */
 
-#include "shared/internal_network.h"
-
-#include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <netdb.h>
-#include <netinet/tcp.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-#include "shared/internal_header.h"
+#include "shared/network.h"
 
 namespace canary {
-
 namespace network {
 
 int close_socket(int socket_fd) { return close(socket_fd); }

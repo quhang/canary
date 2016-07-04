@@ -37,7 +37,7 @@
  * @brief Class CanaryWorker.
  */
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 #include "shared/initialize.h"
 #include "worker/worker_communication_manager.h"

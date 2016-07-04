@@ -45,11 +45,13 @@
 #include <string>
 #include <vector>
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
+
+#include "message/message_include.h"
+#include "shared/network.h"
 #include "shared/partition_map.h"
 #include "worker/worker_communication_interface.h"
 #include "worker/worker_light_thread_context.h"
-#include "message/message_include.h"
 
 namespace canary {
 

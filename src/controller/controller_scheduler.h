@@ -40,11 +40,12 @@
 #ifndef CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 #define CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
-#include "shared/partition_map.h"
 #include "controller/controller_communication_interface.h"
 #include "message/message_include.h"
+#include "shared/network.h"
+#include "shared/partition_map.h"
 
 namespace canary {
 

@@ -40,7 +40,7 @@
 #ifndef CANARY_SRC_SHARED_INITIALIZE_H_
 #define CANARY_SRC_SHARED_INITIALIZE_H_
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 namespace canary {
 
@@ -51,4 +51,5 @@ void InitializeCanaryWorker(int* argc, char** argv[]);
 void InitializeCanaryController(int* argc, char** argv[]);
 
 }  // namespace canary
+
 #endif  // CANARY_SRC_SHARED_INITIALIZE_H_

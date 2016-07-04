@@ -32,52 +32,19 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal_header.h
+ * @file src/shared/canary_task_context.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Internal header files.
+ * @brief Class CanaryTaskContext.
+ * @see include/canary/canary_task_context.h
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_HEADER_H_
-#define CANARY_SRC_SHARED_INTERNAL_HEADER_H_
+#ifndef CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_
+#define CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_
 
-// Gflags library for managing command line flags.
-#include <gflags/gflags.h>
-// Glog library for logging.
-#include <glog/logging.h>
+namespace canary {
 
-// C++ libraries.
-#include <cinttypes>
-#include <functional>
-#include <sstream>
-#include <type_traits>
+class CanaryTaskContext {};
 
-/**
- * Marks a class as singleton which only offers static access.
- */
-#ifndef SINGLETON_STATIC
-#define SINGLETON_STATIC(T) \
-  T() = delete;             \
-  ~T() = delete
-#endif  // SINGLETON_STATIC
+}  // namespace canary
 
-/**
- * Marks a class as non-copyable and non-movable.
- */
-#ifndef NON_COPYABLE_NOR_MOVABLE
-#define NON_COPYABLE_NOR_MOVABLE(T) \
-  T(const T&) = delete;             \
-  T(T&&) = delete;                  \
-  T& operator=(const T&) = delete;  \
-  T& operator=(T&&) = delete
-#endif  // NON_COPYABLE_NOR_MOVABLE
-
-/**
- * Marks a class as non-copyable.
- */
-#ifndef NON_COPYABLE
-#define NON_COPYABLE(T) \
-  T(const T&) = delete; \
-  T& operator=(const T&) = delete
-#endif  // NON_COPYABLE
-
-#endif  // CANARY_SRC_SHARED_INTERNAL_HEADER_H_
+#endif  // CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_

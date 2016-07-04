@@ -1,5 +1,7 @@
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
+
 #include "shared/initialize.h"
+#include "shared/network.h"
 
 DEFINE_string(server_service, "19991", "The server service name.");
 

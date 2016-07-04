@@ -32,37 +32,16 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/internal_time.h
+ * @file src/shared/canary_internal.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Timing functions.
+ * @brief Implementation of Canary top level header file.
  */
 
-#ifndef CANARY_SRC_SHARED_INTERNAL_TIME_H_
-#define CANARY_SRC_SHARED_INTERNAL_TIME_H_
+#include "shared/canary_internal.h"
 
-#include <chrono>  // NOLINT
+DEFINE_string(controller_host, "localhost", "The controller hostname.");
+DEFINE_string(controller_service, "29992",
+              "The controller port for worker to connect.");
+DEFINE_string(worker_service, "39993", "The worker port for exchanging data.");
 
-namespace canary {
-namespace time {
-
-/**
- * Use case:
- *   using namespace ::canary::time;
- *   Timepoint start = Clock::now();
- *   Timepoint end = Clock::now();
- *   Duration duration = end - start;
- *   std::cout << to_double(duration);
- */
-typedef std::chrono::steady_clock Clock;
-/// @brief Time point type.
-typedef Clock::time_point Timepoint;
-/// @brief Time duration type.
-typedef Clock::duration Duration;
-/// @brief Convert a time duration to double.
-inline double to_double(const Duration& input) {
-  return std::chrono::duration<double>(input).count();
-}
-
-}  // namespace time
-}  // namespace canary
-#endif  // CANARY_SRC_SHARED_INTERNAL_TIME_H_
+DEFINE_int32(worker_threads, 2, "The number of worker execution threads.");

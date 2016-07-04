@@ -40,7 +40,7 @@
 #ifndef CANARY_SRC_WORKER_WORKER_COMMUNICATION_INTERFACE_H_
 #define CANARY_SRC_WORKER_WORKER_COMMUNICATION_INTERFACE_H_
 
-#include "shared/internal.h"
+#include "shared/canary_internal.h"
 
 namespace canary {
 
