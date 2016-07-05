@@ -41,10 +41,6 @@
 #ifndef CANARY_SRC_SHARED_CANARY_APPLICATION_H_
 #define CANARY_SRC_SHARED_CANARY_APPLICATION_H_
 
-namespace canary {
-
-class CanaryApplication {};
-
-}  // namespace canary
+#include "canary/canary_application.h"
 
 #endif  // CANARY_SRC_SHARED_CANARY_APPLICATION_H_

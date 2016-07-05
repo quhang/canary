@@ -41,10 +41,6 @@
 #ifndef CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_
 #define CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_
 
-namespace canary {
-
-class CanaryTaskContext {};
-
-}  // namespace canary
+#include "canary/canary_task_context.h"
 
 #endif  // CANARY_SRC_SHARED_CANARY_TASK_CONTEXT_H_

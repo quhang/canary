@@ -79,12 +79,12 @@
  * Marks a class as non-copyable and non-movable.
  */
 #ifndef NON_COPYABLE_AND_NON_MOVABLE
-#define NON_COPYABLE_NOR_MOVABLE(T) \
-  T(const T&) = delete;             \
-  T(T&&) = delete;                  \
-  T& operator=(const T&) = delete;  \
+#define NON_COPYABLE_AND_NON_MOVABLE(T) \
+  T(const T&) = delete;                 \
+  T(T&&) = delete;                      \
+  T& operator=(const T&) = delete;      \
   T& operator=(T&&) = delete
-#endif  // NON_COPYABLE_NOR_MOVABLE
+#endif  // NON_COPYABLE_AND_NON_MOVABLE
 
 /**
  * Command line flags.

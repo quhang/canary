@@ -32,21 +32,11 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file canary/canary.h
+ * @file src/shared/canary_application.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Canary external header file.
+ * @brief Class CanaryApplication.
  */
 
-#ifndef CANARY_INCLUDE_CANARY_CANARY_H_
-#define CANARY_INCLUDE_CANARY_CANARY_H_
+#include "shared/canary_application.h"
 
-#include "canary/canary_internal.h"
-
-#include "canary/canary_application.h"
-#include "canary/canary_task_context.h"
-
-extern "C" {
-void done();
-}
-
-#endif  // CANARY_INCLUDE_CANARY_CANARY_H_
+namespace canary {}  // namespace canary

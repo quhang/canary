@@ -12,7 +12,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # canary_core library target.
 cxx_static_library(canary_core "${cxx_default}"
+    shared/canary_application.cc
     shared/canary_internal.cc
+    shared/canary_task_context.cc
     shared/initialize.cc
     shared/network.cc
     shared/partition_map.cc
