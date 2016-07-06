@@ -263,7 +263,7 @@ void WorkerScheduler::LoadApplicationBinary(
     ApplicationRecord* application_record) {
   CHECK_NOTNULL(application_record);
   LOG(INFO) << "Loading application banary: "
-      << application_record->binary_location;
+            << application_record->binary_location;
 
   // Loading the library.
   dlerror();  // Clears error code.
@@ -283,8 +283,8 @@ void WorkerScheduler::LoadApplicationBinary(
   if (err) {
     LOG(FATAL) << "Loading application error: " << err;
   }
-  application_record->loaded_application
-      = reinterpret_cast<CanaryApplication*>(entry_point());
+  application_record->loaded_application =
+      reinterpret_cast<CanaryApplication*>(entry_point());
 
   // Instantiates the application object.
   auto loaded_application = application_record->loaded_application;

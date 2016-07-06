@@ -41,8 +41,7 @@
 #define CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 namespace canary {
 
-class LaunchMessage {
-};
+class LaunchMessage {};
 
 }  // namespace canary
 #endif  // CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_

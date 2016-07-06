@@ -47,16 +47,13 @@ class StageGraph {
   // typedef std::map<StatementId, StatementInfo> StatementInfoMap;
   // VariableGroupId.
   void Initialize();
-  void CompleteStage(StageId stage_id) {
-  }
+  void CompleteStage(StageId stage_id) {}
   StageId NextReadyStage() {
     while (pending_stages < kMaxPendingStages && !no_stage_to_spawn) {
       // Spawn stages.
     }
   }
-  void FeedCondition(StageId stage_id, bool control_decision) {
-    SpawnStages();
-  }
+  void FeedCondition(StageId stage_id, bool control_decision) { SpawnStages(); }
 
  private:
   void SpawnStages() {

@@ -91,6 +91,7 @@
  */
 DECLARE_string(controller_host);
 DECLARE_string(controller_service);
+DECLARE_string(launch_service);
 DECLARE_string(worker_service);
 DECLARE_int32(worker_threads);
 
@@ -290,7 +291,7 @@ struct enum_hash<T, true> {
 /**
  * The id of a worker.
  */
-enum class WorkerId : int32_t { INVALID = -1, FIRST = 0 };
+enum class WorkerId : int32_t { LAUNCHER = -2, INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(WorkerId);
 
 /**

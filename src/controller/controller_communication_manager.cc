@@ -44,7 +44,7 @@ namespace canary {
 void ControllerCommunicationManager::Initialize(
     network::EventMainThread* event_main_thread,
     ControllerReceiveCommandInterface* command_receiver,
-    const std::string& controller_service) {
+    const std::string& controller_service, const std::string& launch_service) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   command_receiver_ = CHECK_NOTNULL(command_receiver);
   event_base_ = event_main_thread_->get_event_base();
@@ -53,11 +53,22 @@ void ControllerCommunicationManager::Initialize(
       network::allocate_and_bind_listen_socket(controller_service);
   CHECK_NE(listening_socket_, -1) << "Cannot listen on port "
                                   << controller_service << "!";
+  // Registers the launching listening port.
+  launch_listening_socket_ =
+      network::allocate_and_bind_listen_socket(launch_service);
+  CHECK_NE(launch_listening_socket_, -1) << "Cannot listen on port "
+                                         << launch_service << "!";
   // Starts the listening service.
   listening_event_ = CHECK_NOTNULL(
       evconnlistener_new(event_base_, &DispatchAcceptEvent, this,
                          LEV_OPT_CLOSE_ON_FREE, kBacklog, listening_socket_));
   evconnlistener_set_error_cb(listening_event_, DispatchAcceptErrorEvent);
+  // Starts the launching service.
+  launch_listening_event_ = CHECK_NOTNULL(evconnlistener_new(
+      event_base_, &DispatchLaunchAcceptEvent, this, LEV_OPT_CLOSE_ON_FREE,
+      kBacklog, launch_listening_socket_));
+  evconnlistener_set_error_cb(launch_listening_event_,
+                              DispatchAcceptErrorEvent);
   // Sets the initialization flag.
   is_initialized_ = true;
   VLOG(1) << "Controller communication manager is initialized.";
@@ -76,6 +87,13 @@ void ControllerCommunicationManager::DispatchAcceptEvent(
     int socklen, void* arg) {
   auto manager = reinterpret_cast<SelfType*>(arg);
   manager->CallbackAcceptEvent(listener, socket_fd, address, socklen);
+}
+
+void ControllerCommunicationManager::DispatchLaunchAcceptEvent(
+    struct evconnlistener* listener, int socket_fd, struct sockaddr* address,
+    int socklen, void* arg) {
+  auto manager = reinterpret_cast<SelfType*>(arg);
+  manager->CallbackLaunchAcceptEvent(listener, socket_fd, address, socklen);
 }
 
 void ControllerCommunicationManager::DispatchAcceptErrorEvent(
@@ -122,6 +140,27 @@ void ControllerCommunicationManager::CallbackAcceptEvent(
   message.assigned_worker_id = worker_id;
   struct evbuffer* buffer = message::SerializeMessageWithControlHeader(message);
   AppendWorkerSendingQueue(worker_id, buffer);
+}
+
+void ControllerCommunicationManager::CallbackLaunchAcceptEvent(
+    struct evconnlistener* listener, int socket_fd, struct sockaddr* address,
+    int socklen) {
+  CHECK_EQ(listener, launch_listening_event_);
+  std::string host, service;
+  network::translate_sockaddr_to_string(address, socklen, &host, &service);
+  VLOG(1) << "Job launching from " << host << ":" << service;
+  auto worker_record = new WorkerRecord();
+  worker_record->worker_id = WorkerId::LAUNCHER;
+  worker_record->socket_fd = socket_fd;
+  worker_record->is_ready = false;
+  worker_record->read_event =
+      CHECK_NOTNULL(event_new(event_base_, socket_fd, EV_READ | EV_PERSIST,
+                              &DispatchReadEvent, worker_record));
+  CHECK_EQ(event_add(worker_record->read_event, nullptr), 0);
+  worker_record->write_event = nullptr;
+  worker_record->send_buffer = nullptr;
+  worker_record->receive_buffer = CHECK_NOTNULL(evbuffer_new());
+  worker_record->manager = this;
 }
 
 void ControllerCommunicationManager::CallbackReadEvent(
@@ -273,15 +312,20 @@ void ControllerCommunicationManager::CleanUpWorkerRecord(
   }
   worker_record->send_queue.clear();
   const auto worker_id = worker_record->worker_id;
-  VLOG(1) << "Shuts down connection with worker: " << get_value(worker_id)
-          << ".";
-  const bool is_ready = worker_record->is_ready;
-  worker_id_to_status_.erase(worker_id);
+  if (worker_id >= WorkerId::FIRST) {
+    VLOG(1) << "Shuts down connection with worker: " << get_value(worker_id)
+            << ".";
+    const bool is_ready = worker_record->is_ready;
+    worker_id_to_status_.erase(worker_id);
 
-  // Checks the is_ready flag so that up and down events are paired.
-  if (is_ready) {
-    // Notifies that a worker is down.
-    command_receiver_->NotifyWorkerIsDown(worker_id);
+    // Checks the is_ready flag so that up and down events are paired.
+    if (is_ready) {
+      // Notifies that a worker is down.
+      command_receiver_->NotifyWorkerIsDown(worker_id);
+    }
+  } else {
+    CHECK(worker_id == WorkerId::LAUNCHER);
+    delete worker_record;
   }
 }
 
