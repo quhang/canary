@@ -14,13 +14,13 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 cxx_static_library(canary_core "${cxx_default}"
     shared/canary_application.cc
     shared/canary_internal.cc
-    shared/canary_task_context.cc
     shared/initialize.cc
     shared/network.cc
     shared/partition_map.cc
     message/message.cc
     controller/controller_communication_manager.cc
     controller/controller_scheduler.cc
+    worker/canary_task_context.cc
     worker/worker_communication_manager.cc
     worker/worker_data_router.cc
     worker/worker_light_thread_context.cc

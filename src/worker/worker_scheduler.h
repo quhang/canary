@@ -70,6 +70,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
     std::string application_parameter;
     int local_partitions = 0;
     void* loading_handle = nullptr;
+    CanaryApplication* loaded_application = nullptr;
     const CanaryApplication::VariableInfoMap* variable_info_map = nullptr;
     const CanaryApplication::StatementInfoMap* statement_info_map = nullptr;
   };

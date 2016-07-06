@@ -32,12 +32,12 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/shared/canary_task_context.cc
+ * @file src/worker/canary_task_context.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
  * @brief Class CanaryTaskContext.
  */
 
-#include "shared/canary_task_context.h"
+#include "worker/canary_task_context.h"
 
 #include "worker/worker_communication_interface.h"
 

@@ -262,23 +262,32 @@ void WorkerScheduler::StartExecution() {
 void WorkerScheduler::LoadApplicationBinary(
     ApplicationRecord* application_record) {
   CHECK_NOTNULL(application_record);
-  LOG(INFO) << "Loading application: " << application_record->binary_location;
+  LOG(INFO) << "Loading application banary: "
+      << application_record->binary_location;
+
+  // Loading the library.
   dlerror();  // Clears error code.
   application_record->loading_handle =
       dlopen(application_record->binary_location.c_str(), RTLD_NOW);
   const char* err = reinterpret_cast<const char*>(dlerror());
   if (err) {
-    LOG(FATAL) << err;
+    LOG(FATAL) << "Loading application error: " << err;
   }
   dlerror();  // Clears error code.
+
+  // Loading the symbol.
   typedef void* (*FactoryMethod)();
   FactoryMethod entry_point = reinterpret_cast<FactoryMethod>(
       dlsym(application_record->loading_handle, "ApplicationEnterPoint"));
   err = reinterpret_cast<const char*>(dlerror());
   if (err) {
-    LOG(FATAL) << err;
+    LOG(FATAL) << "Loading application error: " << err;
   }
-  auto loaded_application = reinterpret_cast<CanaryApplication*>(entry_point());
+  application_record->loaded_application
+      = reinterpret_cast<CanaryApplication*>(entry_point());
+
+  // Instantiates the application object.
+  auto loaded_application = application_record->loaded_application;
   loaded_application->LoadParameter(application_record->application_parameter);
   loaded_application->Program();
   application_record->variable_info_map =
@@ -289,6 +298,7 @@ void WorkerScheduler::LoadApplicationBinary(
 
 void WorkerScheduler::UnloadApplicationBinary(
     ApplicationRecord* application_record) {
+  delete application_record->loaded_application;
   dlclose(application_record->loading_handle);
   CHECK_NOTNULL(application_record);
   LOG(INFO) << "Unload application binary.";
