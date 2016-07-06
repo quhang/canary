@@ -159,11 +159,20 @@ class CanaryApplication {
   //! Stores information about a variable.
   struct VariableInfo {
     PartitionData* data_prototype = nullptr;
-    // -1 means unknown parallelism.
     int parallelism = -1;
+    // Filled in.
+    VariableGroupId variable_group_id = VariableGroupId::INVALID;
   };
 
   typedef std::map<VariableId, VariableInfo> VariableInfoMap;
+
+  //! Stores information about a group.
+  struct VariableGroupInfo {
+    // Filled in.
+    std::set<VariableId> variable_id_set;
+    int parallelism = -1;
+  };
+  typedef std::map<VariableGroupId, VariableGroupInfo> VariableGroupInfoMap;
 
   //! Stores information about a statement.
   struct StatementInfo {
@@ -175,6 +184,14 @@ class CanaryApplication {
     std::map<VariableId, VariableAccess> variable_access_map;
     bool pause_needed = false;
     bool track_needed = false;
+
+    // Filled in.
+    VariableGroupId variable_group_id = VariableGroupId::INVALID;
+    int parallelism = -1;
+    StatementId true_branch_statement = StatementId::INVALID;
+    StatementId false_branch_statement = StatementId::INVALID;
+    int paired_scatter_parallelism = -1;
+    int paired_gather_parallelism = -1;
   };
 
   typedef std::map<StatementId, StatementInfo> StatementInfoMap;
@@ -302,7 +319,12 @@ class CanaryApplication {
   virtual void LoadParameter(const std::string& parameter) = 0;
   virtual std::string SaveParameter() = 0;
 
+  void FillInProgram();
+
   const VariableInfoMap* get_variable_info_map() { return &variable_info_map_; }
+  const VariableGroupInfoMap* get_variable_group_info_map() {
+    return &variable_group_info_map_;
+  };
   const StatementInfoMap* get_statement_info_map() {
     return &statement_info_map_;
   }
@@ -315,6 +337,7 @@ class CanaryApplication {
   StatementId next_statement_id_ = StatementId::FIRST;
 
   VariableInfoMap variable_info_map_;
+  VariableGroupInfoMap variable_group_info_map_;
   StatementInfoMap statement_info_map_;
 
   //! Applies staged states to a statement.
