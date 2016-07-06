@@ -39,4 +39,22 @@
 
 #include "shared/canary_task_context.h"
 
-namespace canary {}  // namespace canary
+#include "worker/worker_communication_interface.h"
+
+namespace canary {
+
+void CanaryTaskContext::BroadcastInternal(struct evbuffer* buffer) {
+  CHECK_NOTNULL(send_data_interface_)
+      ->BroadcastDataToPartition(application_id_, gather_variable_group_id_,
+                                 gather_stage_id_, buffer);
+}
+
+void CanaryTaskContext::ScatterInternal(int partition_id,
+                                        struct evbuffer* buffer) {
+  CHECK_NOTNULL(send_data_interface_)
+      ->SendDataToPartition(application_id_, gather_variable_group_id_,
+                            static_cast<PartitionId>(partition_id),
+                            gather_stage_id_, buffer);
+}
+
+}  // namespace canary

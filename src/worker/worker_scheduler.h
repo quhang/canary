@@ -48,6 +48,7 @@
 #include "shared/canary_internal.h"
 
 #include "message/message_include.h"
+#include "shared/canary_application.h"
 #include "shared/network.h"
 #include "shared/partition_map.h"
 #include "worker/worker_communication_interface.h"
@@ -68,6 +69,9 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
     std::string binary_location;
     std::string application_parameter;
     int local_partitions = 0;
+    void* loading_handle = nullptr;
+    const CanaryApplication::VariableInfoMap* variable_info_map = nullptr;
+    const CanaryApplication::StatementInfoMap* statement_info_map = nullptr;
   };
 
  public:

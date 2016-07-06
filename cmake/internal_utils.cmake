@@ -48,7 +48,8 @@ function(cxx_executable_with_flags name cxx_flags libs)
     set_target_properties(${name} PROPERTIES COMPILE_FLAGS "${cxx_flags}")
   endif()
   foreach(lib ${libs})
-    target_link_libraries(${name} ${lib})
+    # Ensure all symbols in libcanary_core are exported.
+    target_link_libraries(${name} -Wl,--whole-archive ${lib} -Wl,--no-whole-archive)
   endforeach()
 endfunction()
 

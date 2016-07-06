@@ -51,9 +51,6 @@
 namespace canary {
 
 class WorkerSendDataInterface;
-class PartitionData;
-template <typename T>
-class TypedPartitionData {};
 
 /**
  * The context of a task.
@@ -111,9 +108,22 @@ class CanaryTaskContext {
 
   //! Gathers data.
   template <typename T>
+  void GatherSingle(T* receive_data) {
+    CHECK_EQ(receive_buffer_.size(), 1u);
+    auto buffer = receive_buffer_.front();
+    {
+      CanaryInputArchive archive(buffer);
+      archive(*receive_data);
+    }
+    evbuffer_free(buffer);
+    receive_buffer_.clear();
+  }
+
+  //! Gathers data.
+  template <typename T>
   std::vector<T> Gather() {
     std::vector<T> receive_data(receive_buffer_.size());
-    auto iter = receive_data.front();
+    auto iter = receive_data.begin();
     for (auto buffer : receive_buffer_) {
       {
         CanaryInputArchive archive(buffer);
@@ -155,18 +165,18 @@ class CanaryTaskContext {
   template <typename T>
   const T& ReadVariable(CanaryApplication::VariableHandle<T> handle) {
     auto pointer =
-        dynamic_cast<TypedPartitionData<T>*>(ReadVariableInternal(handle));
+        reinterpret_cast<T*>(ReadVariableInternal(handle.get_variable_id()));
     CHECK(pointer != nullptr) << "Invalid variable read.";
-    return *pointer->get_data();
+    return *pointer;
   }
 
   //! Writes a variable.
   template <typename T>
   T* WriteVariable(CanaryApplication::VariableHandle<T> handle) {
     auto pointer =
-        dynamic_cast<TypedPartitionData<T>*>(WriteVariableInternal(handle));
-    CHECK(pointer != nullptr) << "Invalid variable read.";
-    return pointer->get_data();
+        reinterpret_cast<T*>(WriteVariableInternal(handle.get_variable_id()));
+    CHECK(pointer != nullptr) << "Invalid variable write.";
+    return pointer;
   }
 
   int GetGatherSize() const { return static_cast<int>(receive_buffer_.size()); }
@@ -177,20 +187,41 @@ class CanaryTaskContext {
  private:
   void BroadcastInternal(struct evbuffer* buffer);
   void ScatterInternal(int partition_id, struct evbuffer* buffer);
-  void* ReadVariableInternal(VariableId variable_id);
-  void* WriteVariableInternal(VariableId variable_id);
+  void* ReadVariableInternal(VariableId variable_id) {
+    auto iter = read_partition_data_map_.find(variable_id);
+    CHECK(iter != read_partition_data_map_.end());
+    return iter->second->get_data();
+  }
+  void* WriteVariableInternal(VariableId variable_id) {
+    auto iter = write_partition_data_map_.find(variable_id);
+    CHECK(iter != write_partition_data_map_.end());
+    return iter->second->get_data();
+  }
 
-  WorkerSendDataInterface* send_data_interface_;
+  WorkerSendDataInterface* send_data_interface_ = nullptr;
   std::list<struct evbuffer*> receive_buffer_;
   std::map<VariableId, PartitionData*> read_partition_data_map_;
   std::map<VariableId, PartitionData*> write_partition_data_map_;
-  int self_partition_id_;
+  int self_partition_id_ = -1;
   int scatter_partitioning_ = -1;
   int gather_partitioning_ = -1;
-  ApplicationId application_id_;
-  VariableGroupId gather_variable_group_id_;
-  StageId gather_stage_id_;
+  ApplicationId application_id_ = ApplicationId::INVALID;
+  VariableGroupId gather_variable_group_id_ = VariableGroupId::INVALID;
+  StageId gather_stage_id_ = StageId::INVALID;
 };
+
+//! Specifies the number of data expected by a gather task.
+#ifndef EXPECT_GATHER_SIZE
+#define EXPECT_GATHER_SIZE(x)                              \
+  do {                                                     \
+    const int expected_size = static_cast<int>(x);         \
+    const int buffer_size = task_context->GetGatherSize(); \
+    CHECK_LE(buffer_size, expected_size);                  \
+    if (buffer_size != expected_size) {                    \
+      return expected_size - buffer_size;                  \
+    }                                                      \
+  } while (0)
+#endif  // EXPECT_GATHER_SIZE
 
 }  // namespace canary
 #endif  // CANARY_INCLUDE_CANARY_CANARY_TASK_CONTEXT_H_

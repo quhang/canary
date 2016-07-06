@@ -18,7 +18,7 @@ cxx_test(intensive_marshal . "${TEST_LIBRARIES}")
 cxx_test(basic_command_exchange . "${TEST_LIBRARIES}")
 
 # Test the data exchanging between multile workers.
-cxx_executable(basic_data_exchange . "${TEST_LIBRARIES}")
+cxx_executable(basic_data_exchange . "canary_core")
 
 cxx_executable(basic_server . "canary_core")
 cxx_executable(basic_client . "canary_core")

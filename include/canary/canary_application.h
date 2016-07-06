@@ -47,13 +47,74 @@
 
 namespace canary {
 
+/**
+ * Interface for data of a partition.
+ */
+class PartitionData {
+ public:
+  PartitionData() {}
+  ~PartitionData() {}
+
+  //! Clones a new empty instance.
+  virtual PartitionData* Clone() const = 0;
+
+  //! Initializes the data object.
+  virtual void Initialize() = 0;
+  //! Clears the memory.
+  virtual void Finalize() = 0;
+
+  //! Serializes the data.
+  virtual void Serialize(CanaryOutputArchive& archive) const = 0;  // NOLINT
+  //! Deserializes the data.
+  virtual void Deserialize(CanaryInputArchive& archive) = 0;  // NOLINT
+
+  //! Returns the data in an untyped pointer.
+  void* get_data() { return data_; }
+
+ protected:
+  void* data_ = nullptr;
+};
+
+/**
+ * Represents typed data of a partition.
+ */
+template <typename T>
+class TypedPartitionData : public PartitionData {
+ public:
+  TypedPartitionData() {}
+  ~TypedPartitionData() {}
+
+  PartitionData* Clone() const override { return new TypedPartitionData<T>(); }
+  void Initialize() override {
+    if (!data_) data_ = new T();
+  }
+  void Finalize() override {
+    delete get_typed_data();
+    data_ = nullptr;
+  }
+
+  void Serialize(CanaryOutputArchive& archive) const {  // NOLINT
+    if (data_) {
+      archive(*get_typed_data());
+    }
+  }
+
+  void Deserialize(CanaryInputArchive& archive) override {
+    if (!data_) {
+      data_ = new T();
+    }
+    archive(*get_typed_data());
+  }
+
+  T* get_typed_data() { return reinterpret_cast<T*>(data_); }
+  const T* get_typed_data() const { return reinterpret_cast<const T*>(data_); }
+};
+
 // Forward declaration.
-class TaskContext;
+class CanaryTaskContext;
 
 /**
  * A user writes a Canary application by inheriting the application class.
- *
- * VariableId, StatementId
  */
 class CanaryApplication {
  public:
@@ -76,8 +137,6 @@ class CanaryApplication {
   template <typename Type>
   class VariableHandle {
    public:
-    //! Variable type.
-    typedef Type VariableType;
     //! Copy constructor is allowed.
     VariableHandle(const VariableHandle&) = default;
     //! Copy assignment is allowed.
@@ -93,21 +152,32 @@ class CanaryApplication {
     friend class CanaryApplication;
   };
 
-  //! An statement handle stores information about a statement.
-  struct StatementHandle {
+  /*
+   * External data structures describing the application.
+   */
+
+  //! Stores information about a variable.
+  struct VariableInfo {
+    PartitionData* data_prototype = nullptr;
+    // -1 means unknown parallelism.
+    int parallelism = -1;
+  };
+
+  typedef std::map<VariableId, VariableInfo> VariableInfoMap;
+
+  //! Stores information about a statement.
+  struct StatementInfo {
     StatementType statement_type = StatementType::INVALID;
-    std::function<void(TaskContext*)> void_task_function;
-    std::function<int(TaskContext*)> int_task_function;
-    std::function<bool(TaskContext*)> bool_task_function;
+    std::function<void(CanaryTaskContext*)> void_task_function;
+    std::function<int(CanaryTaskContext*)> int_task_function;
+    std::function<bool(CanaryTaskContext*)> bool_task_function;
     int num_loop = 0;
     std::map<VariableId, VariableAccess> variable_access_map;
     bool pause_needed = false;
     bool track_needed = false;
   };
 
-  // -1 means unknown parallelism.
-  typedef std::map<VariableId, int> VariableParallelismMap;
-  typedef std::map<StatementId, StatementHandle> StatementInfoMap;
+  typedef std::map<StatementId, StatementInfo> StatementInfoMap;
 
  public:
   CanaryApplication() {}
@@ -120,7 +190,9 @@ class CanaryApplication {
     CHECK(parallelism == -1 || parallelism >= 1)
         << "Partitioning of a variable is a positive number.";
     const auto variable_id = AllocateVariableId();
-    variable_partitioning_map_[variable_id] = parallelism;
+    auto& variable_info = variable_info_map_[variable_id];
+    variable_info.data_prototype = new TypedPartitionData<Type>();
+    variable_info.parallelism = parallelism;
     return VariableHandle<Type>(variable_id);
   }
 
@@ -170,24 +242,25 @@ class CanaryApplication {
    * Declares a statement.
    */
 
-  void Transform(std::function<void(TaskContext*)> task_function) {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+  void Transform(std::function<void(CanaryTaskContext*)> task_function) {
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::TRANSFORM;
     statement.void_task_function = std::move(task_function);
     ApplyStagedState(&statement);
     ClearStagedState();
   }
 
-  void Scatter(std::function<void(TaskContext*)> task_function) {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+  void Scatter(std::function<void(CanaryTaskContext*)> task_function) {
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::SCATTER;
     statement.void_task_function = std::move(task_function);
     ApplyStagedState(&statement);
     ClearStagedState();
   }
 
-  void Gather(std::function<int(TaskContext*)> task_function) {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+  // Returns the number of more messages expected.
+  void Gather(std::function<int(CanaryTaskContext*)> task_function) {
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::GATHER;
     statement.int_task_function = std::move(task_function);
     ApplyStagedState(&statement);
@@ -195,20 +268,20 @@ class CanaryApplication {
   }
 
   void Loop(int loop) {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::LOOP;
     statement.num_loop = loop;
     ClearStagedState();
   }
 
   void EndLoop() {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::END_LOOP;
     ClearStagedState();
   }
 
-  void While(std::function<bool(TaskContext*)> task_function) {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+  void While(std::function<bool(CanaryTaskContext*)> task_function) {
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::WHILE;
     statement.bool_task_function = std::move(task_function);
     ApplyStagedState(&statement);
@@ -216,7 +289,7 @@ class CanaryApplication {
   }
 
   void EndWhile() {
-    auto& statement = statement_handle_map_[AllocateStatementId()];
+    auto& statement = statement_info_map_[AllocateStatementId()];
     statement.statement_type = StatementType::END_WHILE;
     ClearStagedState();
   }
@@ -226,14 +299,12 @@ class CanaryApplication {
    * Global interface.
    */
   virtual void Program() = 0;
-  virtual void LoadParamater(const std::string& parameter) = 0;
+  virtual void LoadParameter(const std::string& parameter) = 0;
   virtual std::string SaveParameter() = 0;
 
-  const VariableParallelismMap& get_variable_partitioning_map() {
-    return variable_partitioning_map_;
-  }
-  const StatementInfoMap& get_statement_handle_map_() {
-    return statement_handle_map_;
+  const VariableInfoMap* get_variable_info_map() { return &variable_info_map_; }
+  const StatementInfoMap* get_statement_info_map() {
+    return &statement_info_map_;
   }
 
  private:
@@ -243,28 +314,29 @@ class CanaryApplication {
   StatementId AllocateStatementId() { return next_statement_id_++; }
   StatementId next_statement_id_ = StatementId::FIRST;
 
-  VariableParallelismMap variable_partitioning_map_;
-  StatementInfoMap statement_handle_map_;
+  VariableInfoMap variable_info_map_;
+  StatementInfoMap statement_info_map_;
 
   //! Applies staged states to a statement.
-  void ApplyStagedState(StatementHandle* statement_handle) {
+  void ApplyStagedState(StatementInfo* statement_info) {
     // Adds a dumb writing variable.
     if (!staged_has_writer_) {
       auto dumb_variable = DeclareVariable<bool>();
       WriteAccess(dumb_variable);
     }
-    if (statement_handle->statement_type == StatementType::WHILE) {
+    if (statement_info->statement_type == StatementType::WHILE) {
       for (auto pair : staged_buffer_access_) {
-        if (variable_partitioning_map_.at(pair.first) == -1) {
-          variable_partitioning_map_.at(pair.first) = 1;
+        auto& parallelism = variable_info_map_.at(pair.first).parallelism;
+        if (parallelism == -1) {
+          parallelism = 1;
         }
-        CHECK_EQ(variable_partitioning_map_.at(pair.first), 1)
+        CHECK_EQ(parallelism, 1)
             << "WHILE statement accesses multi-partitioning variable!";
       }
     }
-    statement_handle->variable_access_map = std::move(staged_buffer_access_);
-    statement_handle->pause_needed = staged_pause_needed_;
-    statement_handle->track_needed = staged_track_needed_;
+    statement_info->variable_access_map = std::move(staged_buffer_access_);
+    statement_info->pause_needed = staged_pause_needed_;
+    statement_info->track_needed = staged_track_needed_;
   }
 
   //! Clears staged states.
@@ -296,16 +368,5 @@ class CanaryApplication {
   }                                                                \
   }
 #endif  // REGISTER_APPLICATION
-
-//! Specifies the number of data expected by a gather task.
-#ifndef EXPECT_GATHER_SIZE
-#define EXPECT_GATHER_SIZE(x)                                           \
-  do {                                                                  \
-    const int buffer_size = task_context->GatherSize();                 \
-    CHECK_NE(buffer_size, -1);                                          \
-    CHECK_LE(buffer_size, static_cast<int>(x));                         \
-    if (buffer_size != static_cast<int>(x)) return static_cast<int>(x); \
-  } while (0)
-#endif  // EXPECT_GATHER_SIZE
 
 #endif  // CANARY_INCLUDE_CANARY_CANARY_APPLICATION_H_
