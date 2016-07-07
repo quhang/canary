@@ -70,6 +70,17 @@ bool ReasonId<int>(int hint_id, int* result_id) {
   CHECK_EQ(hint_id, *result_id);
   return false;
 }
+
+template <typename T>
+std::string GetTypeName(T* input) {
+  const char* real_name = typeid(*input).name();
+  std::string result(abi::__cxa_demangle(real_name, 0, 0, nullptr));
+  const std::string header("canary::TypedPartitionData");
+  CHECK_EQ(result.substr(0, header.size()), header);
+  result = result.substr(header.size() + 1);
+  result.pop_back();
+  return std::move(result);
+}
 }  // namespace
 
 namespace canary {
@@ -262,8 +273,7 @@ std::string CanaryApplication::Print() const {
     ss << "var#" << get_value(pair.first) << " group#"
        << get_value(pair.second.variable_group_id)
        << " partitioning=" << pair.second.parallelism << " type="
-       << abi::__cxa_demangle(typeid(*pair.second.data_prototype).name(), 0, 0,
-                              nullptr) << "\n";
+       << GetTypeName(pair.second.data_prototype) << "\n";
   }
 
   for (const auto& pair : variable_group_info_map_) {
