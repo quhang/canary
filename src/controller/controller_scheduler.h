@@ -94,6 +94,24 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
 };
 
 class ControllerScheduler : public ControllerSchedulerBase {
+ protected:
+  //! Represents an active worker.
+  struct WorkerRecord {
+    int num_cores = -1;
+    std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
+    std::set<ApplicationId> loaded_applications;
+  };
+  //! Represents an active application.
+  struct ApplicationRecord {
+    std::string binary_location;
+    std::string application_parameter;
+    void* loading_handle = nullptr;
+    CanaryApplication* loaded_application = nullptr;
+    const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
+        nullptr;
+    PerApplicationPartitionMap per_app_partition_map;
+  };
+
  public:
   ControllerScheduler() {}
   virtual ~ControllerScheduler() {}
@@ -109,25 +127,49 @@ class ControllerScheduler : public ControllerSchedulerBase {
   // paired.
   void InternalNotifyWorkerIsUp(WorkerId worker_id) override;
 
- protected:
+ private:
+  /*
+   * Processes messages from the launcher or workers.
+   */
   void ProcessLaunchApplication(message::LaunchApplication* launch_message);
+  void ProcessMigrationInPrepared(
+      message::ControllerRespondMigrationInPrepared* respond_message);
+  void ProcessMigrationInDone(
+      message::ControllerRespondMigrationInDone* respond_message);
+  void ProcessStatusOfPartition(
+      message::ControllerRespondStatusOfPartition* respond_message);
+  void ProcessStatusOfWorker(
+      message::ControllerRespondStatusOfWorker* respond_message);
 
-  struct WorkerRecord {
-    int num_cores = -1;
-    std::set<FullPartitionId> owned_partitions;
-    std::set<ApplicationId> loaded_applicaitons;
-  };
-  std::map<WorkerId, WorkerRecord> worker_map_;
+  /*
+   * Application launching related.
+   */
+  //! Fills in initial info in the application record.
+  void FillInApplicationLaunchInfo(
+      const message::LaunchApplication& launch_message,
+      ApplicationRecord* application_record);
+  //! Assigns partitions to workers.
+  void AssignPartitionToWorker(ApplicationRecord* application_record);
+  //! Gets the next assigned worker id.
+  WorkerId NextAssignWorkerId();
+  //! Loads an application on all workers.
+  void RequestLoadApplicationOnAllWorkers(
+      ApplicationId application_id,
+      const ApplicationRecord& application_record);
+  //! Updates the partitions each workers own.
+  void UpdateWorkerOwnedPartitions(
+      ApplicationId application_id,
+      const PerApplicationPartitionMap& per_app_partition_map);
+  //! Requests workers to load partitions.
+  void RequestLoadPartitions(ApplicationId application_id);
 
-  struct ApplicationRecord {
-    std::string binary_location;
-    std::string application_parameter;
-    CanaryApplication* loaded_application = nullptr;
-    void* loading_handle = nullptr;
-  };
-  std::map<ApplicationId, ApplicationRecord> application_map_;
-
+ private:
+  WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
   ApplicationId next_application_id_ = ApplicationId::FIRST;
+
+ protected:
+  std::map<WorkerId, WorkerRecord> worker_map_;
+  std::map<ApplicationId, ApplicationRecord> application_map_;
 };
 
 }  // namespace canary

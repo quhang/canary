@@ -155,6 +155,8 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
   for (const auto& pair : worker_command.load_partitions) {
     const auto full_partition_id =
         FullPartitionId{application_id, pair.first, pair.second};
+    VLOG(1) << "Load " << get_value(application_id) << "/"
+            << get_value(pair.first) << "/" << get_value(pair.second);
     CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
     ++application_record_map_.at(application_id).local_partitions;
     WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
@@ -280,6 +282,7 @@ void WorkerScheduler::UnloadApplicationBinary(
 }
 
 WorkerLightThreadContext* WorkerScheduler::LoadPartition(FullPartitionId) {
+  VLOG(1) << "Load partition.";
   return new WorkerExecutionContext();
 }
 

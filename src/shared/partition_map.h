@@ -57,12 +57,15 @@ typedef std::list<std::pair<FullPartitionId, WorkerId>> PartitionMapUpdate;
  */
 class PerApplicationPartitionMap {
  public:
+  int QueryNumVariableGroup() const {
+    return static_cast<int>(application_map_.size());
+  }
+  //! Queries the partitioning of a variable group. Returns -1 if not available.
+  int QueryPartitioning(VariableGroupId variable_group_id) const;
+
   //! Queries the worker id of a partition. Returns INVALID if not available.
   WorkerId QueryWorkerId(VariableGroupId variable_group_id,
                          PartitionId partition_id) const;
-
-  //! Queries the partitioning of a variable group. Returns -1 if not available.
-  int QueryPartitioning(VariableGroupId variable_group_id) const;
 
   //! Sets the number of variable groups.
   void SetNumVariableGroup(int num_variable);
