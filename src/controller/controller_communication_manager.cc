@@ -457,6 +457,9 @@ void ControllerCommunicationManager::ProcessIncomingMessage(
     case MessageCategoryGroup::CONTROLLER_COMMAND:
       command_receiver_->ReceiveCommand(buffer);
       break;
+    case MessageCategoryGroup::LAUNCH_COMMAND:
+      command_receiver_->ReceiveCommand(buffer);
+      break;
     default:
       LOG(FATAL) << "Invalid message header!";
   }  // switch category group.

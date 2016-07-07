@@ -63,4 +63,61 @@ void ControllerSchedulerBase::NotifyWorkerIsUp(WorkerId worker_id) {
       &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
 }
 
+#define PROCESS_MESSAGE(TYPE, METHOD)                                 \
+  case MessageCategory::TYPE: {                                       \
+    auto message =                                                    \
+        new message::get_message_type<MessageCategory::TYPE>::Type(); \
+    message::RemoveControlHeader(buffer);                             \
+    message::DeserializeMessage(buffer, message);                     \
+    METHOD(message);                                                  \
+    break;                                                            \
+  }
+void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
+  CHECK_NOTNULL(buffer);
+  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+  using message::MessageCategoryGroup;
+  using message::MessageCategory;
+  switch (header->category_group) {
+    case MessageCategoryGroup::CONTROLLER_COMMAND:
+      switch (header->category) {
+        default:
+          LOG(FATAL) << "Unexpected message type!";
+      }  // switch category.
+      break;
+    case MessageCategoryGroup::LAUNCH_COMMAND:
+      switch (header->category) {
+        PROCESS_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
+        default:
+          LOG(FATAL) << "Unexpected message type!";
+      }  // switch category.
+      break;
+    default:
+      LOG(FATAL) << "Invalid message header!";
+  }  // switch category group.
+}
+#undef PROCESS_MESSAGE
+
+void ControllerScheduler::ProcessLaunchApplication(
+    message::LaunchApplication* launch_message) {
+  ApplicationId assigned_application_id = (next_application_id_++);
+  auto& application_record = application_map_[assigned_application_id];
+  application_record.binary_location = launch_message->binary_location;
+  application_record.application_parameter =
+      launch_message->application_parameter;
+  application_record.loaded_application = CanaryApplication::LoadApplication(
+      application_record.binary_location,
+      application_record.application_parameter,
+      &application_record.loading_handle);
+  // TODO.
+  delete launch_message;
+}
+
+void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {
+  CHECK(worker_id != WorkerId::INVALID);
+}
+
+void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
+  CHECK(worker_id != WorkerId::INVALID);
+}
+
 }  // namespace canary

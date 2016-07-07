@@ -159,6 +159,7 @@ class CanaryApplication {
   //! Stores information about a variable.
   struct VariableInfo {
     PartitionData* data_prototype = nullptr;
+    // Partially filled in.
     int parallelism = -1;
     // Filled in.
     VariableGroupId variable_group_id = VariableGroupId::INVALID;
@@ -188,8 +189,7 @@ class CanaryApplication {
     // Filled in.
     VariableGroupId variable_group_id = VariableGroupId::INVALID;
     int parallelism = -1;
-    StatementId true_branch_statement = StatementId::INVALID;
-    StatementId false_branch_statement = StatementId::INVALID;
+    StatementId branch_statement = StatementId::INVALID;
     int paired_scatter_parallelism = -1;
     int paired_gather_parallelism = -1;
   };
@@ -197,6 +197,13 @@ class CanaryApplication {
   typedef std::map<StatementId, StatementInfo> StatementInfoMap;
 
  public:
+  //! Dynamically loads an application.
+  static CanaryApplication* LoadApplication(
+      const std::string& binary_location,
+      const std::string& application_parameter, void** handle_ptr);
+  //! Dynamically unloads an application.
+  static void UnloadApplication(void* handle, CanaryApplication* application);
+
   CanaryApplication() {}
   virtual ~CanaryApplication() {}
   NON_COPYABLE_AND_NON_MOVABLE(CanaryApplication);
@@ -317,9 +324,11 @@ class CanaryApplication {
    */
   virtual void Program() = 0;
   virtual void LoadParameter(const std::string& parameter) = 0;
-  virtual std::string SaveParameter() = 0;
 
+  //! Fills in missing metadata.
   void FillInProgram();
+  //! Prints the program in a string.
+  std::string Print() const;
 
   const VariableInfoMap* get_variable_info_map() { return &variable_info_map_; }
   const VariableGroupInfoMap* get_variable_group_info_map() {

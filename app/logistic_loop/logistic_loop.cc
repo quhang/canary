@@ -4,7 +4,7 @@
 #include <sstream>
 #include <utility>
 #include <vector>
-#include <cereal/archives/binary.hpp>
+#include <cereal/archives/xml.hpp>
 
 #include "canary/canary.h"
 
@@ -87,7 +87,7 @@ class LogisticLoopApplication : public CanaryApplication {
     auto d_feature = DeclareVariable<FeatureVector>(FLAGS_app_partitions);
     auto d_local_gradient = DeclareVariable<Point>();
     auto d_local_w = DeclareVariable<Point>();
-    auto d_global_w = DeclareVariable<Point>();
+    auto d_global_w = DeclareVariable<Point>(1);
     auto d_global_gradient = DeclareVariable<Point>();
 
     WriteAccess(d_feature);
@@ -194,23 +194,11 @@ class LogisticLoopApplication : public CanaryApplication {
     std::stringstream ss;
     ss << parameter;
     {
-      cereal::BinaryInputArchive archive(ss);
+      cereal::XMLInputArchive archive(ss);
       archive(FLAGS_app_partitions);
       archive(FLAGS_app_iterations);
       archive(FLAGS_app_samples);
     }
-  }
-
-  // Saves parameter.
-  std::string SaveParameter() override {
-    std::stringstream ss;
-    {
-      cereal::BinaryOutputArchive archive(ss);
-      archive(FLAGS_app_partitions);
-      archive(FLAGS_app_iterations);
-      archive(FLAGS_app_samples);
-    }
-    return ss.str();
   }
 };
 

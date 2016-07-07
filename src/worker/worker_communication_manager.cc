@@ -193,7 +193,6 @@ void WorkerCommunicationManager::ProcessIncomingMessage(
   auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
-  using message::ControlHeader;
   // If assigned worker_id.
   // Differentiante between control messages and command messages.
   switch (header->category_group) {

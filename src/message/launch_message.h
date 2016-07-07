@@ -39,9 +39,29 @@
 
 #ifndef CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
+
+#include <string>
+
+#include "message/message.h"
+
 namespace canary {
+namespace message {
 
-class LaunchMessage {};
+//! Launches an application.
+struct LaunchApplication {
+  std::string binary_location;
+  std::string application_parameter;
+  int fix_num_worker = -1;
 
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(binary_location, application_parameter);
+    archive(fix_num_worker);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);
+
+}  // namespace message
 }  // namespace canary
+
 #endif  // CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_

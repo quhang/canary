@@ -35,6 +35,8 @@ target_link_libraries(canary_core PUBLIC glog gflags event_pthreads event_core p
 cxx_executable(canary_worker worker "canary_core")
 # Controller executable.
 cxx_executable(canary_controller controller "canary_core")
+# Launcher executable.
+cxx_executable(canary_launcher worker "canary_core")
 
 file(GLOB_RECURSE ALL_CANARY_SOURCES "*.cc" "*.h")
 

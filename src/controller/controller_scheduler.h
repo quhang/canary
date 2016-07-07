@@ -40,10 +40,15 @@
 #ifndef CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 #define CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 
+#include <map>
+#include <set>
+#include <string>
+
 #include "shared/canary_internal.h"
 
 #include "controller/controller_communication_interface.h"
 #include "message/message_include.h"
+#include "shared/canary_application.h"
 #include "shared/network.h"
 #include "shared/partition_map.h"
 
@@ -95,20 +100,34 @@ class ControllerScheduler : public ControllerSchedulerBase {
 
  protected:
   //! Called when receiving commands from a worker.
-  void InternalReceiveCommand(struct evbuffer* buffer) override {
-    CHECK_NOTNULL(buffer);
-  }
+  void InternalReceiveCommand(struct evbuffer* buffer) override;
 
   //! Called when a worker is down, even if it is shut down by the controller.
-  void InternalNotifyWorkerIsDown(WorkerId worker_id) override {
-    CHECK(worker_id != WorkerId::INVALID);
-  }
+  void InternalNotifyWorkerIsDown(WorkerId worker_id) override;
 
   //! Called when a worker is up. The up notification and down notification are
   // paired.
-  void InternalNotifyWorkerIsUp(WorkerId worker_id) override {
-    CHECK(worker_id != WorkerId::INVALID);
-  }
+  void InternalNotifyWorkerIsUp(WorkerId worker_id) override;
+
+ protected:
+  void ProcessLaunchApplication(message::LaunchApplication* launch_message);
+
+  struct WorkerRecord {
+    int num_cores = -1;
+    std::set<FullPartitionId> owned_partitions;
+    std::set<ApplicationId> loaded_applicaitons;
+  };
+  std::map<WorkerId, WorkerRecord> worker_map_;
+
+  struct ApplicationRecord {
+    std::string binary_location;
+    std::string application_parameter;
+    CanaryApplication* loaded_application = nullptr;
+    void* loading_handle = nullptr;
+  };
+  std::map<ApplicationId, ApplicationRecord> application_map_;
+
+  ApplicationId next_application_id_ = ApplicationId::FIRST;
 };
 
 }  // namespace canary
