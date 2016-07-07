@@ -36,8 +36,8 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
     } else {
       ++sent_commands_.at(from_worker_id);
       SendMessage(from_worker_id);
-      LOG(INFO) << "C to W" << get_value(from_worker_id)
-          << " : " << ongoing_sequence_[from_worker_id];
+      LOG(INFO) << "C to W" << get_value(from_worker_id) << " : "
+                << ongoing_sequence_[from_worker_id];
     }
   }
 
@@ -56,21 +56,18 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
     sent_commands_[worker_id] = 1;
     SendMessage(worker_id);
     LOG(INFO) << "Up W" << get_value(worker_id);
-    LOG(INFO) << "C to W" << get_value(worker_id)
-        << " : " << ongoing_sequence_[worker_id];
+    LOG(INFO) << "C to W" << get_value(worker_id) << " : "
+              << ongoing_sequence_[worker_id];
   }
 
   void set_manager(ControllerCommunicationManager* manager) {
     manager_ = manager;
   }
 
-  bool get_success() {
-    return success_;
-  }
+  bool get_success() { return success_; }
 
  private:
-  void AnalyzeMessage(struct evbuffer* buffer,
-                      std::string* result_string,
+  void AnalyzeMessage(struct evbuffer* buffer, std::string* result_string,
                       WorkerId* result_worker_id) {
     auto header = message::StripControlHeader(buffer);
     CHECK(header->category ==
@@ -97,9 +94,7 @@ class TestControllerReceiver : public ControllerReceiveCommandInterface {
 
 class TestWorkerReceiver : public WorkerReceiveCommandInterface {
  public:
-  void set_manager(WorkerCommunicationManager* manager) {
-    manager_ = manager;
-  }
+  void set_manager(WorkerCommunicationManager* manager) { manager_ = manager; }
   void ReceiveCommandFromController(struct evbuffer* buffer) override {
     std::string test_string;
     AnalyzeMessage(buffer, &test_string);
@@ -113,16 +108,12 @@ class TestWorkerReceiver : public WorkerReceiveCommandInterface {
     manager_->SendCommandToController(send_buffer);
   }
 
-  void AssignWorkerId(WorkerId worker_id) {
-    worker_id_ = worker_id;
-  }
+  void AssignWorkerId(WorkerId worker_id) { worker_id_ = worker_id; }
 
  private:
-  void AnalyzeMessage(struct evbuffer* buffer,
-                      std::string* result_string) {
+  void AnalyzeMessage(struct evbuffer* buffer, std::string* result_string) {
     auto header = message::StripControlHeader(buffer);
-    CHECK(header->category ==
-          message::MessageCategory::TEST_WORKER_COMMAND);
+    CHECK(header->category == message::MessageCategory::TEST_WORKER_COMMAND);
     delete header;
     message::TestWorkerCommand command;
     message::DeserializeMessage(buffer, &command);
@@ -138,10 +129,7 @@ class TestDataReceiver : public WorkerReceiveDataInterface {
   //! Called when receiving data from a partition. The routed data might be
   // rejected, which means this is not the right destination. The header is
   // stripped.
-  bool ReceiveRoutedData(ApplicationId,
-                         VariableGroupId,
-                         PartitionId,
-                         StageId,
+  bool ReceiveRoutedData(ApplicationId, VariableGroupId, PartitionId, StageId,
                          struct evbuffer* buffer) override {
     evbuffer_free(buffer);
     return true;
@@ -155,7 +143,7 @@ class TestDataReceiver : public WorkerReceiveDataInterface {
 
 TEST(basic, basic_command_exchange) {
   // Pointers are used to avoid deallocation.
-  std::thread controller_thread([]{
+  std::thread controller_thread([] {
     auto event_main_thread = new network::EventMainThread();
     auto manager = new ControllerCommunicationManager();
     auto command_receiver = new TestControllerReceiver();
@@ -168,20 +156,17 @@ TEST(basic, basic_command_exchange) {
 
   std::list<std::thread> thread_vector;
   for (int i = 0; i < FLAGS_num_worker; ++i) {
-    thread_vector.emplace_back([i]{
-        auto event_main_thread = new network::EventMainThread();
-        auto manager = new WorkerCommunicationManager();
-        auto command_receiver = new TestWorkerReceiver();
-        auto data_receiver = new TestDataReceiver();
-        command_receiver->set_manager(manager);
-        manager->Initialize(event_main_thread,
-                            command_receiver, data_receiver,
-                            FLAGS_controller_host,
-                            FLAGS_controller_service,
-                            std::to_string(
-                                std::stoi(FLAGS_worker_service) + i));
-        event_main_thread->Run();
-        LOG(INFO) << "Exit worker thread " << i;
+    thread_vector.emplace_back([i] {
+      auto event_main_thread = new network::EventMainThread();
+      auto manager = new WorkerCommunicationManager();
+      auto command_receiver = new TestWorkerReceiver();
+      auto data_receiver = new TestDataReceiver();
+      command_receiver->set_manager(manager);
+      manager->Initialize(event_main_thread, command_receiver, data_receiver,
+                          FLAGS_controller_host, FLAGS_controller_service,
+                          std::to_string(std::stoi(FLAGS_worker_service) + i));
+      event_main_thread->Run();
+      LOG(INFO) << "Exit worker thread " << i;
     });
   }
   for (auto& thread_handle : thread_vector) {

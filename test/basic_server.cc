@@ -39,8 +39,8 @@ void BounceBackMessage(int socket_fd) {
 int main(int argc, char* argv[]) {
   using namespace canary;
   InitializeCanaryWorker(&argc, &argv);
-  int socket_fd = network::allocate_and_bind_listen_socket(
-      FLAGS_server_service);
+  int socket_fd =
+      network::allocate_and_bind_listen_socket(FLAGS_server_service);
   PCHECK(listen(socket_fd, 100) == 0);
   while (true) {
     int recv_socket_fd;
@@ -51,12 +51,12 @@ int main(int argc, char* argv[]) {
 
     std::string buffer_host, buffer_service;
 
-    PCHECK(network::get_socket_local_address_name(
-            recv_socket_fd, &buffer_host, &buffer_service) >= 0);
+    PCHECK(network::get_socket_local_address_name(recv_socket_fd, &buffer_host,
+                                                  &buffer_service) >= 0);
     LOG(INFO) << "Local address: " << buffer_host << " : " << buffer_service;
 
-    PCHECK(network::get_socket_peer_address_name(
-            recv_socket_fd, &buffer_host, &buffer_service) >= 0);
+    PCHECK(network::get_socket_peer_address_name(recv_socket_fd, &buffer_host,
+                                                 &buffer_service) >= 0);
     LOG(INFO) << "Peer address: " << buffer_host << " : " << buffer_service;
 
     BounceBackMessage(recv_socket_fd);

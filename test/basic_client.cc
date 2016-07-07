@@ -22,7 +22,7 @@ void SendEchoLoop(int socket_fd, const char* buffer, size_t size) {
       send_buffer += n_bytes;
       to_send -= n_bytes;
     } while (to_send != 0);
-  };
+  }
   char* comp_buffer = new char[size];
   {
     auto recv_buffer = comp_buffer;
@@ -36,7 +36,7 @@ void SendEchoLoop(int socket_fd, const char* buffer, size_t size) {
       recv_buffer += n_bytes;
       to_recv -= n_bytes;
     } while (to_recv != 0);
-  };
+  }
   CHECK_STREQ(buffer, comp_buffer);
   delete[] comp_buffer;
 }
@@ -54,8 +54,8 @@ void cb_func(int socket_fd, short, void*) {
 int main(int argc, char* argv[]) {
   using namespace canary;
   InitializeCanaryWorker(&argc, &argv);
-  int socket_fd = network::allocate_and_connect_socket(
-      FLAGS_server_host, FLAGS_server_service);
+  int socket_fd = network::allocate_and_connect_socket(FLAGS_server_host,
+                                                       FLAGS_server_service);
   PCHECK(socket_fd != -1);
 
   auto base = event_base_new();
@@ -67,12 +67,12 @@ int main(int argc, char* argv[]) {
 
   std::string buffer_host, buffer_service;
 
-  PCHECK(network::get_socket_local_address_name(
-          socket_fd, &buffer_host, &buffer_service) == 0);
+  PCHECK(network::get_socket_local_address_name(socket_fd, &buffer_host,
+                                                &buffer_service) == 0);
   LOG(INFO) << "Local address: " << buffer_host << " : " << buffer_service;
 
-  PCHECK(network::get_socket_peer_address_name(
-          socket_fd, &buffer_host, &buffer_service) >= 0);
+  PCHECK(network::get_socket_peer_address_name(socket_fd, &buffer_host,
+                                               &buffer_service) >= 0);
   LOG(INFO) << "Peer address: " << buffer_host << " : " << buffer_service;
 
   const char message[] = "hello";

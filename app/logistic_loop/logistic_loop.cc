@@ -1,10 +1,11 @@
+#include <cereal/archives/xml.hpp>
+
 #include <algorithm>
 #include <array>
 #include <random>
 #include <sstream>
 #include <utility>
 #include <vector>
-#include <cereal/archives/xml.hpp>
 
 #include "canary/canary.h"
 
@@ -58,8 +59,7 @@ void array_substract(const std::array<T, size>& input,
 
 // Helper function: output += input_multi * input.
 template <typename T, size_t size>
-void array_add(const std::array<T, size>& input,
-               std::array<T, size>* output) {
+void array_add(const std::array<T, size>& input, std::array<T, size>* output) {
   auto input_iter = input.cbegin();
   auto output_iter = output->begin();
   while (input_iter != input.cend() && output_iter != output->end()) {
@@ -166,8 +166,8 @@ class LogisticLoopApplication : public CanaryApplication {
     ReadAccess(d_global_gradient);
     WriteAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
-      const auto& global_gradient
-          = task_context->ReadVariable(d_global_gradient);
+      const auto& global_gradient =
+          task_context->ReadVariable(d_global_gradient);
       auto global_w = task_context->WriteVariable(d_global_w);
       array_substract(global_gradient, global_w);
       return 0;

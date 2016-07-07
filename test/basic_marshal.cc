@@ -51,7 +51,8 @@ TEST(id, basic_marshal_test) {
     input_archive(raw_evbuffer);
     auto length = evbuffer_get_length(raw_evbuffer.buffer);
     std::string result_string(reinterpret_cast<const char*>(
-            evbuffer_pullup(raw_evbuffer.buffer, length)), length);
+                                  evbuffer_pullup(raw_evbuffer.buffer, length)),
+                              length);
     CHECK_EQ(result_string, std::string("hello"));
     input_archive(b1, b2, b3);
   }

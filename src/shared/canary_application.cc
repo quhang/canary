@@ -272,8 +272,8 @@ std::string CanaryApplication::Print() const {
   for (const auto& pair : variable_info_map_) {
     ss << "var#" << get_value(pair.first) << " group#"
        << get_value(pair.second.variable_group_id)
-       << " partitioning=" << pair.second.parallelism << " type="
-       << GetTypeName(pair.second.data_prototype) << "\n";
+       << " partitioning=" << pair.second.parallelism
+       << " type=" << GetTypeName(pair.second.data_prototype) << "\n";
   }
 
   for (const auto& pair : variable_group_info_map_) {

@@ -49,26 +49,25 @@ class TestControllerScheduler : public ControllerSchedulerBase {
   void InternalNotifyWorkerIsUp(WorkerId worker_id) override {
     CHECK(worker_id != WorkerId::INVALID);
     if (++num_workers_ == FLAGS_num_worker) {
-      const auto total_partitions = FLAGS_num_worker *
-          FLAGS_num_partition_per_worker;
+      const auto total_partitions =
+          FLAGS_num_worker * FLAGS_num_partition_per_worker;
       const ApplicationId application_id = ApplicationId::FIRST;
       per_app_partition_map_.SetNumVariableGroup(2);
       per_app_partition_map_.SetPartitioning(reduce_variable, 1);
-      per_app_partition_map_.SetWorkerId(
-          reduce_variable, PartitionId::FIRST, WorkerId::FIRST);
-      per_app_partition_map_.SetPartitioning(
-          distribute_variable, total_partitions);
+      per_app_partition_map_.SetWorkerId(reduce_variable, PartitionId::FIRST,
+                                         WorkerId::FIRST);
+      per_app_partition_map_.SetPartitioning(distribute_variable,
+                                             total_partitions);
       // Set partition map.
       for (int worker_index = 0; worker_index < FLAGS_num_worker;
            ++worker_index) {
-             for (int partition_index
-                  = worker_index * FLAGS_num_partition_per_worker;
-                  partition_index
-                  < (worker_index + 1) * FLAGS_num_partition_per_worker;
-                  ++partition_index) {
+        for (int partition_index =
+                 worker_index * FLAGS_num_partition_per_worker;
+             partition_index <
+                 (worker_index + 1) * FLAGS_num_partition_per_worker;
+             ++partition_index) {
           per_app_partition_map_.SetWorkerId(
-              distribute_variable,
-              static_cast<PartitionId>(partition_index),
+              distribute_variable, static_cast<PartitionId>(partition_index),
               static_cast<WorkerId>(worker_index));
         }
       }
@@ -90,10 +89,10 @@ class TestControllerScheduler : public ControllerSchedulerBase {
         message::WorkerLoadPartitions load_partitions;
         load_partitions.application_id = application_id;
         load_partitions.load_partitions.clear();
-        for (int partition_index
-             = worker_index * FLAGS_num_partition_per_worker;
-             partition_index
-             < (worker_index + 1) * FLAGS_num_partition_per_worker;
+        for (int partition_index =
+                 worker_index * FLAGS_num_partition_per_worker;
+             partition_index <
+                 (worker_index + 1) * FLAGS_num_partition_per_worker;
              ++partition_index) {
           load_partitions.load_partitions.emplace_back(
               distribute_variable, static_cast<PartitionId>(partition_index));
@@ -106,44 +105,44 @@ class TestControllerScheduler : public ControllerSchedulerBase {
         message::WorkerLoadPartitions load_partitions;
         load_partitions.application_id = application_id;
         load_partitions.load_partitions.clear();
-        load_partitions.load_partitions.emplace_back(
-            reduce_variable, PartitionId::FIRST);
+        load_partitions.load_partitions.emplace_back(reduce_variable,
+                                                     PartitionId::FIRST);
         send_command_interface_->SendCommandToWorker(
             WorkerId::FIRST,
             message::SerializeMessageWithControlHeader(load_partitions));
       }
       if (FLAGS_trigger_swap) {
-        event_main_thread_->AddDelayInjectedEvent(std::bind(
-                &TestControllerScheduler::Switch, this));
+        event_main_thread_->AddDelayInjectedEvent(
+            std::bind(&TestControllerScheduler::Switch, this));
       }
     }
   }
 
   void Switch() {
     PartitionMapUpdate update;
-    const auto total_partitions
-        = FLAGS_num_worker * FLAGS_num_partition_per_worker;
-    const FullPartitionId first_partition{ApplicationId::FIRST,
-      distribute_variable, PartitionId::FIRST};
-    const auto last_partition_id = static_cast<PartitionId>(total_partitions-1);
-    const FullPartitionId second_partition{ApplicationId::FIRST,
-      distribute_variable, last_partition_id};
-    const auto first_worker_id =
-        per_app_partition_map_.QueryWorkerId(
-            distribute_variable, PartitionId::FIRST);
+    const auto total_partitions =
+        FLAGS_num_worker * FLAGS_num_partition_per_worker;
+    const FullPartitionId first_partition{
+        ApplicationId::FIRST, distribute_variable, PartitionId::FIRST};
+    const auto last_partition_id =
+        static_cast<PartitionId>(total_partitions - 1);
+    const FullPartitionId second_partition{
+        ApplicationId::FIRST, distribute_variable, last_partition_id};
+    const auto first_worker_id = per_app_partition_map_.QueryWorkerId(
+        distribute_variable, PartitionId::FIRST);
     const auto second_worker_id = per_app_partition_map_.QueryWorkerId(
         distribute_variable, last_partition_id);
 
     update.emplace_back(first_partition, second_worker_id);
     update.emplace_back(second_partition, first_worker_id);
     send_command_interface_->UpdatePartitionMap(new PartitionMapUpdate(update));
-    per_app_partition_map_.SetWorkerId(
-        distribute_variable, PartitionId::FIRST, second_worker_id);
-    per_app_partition_map_.SetWorkerId(
-        distribute_variable, last_partition_id, first_worker_id);
+    per_app_partition_map_.SetWorkerId(distribute_variable, PartitionId::FIRST,
+                                       second_worker_id);
+    per_app_partition_map_.SetWorkerId(distribute_variable, last_partition_id,
+                                       first_worker_id);
 
-    event_main_thread_->AddDelayInjectedEvent(std::bind(
-            &TestControllerScheduler::Switch, this));
+    event_main_thread_->AddDelayInjectedEvent(
+        std::bind(&TestControllerScheduler::Switch, this));
   }
 
  private:
@@ -163,19 +162,19 @@ class TestWorkerLightThreadContext : public WorkerLightThreadContext {
   void Finalize() override {}
 
   void Run() override {
-   struct evbuffer* command;
-   StageId command_stage_id;
-   if (RetrieveCommand(&command_stage_id, &command)) {
-     ProcessCommand(command_stage_id, command);
-     return;
-   }
-   std::list<struct evbuffer*> buffer_list;
-   StageId stage_id;
-   if (RetrieveData(&stage_id, &buffer_list)) {
-     ProcessData(stage_id, &buffer_list);
-     return;
-   }
- }
+    struct evbuffer* command;
+    StageId command_stage_id;
+    if (RetrieveCommand(&command_stage_id, &command)) {
+      ProcessCommand(command_stage_id, command);
+      return;
+    }
+    std::list<struct evbuffer*> buffer_list;
+    StageId stage_id;
+    if (RetrieveData(&stage_id, &buffer_list)) {
+      ProcessData(stage_id, &buffer_list);
+      return;
+    }
+  }
 
  private:
   void ProcessCommand(StageId command_stage_id, struct evbuffer* command) {
@@ -190,8 +189,8 @@ class TestWorkerLightThreadContext : public WorkerLightThreadContext {
             archive(data);
           }
           get_send_data_interface()->BroadcastDataToPartition(
-              get_application_id(), distribute_variable,
-              StageId::FIRST, buffer);
+              get_application_id(), distribute_variable, StageId::FIRST,
+              buffer);
           RegisterReceivingData(
               get_next(StageId::FIRST),
               FLAGS_num_worker * FLAGS_num_partition_per_worker);
@@ -209,8 +208,8 @@ class TestWorkerLightThreadContext : public WorkerLightThreadContext {
   }
   void ProcessData(StageId stage_id, std::list<struct evbuffer*>* buffer_list) {
     CHECK(stage_id > StageId::INVALID);
-    const auto total_partitions
-        = FLAGS_num_worker * FLAGS_num_partition_per_worker;
+    const auto total_partitions =
+        FLAGS_num_worker * FLAGS_num_partition_per_worker;
     if (get_variable_group_id() == reduce_variable) {
       CHECK_EQ(static_cast<int>(buffer_list->size()), total_partitions);
       int data = 0;
@@ -231,8 +230,8 @@ class TestWorkerLightThreadContext : public WorkerLightThreadContext {
         archive(data);
       }
       get_send_data_interface()->BroadcastDataToPartition(
-          ApplicationId::FIRST, distribute_variable,
-          get_next(stage_id), send_buffer);
+          ApplicationId::FIRST, distribute_variable, get_next(stage_id),
+          send_buffer);
       RegisterReceivingData(get_next(stage_id, 2), total_partitions);
     } else if (get_variable_group_id() == distribute_variable) {
       CHECK_EQ(buffer_list->size(), 1u);
@@ -294,10 +293,9 @@ void LaunchController() {
   network::EventMainThread event_main_thread;
   ControllerCommunicationManager manager;
   TestControllerScheduler scheduler;
-  manager.Initialize(&event_main_thread,
-                     &scheduler);  // command receiver.
-  scheduler.Initialize(&event_main_thread,  // command sender.
-                       &manager);  // data sender.
+  manager.Initialize(&event_main_thread, &scheduler);  // command receiver.
+  scheduler.Initialize(&event_main_thread,             // command sender.
+                       &manager);                      // data sender.
   // The main thread runs both the manager and the scheduler.
   event_main_thread.Run();
 }
@@ -306,11 +304,8 @@ void LaunchWorker(int index) {
   network::EventMainThread event_main_thread;
   WorkerCommunicationManager manager;
   TestWorkerScheduler scheduler;
-  manager.Initialize(&event_main_thread,
-                     &scheduler,
-                     &scheduler,
-                     FLAGS_controller_host,
-                     FLAGS_controller_service,
+  manager.Initialize(&event_main_thread, &scheduler, &scheduler,
+                     FLAGS_controller_host, FLAGS_controller_service,
                      std::to_string(std::stoi(FLAGS_worker_service) + index));
   scheduler.Initialize(&manager, manager.GetDataRouter());
   event_main_thread.Run();
