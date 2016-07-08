@@ -20,6 +20,7 @@ cxx_static_library(canary_core "${cxx_default}"
     message/message.cc
     controller/controller_communication_manager.cc
     controller/controller_scheduler.cc
+    worker/stage_graph.cc
     worker/canary_task_context.cc
     worker/worker_communication_manager.cc
     worker/worker_data_router.cc
