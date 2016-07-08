@@ -228,6 +228,10 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
 void WorkerExecutionContext::RunGatherStage(
     StageId stage_id, StatementId statement_id,
     std::list<struct evbuffer*>* buffer_list) {
+  VLOG(1) << "Run gather stage=" << get_value(stage_id)
+      << " statement=" << get_value(statement_id)
+      << " variable_group=" << get_value(get_variable_group_id())
+      << " partition=" << get_value(get_partition_id());
   const auto statement_info =
       get_canary_application()->get_statement_info_map()->at(statement_id);
   CanaryTaskContext task_context;
@@ -240,6 +244,10 @@ void WorkerExecutionContext::RunGatherStage(
 
 void WorkerExecutionContext::RunStage(StageId stage_id,
                                       StatementId statement_id) {
+  VLOG(1) << "Run stage=" << get_value(stage_id)
+      << " statement=" << get_value(statement_id)
+      << " variable_group=" << get_value(get_variable_group_id())
+      << " partition=" << get_value(get_partition_id());
   const auto statement_info =
       get_canary_application()->get_statement_info_map()->at(statement_id);
   CanaryTaskContext task_context;
@@ -257,8 +265,10 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const int needed_message =
           (statement_info.int_task_function)(&task_context);
       if (needed_message == 0) {
+        VLOG(1) << "Gather stage needs no data, and falls throught.";
         stage_graph_.CompleteStage(stage_id);
       } else {
+        VLOG(1) << "Gather stage needs message of " << needed_message;
         pending_gather_stages_[stage_id] = statement_id;
         RegisterReceivingData(stage_id, needed_message);
       }
@@ -294,10 +304,12 @@ void WorkerExecutionContext::PrepareTaskContext(
   task_context->send_data_interface_ = get_send_data_interface();
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
+      VLOG(1) << "Read " << get_value(pair.first);
       task_context->read_partition_data_map_[pair.first] =
           local_partition_data_.at(pair.first);
     } else {
       CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
+      VLOG(1) << "Write " << get_value(pair.first);
       task_context->write_partition_data_map_[pair.first] =
           local_partition_data_.at(pair.first);
     }
@@ -348,6 +360,7 @@ void WorkerExecutionContext::AllocatePartitionData() {
        variable_group_info_map->at(get_variable_group_id()).variable_id_set) {
     local_partition_data_[variable_id] =
         variable_info_map->at(variable_id).data_prototype->Clone();
+    local_partition_data_[variable_id]->Initialize();
   }
 }
 

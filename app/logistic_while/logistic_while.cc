@@ -10,7 +10,7 @@
 #include "canary/canary.h"
 
 DEFINE_int32(app_partitions, 2, "Number of partitions.");
-DEFINE_int32(app_iterations, 50, "Number of iterations.");
+DEFINE_double(app_tolerance, 0.1, "Number of total samples.");
 DEFINE_int32(app_samples, 100, "Number of total samples.");
 
 constexpr int DIMENSION = 20;
@@ -73,7 +73,7 @@ void array_add(const std::array<T, size>& input, std::array<T, size>* output) {
 
 namespace canary {
 
-class LogisticLoopApplication : public CanaryApplication {
+class LogisticWhileApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
@@ -109,7 +109,7 @@ class LogisticLoopApplication : public CanaryApplication {
     WriteAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
       auto global_w = task_context->WriteVariable(d_global_w);
-      std::fill(global_w->begin(), global_w->end(), 0);
+      std::fill(global_w->begin(), global_w->end(), 1);
     });
 
     WriteAccess(d_global_gradient);
@@ -118,7 +118,19 @@ class LogisticLoopApplication : public CanaryApplication {
       std::fill(global_gradient->begin(), global_gradient->end(), 1000);
     });
 
-    Loop(FLAGS_app_iterations);
+    ReadAccess(d_global_w);
+    ReadAccess(d_global_gradient);
+    While([=](CanaryTaskContext* task_context) -> bool {
+      const auto& global_w = task_context->ReadVariable(d_global_w);
+      const auto& global_gradient =
+          task_context->ReadVariable(d_global_gradient);
+      for (int i = 0; i < DIMENSION; ++i) {
+        if (std::abs(global_gradient[i] / global_w[i]) >= FLAGS_app_tolerance) {
+          return true;
+        }
+      }
+      return false;
+    });
 
     ReadAccess(d_global_w);
     Scatter([=](CanaryTaskContext* task_context) {
@@ -174,7 +186,7 @@ class LogisticLoopApplication : public CanaryApplication {
       return 0;
     });
 
-    EndLoop();
+    EndWhile();
 
     ReadAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
@@ -197,7 +209,7 @@ class LogisticLoopApplication : public CanaryApplication {
     {
       cereal::XMLInputArchive archive(ss);
       archive(FLAGS_app_partitions);
-      archive(FLAGS_app_iterations);
+      archive(FLAGS_app_tolerance);
       archive(FLAGS_app_samples);
     }
   }
@@ -205,4 +217,4 @@ class LogisticLoopApplication : public CanaryApplication {
 
 }  // namespace canary
 
-REGISTER_APPLICATION(::canary::LogisticLoopApplication);
+REGISTER_APPLICATION(::canary::LogisticWhileApplication);

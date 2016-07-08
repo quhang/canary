@@ -1,2 +1,3 @@
 add_subdirectory(parsec)
 add_subdirectory(logistic_loop)
+add_subdirectory(logistic_while)

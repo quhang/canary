@@ -300,7 +300,7 @@ std::string CanaryApplication::Print() const {
            << pair.second.paired_gather_parallelism << ")";
         break;
       case StatementType::GATHER:
-        ss << " gatter(" << pair.second.paired_scatter_parallelism << "/"
+        ss << " gather(" << pair.second.paired_scatter_parallelism << "/"
            << pair.second.parallelism << ")";
         break;
       case StatementType::LOOP:

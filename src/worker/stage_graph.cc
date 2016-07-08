@@ -49,6 +49,7 @@ void StageGraph::Initialize(VariableGroupId self_variable_group_id) {
 }
 
 void StageGraph::CompleteStage(StageId complete_stage_id) {
+  VLOG(1) << "Complete stage " << get_value(complete_stage_id);
   auto iter = uncomplete_stage_map_.find(complete_stage_id);
   CHECK(iter != uncomplete_stage_map_.end());
   auto& stage_record = iter->second;
@@ -68,9 +69,11 @@ void StageGraph::CompleteStage(StageId complete_stage_id) {
   // Triggers following stages.
   for (auto after_stage : stage_record.after_set) {
     if (--uncomplete_stage_map_.at(after_stage).before_set_size == 0) {
+      VLOG(1) << "Triggers stage " << get_value(after_stage);
       ready_stage_queue_.insert(after_stage);
     }
   }
+  uncomplete_stage_map_.erase(iter);
   SpawnLocalStages();
 }
 
@@ -192,6 +195,8 @@ bool StageGraph::ExamineNextStatement() {
 void StageGraph::SpawnStageFromStatement(
     StageId stage_id, StatementId statement_id,
     const CanaryApplication::StatementInfo& statement_info) {
+  VLOG(1) << "Spawn stage " << get_value(stage_id)
+      << " statement " << get_value(statement_id);
   std::set<StageId> before_set;
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
@@ -209,6 +214,16 @@ void StageGraph::SpawnStageFromStatement(
     }
   }
 
+  for (const auto& pair : statement_info.variable_access_map) {
+    if (pair.second == CanaryApplication::VariableAccess::READ) {
+      variable_access_map_[pair.first].read_stages.insert(stage_id);
+    } else {
+      CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
+      variable_access_map_[pair.first].write_stage = stage_id;
+      variable_access_map_[pair.first].read_stages.clear();
+    }
+  }
+
   auto& stage_record = uncomplete_stage_map_[stage_id];
   stage_record.statement_id = statement_id;
   stage_record.before_set_size = before_set.size();
@@ -216,6 +231,7 @@ void StageGraph::SpawnStageFromStatement(
     uncomplete_stage_map_.at(before_stage).after_set.insert(stage_id);
   }
   if (stage_record.before_set_size == 0) {
+    VLOG(1) << "Self triggers " << get_value(stage_id);
     ready_stage_queue_.insert(stage_id);
   }
 }
