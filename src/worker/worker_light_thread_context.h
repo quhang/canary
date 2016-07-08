@@ -45,14 +45,12 @@
 
 #include "shared/canary_internal.h"
 
+#include "shared/canary_application.h"
+#include "worker/canary_task_context.h"
 #include "worker/worker_communication_interface.h"
 #include "worker/stage_graph.h"
 
 namespace canary {
-
-// WorkerMigrationThreadContext.
-// WorkerFileServiceThreadContext.
-// WorkerPartitionExecutionThreadContext.
 
 /**
  * The execution context of a lightweight thread, which is responsible for
@@ -74,16 +72,12 @@ class WorkerLightThreadContext {
  public:
   //! Constructor.
   WorkerLightThreadContext();
-
   //! Destructor.
   virtual ~WorkerLightThreadContext();
-
   //! Initializes the light thread.
   virtual void Initialize() = 0;
-
   //! Finalizes the light thread.
   virtual void Finalize() = 0;
-
   //! Runs the thread.
   virtual void Run() = 0;
 
@@ -120,28 +114,29 @@ class WorkerLightThreadContext {
   void set_send_data_interface(WorkerSendDataInterface* interface) {
     send_data_interface_ = interface;
   }
+  const CanaryApplication* get_canary_application() const {
+    return canary_application_;
+  }
+  void set_canary_application(const CanaryApplication* canary_application) {
+    canary_application_ = canary_application;
+  }
 
   //! Tries to enter the execution context of the thread. Returns true if there
   // is data to process.
   bool Enter();
-
   //! Tries to exit the execution context of the thread. Returns true if there
   // is no data to process.
   bool Exit();
-
   //! Forces the execution context to exit.
   void ForceExit();
-
   //! Delivers a message.
   void DeliverMessage(StageId stage_id, struct evbuffer* buffer);
 
  protected:
   //! Registers how many messages are expected for a message.
   void RegisterReceivingData(StageId stage_id, int num_message);
-
   //! Retrieves a command.
   bool RetrieveCommand(StageId* stage_id, struct evbuffer** command);
-
   //! Retrieves the buffer of a stage.
   bool RetrieveData(StageId* stage_id,
                     std::list<struct evbuffer*>* buffer_list);
@@ -154,6 +149,7 @@ class WorkerLightThreadContext {
   std::function<void()> activate_callback_;
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
   WorkerSendDataInterface* send_data_interface_ = nullptr;
+  const CanaryApplication* canary_application_ = nullptr;
 
   //! Synchronization lock.
   pthread_mutex_t internal_lock_;
@@ -173,68 +169,41 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
 
   //! Initializes the light thread.
   void Initialize() override {}
-
   //! Finalizes the light thread.
   void Finalize() override {}
-
   //! Runs the thread.
-  void Run() override {
-    {
-      struct evbuffer* command;
-      StageId command_stage_id;
-      while (RetrieveCommand(&command_stage_id, &command)) {
-        ProcessCommand(command_stage_id, command);
-      }
-    }
-    {
-      std::list<struct evbuffer*> buffer_list;
-      StageId stage_id;
-      while (RetrieveData(&stage_id, &buffer_list)) {
-        RunGatherStage(
-            stage_id, pending_gather_stages_.at(stage_id), &buffer_list);
-        pending_gather_stages_.erase(stage_id);
-      }
-    }
-    {
-      StageId stage_id;
-      StatementId statement_id;
-      std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
-      RunStage(stage_id, statement_id);
-    }
-  }
-
-  void RunGatherStage(StageId stage_id, StatementId statement_id,
-                      std::list<struct evbuffer*>* buffer_list) {
-    // Runs.
-    stage_graph_.CompleteStage(stage_id);
-  }
-
-  void RunStage(StageId stage_id, StatementId statement_id) {
-    // RegisterReceivingData(StageId stage_id, int num_message);
-  }
+  void Run() override;
 
  private:
-  void ProcessCommand(StageId command_stage_id, struct evbuffer* command) {
-    CHECK(command_stage_id < StageId::INVALID);
-    switch (command_stage_id) {
-      case StageId::INIT:
-        stage_graph_.Initialize(get_variable_group_id());
-        break;
-      case StageId::CONTROL_FLOW_DECISION:
-        stage_graph_.FeedControlFlowDecision();
-        break;
-      default:
-        LOG(FATAL) << "Unknown command stage id!";
-    }
-    // The command might be empty.
-    if (command) {
-      evbuffer_free(command);
-    }
-  }
+  //! Processes an initialization command.
+  void ProcessInitCommand();
+  //! Processes a control flow decision.
+  void ProcessControlFlowDecision(struct evbuffer* command);
+
+  //! Runs the second step of a gather task.
+  void RunGatherStage(StageId stage_id, StatementId statement_id,
+                      std::list<struct evbuffer*>* buffer_list);
+  //! Runs a stage, including the first step of a gather task.
+  void RunStage(StageId stage_id, StatementId statement_id);
+
+  //! Prepares a task context
+  void PrepareTaskContext(
+      StageId stage_id, StatementId statement_id,
+      const CanaryApplication::StatementInfo& statement_info,
+      CanaryTaskContext* task_context);
+  //! Serializes a control flow decision.
+  struct evbuffer* SerializeControlFlowDecision(StageId stage_id,
+                                                bool decision);
+  //! Deserializes a control flow decision.
+  void DeserializeControlFlowDecision(struct evbuffer* buffer,
+                                      StageId* stage_id, bool* decision);
+  //! Allocates data partitions.
+  void AllocatePartitionData();
 
  private:
   StageGraph stage_graph_;
   std::map<StageId, StatementId> pending_gather_stages_;
+  std::map<VariableId, PartitionData*> local_partition_data_;
 };
 
 }  // namespace canary

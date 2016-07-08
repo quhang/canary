@@ -169,4 +169,186 @@ bool WorkerLightThreadContext::RetrieveData(
   return result;
 }
 
+void WorkerExecutionContext::Run() {
+  // Processes commands.
+  struct evbuffer* command;
+  StageId command_stage_id;
+  while (RetrieveCommand(&command_stage_id, &command)) {
+    switch (command_stage_id) {
+      case StageId::INIT:
+        ProcessInitCommand();
+        CHECK(command == nullptr);
+        break;
+      case StageId::CONTROL_FLOW_DECISION:
+        ProcessControlFlowDecision(command);
+        break;
+      default:
+        LOG(FATAL) << "Unknown command stage id!";
+    }
+  }
+
+  // Processes received data.
+  std::list<struct evbuffer*> buffer_list;
+  StageId stage_id;
+  while (RetrieveData(&stage_id, &buffer_list)) {
+    RunGatherStage(stage_id, pending_gather_stages_.at(stage_id), &buffer_list);
+    pending_gather_stages_.erase(stage_id);
+  }
+
+  // Runs ready stages.
+  StatementId statement_id;
+  do {
+    std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
+    if (stage_id == StageId::COMPLETE) {
+      // TODO(quhang): report back.
+      break;
+    } else if (stage_id == StageId::INVALID) {
+      break;
+    } else {
+      RunStage(stage_id, statement_id);
+    }
+  } while (true);
+}
+
+void WorkerExecutionContext::ProcessInitCommand() {
+  stage_graph_.set_statement_info_map(
+      get_canary_application()->get_statement_info_map());
+  stage_graph_.Initialize(get_variable_group_id());
+  AllocatePartitionData();
+}
+
+void WorkerExecutionContext::ProcessControlFlowDecision(
+    struct evbuffer* command) {
+  StageId stage_id;
+  bool decision;
+  DeserializeControlFlowDecision(command, &stage_id, &decision);
+  stage_graph_.FeedControlFlowDecision(stage_id, decision);
+}
+
+void WorkerExecutionContext::RunGatherStage(
+    StageId stage_id, StatementId statement_id,
+    std::list<struct evbuffer*>* buffer_list) {
+  const auto statement_info =
+      get_canary_application()->get_statement_info_map()->at(statement_id);
+  CanaryTaskContext task_context;
+  PrepareTaskContext(stage_id, statement_id, statement_info, &task_context);
+  task_context.receive_buffer_.swap(*buffer_list);
+  const int needed_message = (statement_info.int_task_function)(&task_context);
+  CHECK_EQ(needed_message, 0);
+  stage_graph_.CompleteStage(stage_id);
+}
+
+void WorkerExecutionContext::RunStage(StageId stage_id,
+                                      StatementId statement_id) {
+  const auto statement_info =
+      get_canary_application()->get_statement_info_map()->at(statement_id);
+  CanaryTaskContext task_context;
+  PrepareTaskContext(stage_id, statement_id, statement_info, &task_context);
+  switch (statement_info.statement_type) {
+    case CanaryApplication::StatementType::TRANSFORM:
+      (statement_info.void_task_function)(&task_context);
+      stage_graph_.CompleteStage(stage_id);
+      break;
+    case CanaryApplication::StatementType::SCATTER:
+      (statement_info.void_task_function)(&task_context);
+      stage_graph_.CompleteStage(stage_id);
+      break;
+    case CanaryApplication::StatementType::GATHER: {
+      const int needed_message =
+          (statement_info.int_task_function)(&task_context);
+      if (needed_message == 0) {
+        stage_graph_.CompleteStage(stage_id);
+      } else {
+        pending_gather_stages_[stage_id] = statement_id;
+        RegisterReceivingData(stage_id, needed_message);
+      }
+      break;
+    }
+    case CanaryApplication::StatementType::WHILE: {
+      const bool decision = (statement_info.bool_task_function)(&task_context);
+      stage_graph_.CompleteStage(stage_id);
+      // Broadcast control flow decision.
+      for (const auto& pair :
+           *get_canary_application()->get_variable_group_info_map()) {
+        get_send_data_interface()->BroadcastDataToPartition(
+            get_application_id(), pair.first, StageId::CONTROL_FLOW_DECISION,
+            SerializeControlFlowDecision(stage_id, decision));
+      }
+      break;
+    }
+    case CanaryApplication::StatementType::LOOP:
+    case CanaryApplication::StatementType::END_LOOP:
+    case CanaryApplication::StatementType::END_WHILE:
+      LOG(FATAL) << "Invalid statement type!";
+      break;
+    default:
+      LOG(FATAL) << "Unknown statement type!";
+      break;
+  }
+}
+
+void WorkerExecutionContext::PrepareTaskContext(
+    StageId stage_id, StatementId statement_id,
+    const CanaryApplication::StatementInfo& statement_info,
+    CanaryTaskContext* task_context) {
+  task_context->send_data_interface_ = get_send_data_interface();
+  for (const auto& pair : statement_info.variable_access_map) {
+    if (pair.second == CanaryApplication::VariableAccess::READ) {
+      task_context->read_partition_data_map_[pair.first] =
+          local_partition_data_.at(pair.first);
+    } else {
+      CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
+      task_context->write_partition_data_map_[pair.first] =
+          local_partition_data_.at(pair.first);
+    }
+  }
+  task_context->self_partition_id_ = get_value(get_partition_id());
+  task_context->application_id_ = get_application_id();
+  if (statement_info.statement_type ==
+      CanaryApplication::StatementType::SCATTER) {
+    task_context->scatter_partitioning_ = statement_info.parallelism;
+    task_context->gather_partitioning_ =
+        statement_info.paired_gather_parallelism;
+    task_context->gather_variable_group_id_ = get_canary_application()
+                                                  ->get_statement_info_map()
+                                                  ->at(get_next(statement_id))
+                                                  .variable_group_id;
+    task_context->gather_stage_id_ = get_next(stage_id);
+  } else if (statement_info.statement_type ==
+             CanaryApplication::StatementType::GATHER) {
+    task_context->scatter_partitioning_ =
+        statement_info.paired_scatter_parallelism;
+    task_context->gather_partitioning_ = statement_info.parallelism;
+  }
+}
+
+struct evbuffer* WorkerExecutionContext::SerializeControlFlowDecision(
+    StageId stage_id, bool decision) {
+  struct evbuffer* result = evbuffer_new();
+  CanaryOutputArchive archive(result);
+  archive(stage_id);
+  archive(decision);
+  return result;
+}
+
+void WorkerExecutionContext::DeserializeControlFlowDecision(
+    struct evbuffer* buffer, StageId* stage_id, bool* decision) {
+  CanaryInputArchive archive(buffer);
+  archive(*stage_id);
+  archive(*decision);
+  evbuffer_free(buffer);
+}
+
+void WorkerExecutionContext::AllocatePartitionData() {
+  const auto variable_group_info_map =
+      get_canary_application()->get_variable_group_info_map();
+  const auto variable_info_map =
+      get_canary_application()->get_variable_info_map();
+  for (auto variable_id :
+       variable_group_info_map->at(get_variable_group_id()).variable_id_set) {
+    local_partition_data_[variable_id] =
+        variable_info_map->at(variable_id).data_prototype->Clone();
+  }
+}
+
 }  // namespace canary

@@ -331,11 +331,13 @@ class CanaryApplication {
   //! Prints the program in a string.
   std::string Print() const;
 
-  const VariableInfoMap* get_variable_info_map() { return &variable_info_map_; }
-  const VariableGroupInfoMap* get_variable_group_info_map() {
+  const VariableInfoMap* get_variable_info_map() const {
+    return &variable_info_map_;
+  }
+  const VariableGroupInfoMap* get_variable_group_info_map() const {
     return &variable_group_info_map_;
   }
-  const StatementInfoMap* get_statement_info_map() {
+  const StatementInfoMap* get_statement_info_map() const {
     return &statement_info_map_;
   }
 

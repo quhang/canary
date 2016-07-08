@@ -56,6 +56,7 @@ class WorkerSendDataInterface;
  * The context of a task.
  */
 class CanaryTaskContext {
+  friend class WorkerExecutionContext;
  public:
   CanaryTaskContext() {}
   virtual ~CanaryTaskContext() {}
