@@ -46,6 +46,7 @@
 #include "shared/canary_internal.h"
 
 #include "worker/worker_communication_interface.h"
+#include "worker/stage_graph.h"
 
 namespace canary {
 
@@ -178,10 +179,62 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
 
   //! Runs the thread.
   void Run() override {
-    while (true) {
-      continue;
+    {
+      struct evbuffer* command;
+      StageId command_stage_id;
+      while (RetrieveCommand(&command_stage_id, &command)) {
+        ProcessCommand(command_stage_id, command);
+      }
+    }
+    {
+      std::list<struct evbuffer*> buffer_list;
+      StageId stage_id;
+      while (RetrieveData(&stage_id, &buffer_list)) {
+        RunGatherStage(
+            stage_id, pending_gather_stages_.at(stage_id), &buffer_list);
+        pending_gather_stages_.erase(stage_id);
+      }
+    }
+    {
+      StageId stage_id;
+      StatementId statement_id;
+      std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
+      RunStage(stage_id, statement_id);
     }
   }
+
+  void RunGatherStage(StageId stage_id, StatementId statement_id,
+                      std::list<struct evbuffer*>* buffer_list) {
+    // Runs.
+    stage_graph_.CompleteStage(stage_id);
+  }
+
+  void RunStage(StageId stage_id, StatementId statement_id) {
+    // RegisterReceivingData(StageId stage_id, int num_message);
+  }
+
+ private:
+  void ProcessCommand(StageId command_stage_id, struct evbuffer* command) {
+    CHECK(command_stage_id < StageId::INVALID);
+    switch (command_stage_id) {
+      case StageId::INIT:
+        stage_graph_.Initialize(get_variable_group_id());
+        break;
+      case StageId::CONTROL_FLOW_DECISION:
+        stage_graph_.FeedControlFlowDecision();
+        break;
+      default:
+        LOG(FATAL) << "Unknown command stage id!";
+    }
+    // The command might be empty.
+    if (command) {
+      evbuffer_free(command);
+    }
+  }
+
+ private:
+  StageGraph stage_graph_;
+  std::map<StageId, StatementId> pending_gather_stages_;
 };
 
 }  // namespace canary

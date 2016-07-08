@@ -322,7 +322,8 @@ COUNTABLE_ENUM(PartitionId);
  * The id of a stage.
  */
 enum class StageId : int32_t {
-  COMPLETE = -101, INIT = -2,
+  CONTROL_FLOW_DECISION = -4,
+  COMPLETE = -3, INIT = -2,
   INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(StageId);
 
