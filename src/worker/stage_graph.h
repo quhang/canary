@@ -50,8 +50,9 @@
 namespace canary {
 
 /**
- * The stage graph belonged to a partition, recording spawned stages and
- * tracking whether those stages are ready to execute.
+ * The stage graph stores spawned stages and tracks when those stages are ready
+ * to execute. In the current implementation, each partition saves a seperate
+ * copy of the stage graph, for simplicity reasons.
  */
 class StageGraph {
  public:
@@ -95,6 +96,19 @@ class StageGraph {
   //! Feeds a control flow decision.
   void FeedControlFlowDecision(StageId stage_id, bool control_decision);
 
+  //! Serialization/deserialization.
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(self_variable_group_id_);
+    archive(uncomplete_stage_map_, ready_stage_queue_);
+    archive(variable_access_map_);
+    archive(received_control_flow_decisions_);
+    archive(next_statement_to_spawn_, next_stage_to_spawn_,
+            no_more_statement_to_spawn_);
+    archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
+            spawned_loops_);
+  }
+
  private:
   //! Spawns local stages until there are enough uncomplete stages or there are
   // no more statement to execute.
@@ -136,18 +150,6 @@ class StageGraph {
   bool is_blocked_by_control_flow_decision_ = false;
   bool is_inside_loop_ = false;
   int spawned_loops_ = 0;
-
-  template <typename Archive>
-  void serialize(Archive& archive) {  // NOLINT
-    archive(self_variable_group_id_);
-    archive(uncomplete_stage_map_, ready_stage_queue_);
-    archive(variable_access_map_);
-    archive(received_control_flow_decisions_);
-    archive(next_statement_to_spawn_, next_stage_to_spawn_,
-            no_more_statement_to_spawn_);
-    archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
-            spawned_loops_);
-  }
 };
 
 }  // namespace canary

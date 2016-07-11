@@ -169,6 +169,11 @@ bool WorkerLightThreadContext::RetrieveData(
   return result;
 }
 
+void WorkerExecutionContext::Initialize() {
+  stage_graph_.set_statement_info_map(
+      get_canary_application()->get_statement_info_map());
+}
+
 void WorkerExecutionContext::Run() {
   // Processes commands.
   struct evbuffer* command;
@@ -176,8 +181,8 @@ void WorkerExecutionContext::Run() {
   while (RetrieveCommand(&command_stage_id, &command)) {
     switch (command_stage_id) {
       case StageId::INIT:
-        ProcessInitCommand();
         CHECK(command == nullptr);
+        ProcessInitCommand();
         break;
       case StageId::CONTROL_FLOW_DECISION:
         ProcessControlFlowDecision(command);
@@ -211,8 +216,6 @@ void WorkerExecutionContext::Run() {
 }
 
 void WorkerExecutionContext::ProcessInitCommand() {
-  stage_graph_.set_statement_info_map(
-      get_canary_application()->get_statement_info_map());
   stage_graph_.Initialize(get_variable_group_id());
   AllocatePartitionData();
 }
@@ -229,9 +232,9 @@ void WorkerExecutionContext::RunGatherStage(
     StageId stage_id, StatementId statement_id,
     std::list<struct evbuffer*>* buffer_list) {
   VLOG(1) << "Run gather stage=" << get_value(stage_id)
-      << " statement=" << get_value(statement_id)
-      << " variable_group=" << get_value(get_variable_group_id())
-      << " partition=" << get_value(get_partition_id());
+          << " statement=" << get_value(statement_id)
+          << " variable_group=" << get_value(get_variable_group_id())
+          << " partition=" << get_value(get_partition_id());
   const auto statement_info =
       get_canary_application()->get_statement_info_map()->at(statement_id);
   CanaryTaskContext task_context;
@@ -245,9 +248,9 @@ void WorkerExecutionContext::RunGatherStage(
 void WorkerExecutionContext::RunStage(StageId stage_id,
                                       StatementId statement_id) {
   VLOG(1) << "Run stage=" << get_value(stage_id)
-      << " statement=" << get_value(statement_id)
-      << " variable_group=" << get_value(get_variable_group_id())
-      << " partition=" << get_value(get_partition_id());
+          << " statement=" << get_value(statement_id)
+          << " variable_group=" << get_value(get_variable_group_id())
+          << " partition=" << get_value(get_partition_id());
   const auto statement_info =
       get_canary_application()->get_statement_info_map()->at(statement_id);
   CanaryTaskContext task_context;

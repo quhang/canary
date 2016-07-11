@@ -168,7 +168,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   virtual ~WorkerExecutionContext() {}
 
   //! Initializes the light thread.
-  void Initialize() override {}
+  void Initialize() override;
   //! Finalizes the light thread.
   void Finalize() override {}
   //! Runs the thread.

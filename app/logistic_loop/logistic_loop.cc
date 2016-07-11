@@ -9,9 +9,9 @@
 
 #include "canary/canary.h"
 
-DEFINE_int32(app_partitions, 2, "Number of partitions.");
-DEFINE_int32(app_iterations, 50, "Number of iterations.");
-DEFINE_int32(app_samples, 100, "Number of total samples.");
+static int FLAG_app_partitions = 2;  // Number of partitions.
+static int FLAG_app_iterations = 50;  // Number of iterations.
+static int FLAG_app_samples = 100;  // Number of total samples.
 
 constexpr int DIMENSION = 20;
 
@@ -84,7 +84,7 @@ class LogisticLoopApplication : public CanaryApplication {
                               1.f, 1.f,  2.f, 1.f, 1.f,  1.f};
 
     // Declares variables.
-    auto d_feature = DeclareVariable<FeatureVector>(FLAGS_app_partitions);
+    auto d_feature = DeclareVariable<FeatureVector>(FLAG_app_partitions);
     auto d_local_gradient = DeclareVariable<Point>();
     auto d_local_w = DeclareVariable<Point>();
     auto d_global_w = DeclareVariable<Point>(1);
@@ -93,7 +93,7 @@ class LogisticLoopApplication : public CanaryApplication {
     WriteAccess(d_feature);
     Transform([=](CanaryTaskContext* task_context) {
       auto feature = task_context->WriteVariable(d_feature);
-      feature->resize(FLAGS_app_samples / FLAGS_app_partitions);
+      feature->resize(FLAG_app_samples / FLAG_app_partitions);
       std::random_device rd;
       std::default_random_engine gen(rd());
       std::uniform_real_distribution<> dis(-1, 1);
@@ -101,7 +101,7 @@ class LogisticLoopApplication : public CanaryApplication {
       for (auto& pair : *feature) {
         Point& point = pair.first;
         std::generate_n(point.begin(), point.size() - 1, generator);
-        *point.end() = 1;
+        point.back() = 1;
         pair.second = (array_dot(point, reference) > 0);
       }
     });
@@ -118,7 +118,7 @@ class LogisticLoopApplication : public CanaryApplication {
       std::fill(global_gradient->begin(), global_gradient->end(), 1000);
     });
 
-    Loop(FLAGS_app_iterations);
+    Loop(FLAG_app_iterations);
 
     ReadAccess(d_global_w);
     Scatter([=](CanaryTaskContext* task_context) {
@@ -196,9 +196,9 @@ class LogisticLoopApplication : public CanaryApplication {
     ss << parameter;
     {
       cereal::XMLInputArchive archive(ss);
-      archive(FLAGS_app_partitions);
-      archive(FLAGS_app_iterations);
-      archive(FLAGS_app_samples);
+      archive(FLAG_app_partitions);
+      archive(FLAG_app_iterations);
+      archive(FLAG_app_samples);
     }
   }
 };

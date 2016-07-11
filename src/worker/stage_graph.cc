@@ -55,7 +55,8 @@ void StageGraph::CompleteStage(StageId complete_stage_id) {
   auto& stage_record = iter->second;
   const auto& statement_info =
       statement_info_map_->at(stage_record.statement_id);
-  // Updates variable access map.
+  // Updates variable access map, so that later spawned stages do not depend on
+  // this complete stage.
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
       variable_access_map_[pair.first].read_stages.erase(complete_stage_id);
@@ -73,6 +74,7 @@ void StageGraph::CompleteStage(StageId complete_stage_id) {
       ready_stage_queue_.insert(after_stage);
     }
   }
+  // Removes the stage.
   uncomplete_stage_map_.erase(iter);
   SpawnLocalStages();
 }
@@ -195,35 +197,27 @@ bool StageGraph::ExamineNextStatement() {
 void StageGraph::SpawnStageFromStatement(
     StageId stage_id, StatementId statement_id,
     const CanaryApplication::StatementInfo& statement_info) {
-  VLOG(1) << "Spawn stage " << get_value(stage_id)
-      << " statement " << get_value(statement_id);
+  VLOG(1) << "Spawn stage " << get_value(stage_id) << " statement "
+          << get_value(statement_id);
   std::set<StageId> before_set;
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
       if (variable_access_map_[pair.first].write_stage != StageId::INVALID) {
         before_set.insert(variable_access_map_[pair.first].write_stage);
       }
+      variable_access_map_[pair.first].read_stages.insert(stage_id);
     } else {
       CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
       if (variable_access_map_[pair.first].write_stage != StageId::INVALID) {
         before_set.insert(variable_access_map_[pair.first].write_stage);
       }
+      variable_access_map_[pair.first].write_stage = stage_id;
       for (auto read_stage : variable_access_map_[pair.first].read_stages) {
         before_set.insert(read_stage);
       }
-    }
-  }
-
-  for (const auto& pair : statement_info.variable_access_map) {
-    if (pair.second == CanaryApplication::VariableAccess::READ) {
-      variable_access_map_[pair.first].read_stages.insert(stage_id);
-    } else {
-      CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
-      variable_access_map_[pair.first].write_stage = stage_id;
       variable_access_map_[pair.first].read_stages.clear();
     }
   }
-
   auto& stage_record = uncomplete_stage_map_[stage_id];
   stage_record.statement_id = statement_id;
   stage_record.before_set_size = before_set.size();
