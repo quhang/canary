@@ -110,6 +110,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
         nullptr;
     PerApplicationPartitionMap per_app_partition_map;
+    int total_partition = 0;
+    int complete_partition = 0;
   };
 
  public:
@@ -140,6 +142,9 @@ class ControllerScheduler : public ControllerSchedulerBase {
       message::ControllerRespondStatusOfPartition* respond_message);
   void ProcessStatusOfWorker(
       message::ControllerRespondStatusOfWorker* respond_message);
+
+  void CleanUpApplication(ApplicationId application_id,
+                          ApplicationRecord* application_record);
 
   /*
    * Application launching related.

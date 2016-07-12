@@ -90,11 +90,39 @@ class StageGraph {
   //! Initializes the stage graph when first launched.
   void Initialize(VariableGroupId self_variable_group_id);
   //! Reports complete stage.
-  void CompleteStage(StageId complete_stage_id);
+  void CompleteStage(StageId complete_stage_id, double timestamp,
+                     double cycles);
   //! Gets the next ready stage.
   std::pair<StageId, StatementId> GetNextReadyStage();
   //! Feeds a control flow decision.
   void FeedControlFlowDecision(StageId stage_id, bool control_decision);
+
+  //! Gets the earliest stage that is not finished.
+  StageId get_earliest_unfinished_stage_id() {
+    if (uncomplete_stage_map_.empty()) {
+      return StageId::INVALID;
+    } else {
+      return uncomplete_stage_map_.begin()->first;
+    }
+  }
+  //! Gets the latest stage that is finished.
+  StageId get_last_finished_stage_id() {
+    if (no_more_statement_to_spawn_ && uncomplete_stage_map_.empty()) {
+      return StageId::COMPLETE;
+    } else {
+      return last_finished_stage_id_;
+    }
+  }
+  //! The timestamp of critical stages.
+  void retrieve_timestamp_statistics(
+      std::map<StageId, std::pair<StatementId, double>>* timestamp_storage) {
+    timestamp_storage->swap(timestamp_storage_);
+  }
+  //! The cycles for stages.
+  void retrieve_cycle_statistics(
+      std::map<StageId, std::pair<StatementId, double>>* cycle_storage) {
+    cycle_storage->swap(cycle_storage_);
+  }
 
   //! Serialization/deserialization.
   template <typename Archive>
@@ -110,6 +138,9 @@ class StageGraph {
   }
 
  private:
+  //! Updates cycle statistics.
+  void UpdateCycleStatistics(StageId stage_id, StatementId statement_id,
+                             double cycles);
   //! Spawns local stages until there are enough uncomplete stages or there are
   // no more statement to execute.
   void SpawnLocalStages();
@@ -150,6 +181,11 @@ class StageGraph {
   bool is_blocked_by_control_flow_decision_ = false;
   bool is_inside_loop_ = false;
   int spawned_loops_ = 0;
+
+  //! Running statistics.
+  StageId last_finished_stage_id_ = StageId::INVALID;
+  std::map<StageId, std::pair<StatementId, double>> timestamp_storage_;
+  std::map<StageId, std::pair<StatementId, double>> cycle_storage_;
 };
 
 }  // namespace canary

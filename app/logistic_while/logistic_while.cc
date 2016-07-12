@@ -133,6 +133,7 @@ class LogisticWhileApplication : public CanaryApplication {
       return false;
     });
 
+    TrackNeeded();
     ReadAccess(d_global_w);
     Scatter([=](CanaryTaskContext* task_context) {
       task_context->Broadcast(task_context->ReadVariable(d_global_w));

@@ -99,6 +99,8 @@ class WorkerLightThreadContext {
   void set_priority_level(PriorityLevel priority_level) {
     priority_level_ = priority_level;
   }
+  WorkerId get_worker_id() const { return worker_id_; }
+  void set_worker_id(WorkerId worker_id) { worker_id_ = worker_id; }
   void set_activate_callback(std::function<void()> activate_callback) {
     activate_callback_ = std::move(activate_callback);
   }
@@ -142,6 +144,7 @@ class WorkerLightThreadContext {
                     std::list<struct evbuffer*>* buffer_list);
 
  private:
+  WorkerId worker_id_ = WorkerId::INVALID;
   ApplicationId application_id_ = ApplicationId::INVALID;
   VariableGroupId variable_group_id_ = VariableGroupId::INVALID;
   PartitionId partition_id_ = PartitionId::INVALID;
@@ -170,11 +173,13 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   //! Initializes the light thread.
   void Initialize() override;
   //! Finalizes the light thread.
-  void Finalize() override {}
+  void Finalize() override;
   //! Runs the thread.
   void Run() override;
 
  private:
+  //! Reports running status to the controller.
+  void ReportStatus();
   //! Processes an initialization command.
   void ProcessInitCommand();
   //! Processes a control flow decision.
@@ -199,6 +204,8 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
                                       StageId* stage_id, bool* decision);
   //! Allocates data partitions.
   void AllocatePartitionData();
+  //! Deallocates data partitions.
+  void DeallocatePartitionData();
 
  private:
   StageGraph stage_graph_;

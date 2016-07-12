@@ -54,7 +54,7 @@ namespace canary {
 class PartitionData {
  public:
   PartitionData() {}
-  ~PartitionData() {}
+  virtual ~PartitionData() {}
 
   //! Clones a new empty instance.
   virtual PartitionData* Clone() const = 0;
@@ -83,7 +83,7 @@ template <typename T>
 class TypedPartitionData : public PartitionData {
  public:
   TypedPartitionData() {}
-  ~TypedPartitionData() {}
+  virtual ~TypedPartitionData() {}
 
   PartitionData* Clone() const override { return new TypedPartitionData<T>(); }
   void Initialize() override {

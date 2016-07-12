@@ -244,6 +244,9 @@ using cereal::CanaryOutputArchive;
   inline constexpr std::underlying_type<T>::type get_value(T t) { \
     return static_cast<std::underlying_type<T>::type>(t);         \
   }                                                               \
+  inline constexpr std::underlying_type<T>::type get_distance(T t1, T t2) { \
+    return get_value(t2) - get_value(t1);                         \
+  }                                                               \
   inline constexpr T get_next(const T& t, int inc = 1) {          \
     return static_cast<T>(get_value(t) + inc);                    \
   }                                                               \
@@ -409,10 +412,16 @@ typedef std::chrono::steady_clock Clock;
 typedef Clock::time_point Timepoint;
 //! Time duration type.
 typedef Clock::duration Duration;
+
 //! Convert a time duration to double.
-inline double to_double(const Duration& input) {
+inline double duration_to_double(const Duration& input) {
   return std::chrono::duration<double>(input).count();
 }
+
+inline double timepoint_to_double(const Timepoint& time_point) {
+  return duration_to_double(time_point.time_since_epoch());
+}
+
 
 }  // namespace time
 }  // namespace canary

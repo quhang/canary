@@ -39,6 +39,8 @@
 
 #include "worker/stage_graph.h"
 
+#include <algorithm>
+
 namespace canary {
 
 void StageGraph::Initialize(VariableGroupId self_variable_group_id) {
@@ -48,13 +50,27 @@ void StageGraph::Initialize(VariableGroupId self_variable_group_id) {
   SpawnLocalStages();
 }
 
-void StageGraph::CompleteStage(StageId complete_stage_id) {
+void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
+                               double cycles) {
   VLOG(1) << "Complete stage " << get_value(complete_stage_id);
   auto iter = uncomplete_stage_map_.find(complete_stage_id);
   CHECK(iter != uncomplete_stage_map_.end());
   auto& stage_record = iter->second;
   const auto& statement_info =
       statement_info_map_->at(stage_record.statement_id);
+  // Updates the last finished stage.
+  if (last_finished_stage_id_ == StageId::INVALID) {
+    last_finished_stage_id_ = complete_stage_id;
+  } else {
+    last_finished_stage_id_ =
+        std::max(last_finished_stage_id_, complete_stage_id);
+  }
+  // Updates running statistics.
+  if (statement_info.track_needed) {
+    timestamp_storage_[complete_stage_id] =
+        std::make_pair(stage_record.statement_id, timestamp);
+  }
+  UpdateCycleStatistics(complete_stage_id, stage_record.statement_id, cycles);
   // Updates variable access map, so that later spawned stages do not depend on
   // this complete stage.
   for (const auto& pair : statement_info.variable_access_map) {
@@ -103,6 +119,35 @@ void StageGraph::FeedControlFlowDecision(StageId stage_id,
         received_control_flow_decisions_.end());
   received_control_flow_decisions_[stage_id] = control_decision;
   SpawnLocalStages();
+}
+
+void StageGraph::UpdateCycleStatistics(StageId stage_id,
+                                       StatementId statement_id,
+                                       double cycles) {
+  auto iter = cycle_storage_.rbegin();
+  // Finds the record whose stage id is exactly before the given stage id.
+  while (iter != cycle_storage_.rend() && iter->first > stage_id) {
+    --iter;
+  }
+  if (iter != cycle_storage_.rend() &&
+      get_distance(iter->first, stage_id) ==
+          get_distance(iter->second.first, statement_id)) {
+    // Merge the cycles with the former stage.
+    iter->second.second += cycles;
+  } else {
+    cycle_storage_[stage_id] = std::make_pair(statement_id, cycles);
+    auto next_iter = cycle_storage_.find(stage_id);
+    if (next_iter != cycle_storage_.end()) {
+      ++next_iter;
+    }
+    if (next_iter != cycle_storage_.end() &&
+        get_distance(stage_id, next_iter->first) ==
+            get_distance(statement_id, next_iter->second.first)) {
+      // Merge the cycles with the next stage.
+      iter->second.second += next_iter->second.second;
+      cycle_storage_.erase(next_iter);
+    }
+  }
 }
 
 void StageGraph::SpawnLocalStages() {

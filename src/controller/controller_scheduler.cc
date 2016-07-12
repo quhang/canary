@@ -83,13 +83,6 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
   switch (header->category_group) {
     case MessageCategoryGroup::CONTROLLER_COMMAND:
       switch (header->category) {
-        default:
-          LOG(FATAL) << "Unexpected message type!";
-      }  // switch category.
-      break;
-    case MessageCategoryGroup::LAUNCH_COMMAND:
-      switch (header->category) {
-        PROCESS_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
                         ProcessMigrationInPrepared);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_DONE,
@@ -98,6 +91,13 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                         ProcessStatusOfPartition);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER,
                         ProcessStatusOfWorker);
+        default:
+          LOG(FATAL) << "Unexpected message type!";
+      }  // switch category.
+      break;
+    case MessageCategoryGroup::LAUNCH_COMMAND:
+      switch (header->category) {
+        PROCESS_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
         default:
           LOG(FATAL) << "Unexpected message type!";
       }  // switch category.
@@ -119,6 +119,11 @@ void ControllerScheduler::FillInApplicationLaunchInfo(
       &application_record->loading_handle);
   application_record->variable_group_info_map =
       application_record->loaded_application->get_variable_group_info_map();
+  application_record->total_partition = 0;
+  application_record->complete_partition = 0;
+  for (auto& pair : *application_record->variable_group_info_map) {
+    application_record->total_partition += pair.second.parallelism;
+  }
 }
 
 void ControllerScheduler::AssignPartitionToWorker(
@@ -252,12 +257,45 @@ void ControllerScheduler::ProcessMigrationInDone(
 
 void ControllerScheduler::ProcessStatusOfPartition(
     message::ControllerRespondStatusOfPartition* respond_message) {
+  if (respond_message->earliest_unfinished_stage_id == StageId::INVALID &&
+      respond_message->last_finished_stage_id == StageId::COMPLETE) {
+    auto& application_record =
+        application_map_.at(respond_message->application_id);
+    if (++application_record.complete_partition ==
+        application_record.total_partition) {
+      CleanUpApplication(respond_message->application_id, &application_record);
+    }
+  }
+  LOG(INFO) << "P " << get_value(respond_message->application_id) << ' '
+            << get_value(respond_message->variable_group_id) << ' '
+            << get_value(respond_message->partition_id) << ' ' << "W "
+            << get_value(respond_message->from_worker_id);
+  const auto min_timestamp =
+      respond_message->timestamp_statistics.begin()->second.second;
+  for (auto& pair : respond_message->timestamp_statistics) {
+    LOG(INFO) << "T " << get_value(pair.first) << ' '
+              << get_value(pair.second.first) << ' '
+              << (pair.second.second - min_timestamp) * 1.e3;
+  }
+  for (auto& pair : respond_message->cycle_statistics) {
+    LOG(INFO) << "C " << get_value(pair.first) << ' '
+              << get_value(pair.second.first) << ' '
+              << pair.second.second * 1.e3;
+  }
   delete respond_message;
 }
 
 void ControllerScheduler::ProcessStatusOfWorker(
     message::ControllerRespondStatusOfWorker* respond_message) {
   delete respond_message;
+}
+
+void ControllerScheduler::CleanUpApplication(
+    ApplicationId application_id, ApplicationRecord* application_record) {
+  // Unload partitions.
+  // Unload application.
+  // Unload application binary.
+  // Unload partition map.
 }
 
 void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {

@@ -41,6 +41,7 @@
 #define CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_
 
 #include <list>
+#include <map>
 #include <string>
 #include <utility>
 
@@ -231,13 +232,16 @@ struct ControllerRespondStatusOfPartition {
   ApplicationId application_id;
   VariableGroupId variable_group_id;
   PartitionId partition_id;
-  // Cycles.
-  // Barrier reached.
-  // Critical breakpoint.
+  StageId earliest_unfinished_stage_id, last_finished_stage_id;
+  std::map<StageId, std::pair<StatementId, double>> timestamp_statistics;
+  std::map<StageId, std::pair<StatementId, double>> cycle_statistics;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id);
     archive(application_id, variable_group_id, partition_id);
+    archive(earliest_unfinished_stage_id, last_finished_stage_id);
+    archive(timestamp_statistics);
+    archive(cycle_statistics);
   }
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_PARTITION,

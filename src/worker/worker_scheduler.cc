@@ -160,6 +160,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
     ++application_record_map_.at(application_id).local_partitions;
     WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
+    thread_context->set_worker_id(self_worker_id_);
     thread_context->set_application_id(application_id);
     thread_context->set_variable_group_id(pair.first);
     thread_context->set_partition_id(pair.second);
