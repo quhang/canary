@@ -56,6 +56,8 @@ void WorkerSchedulerBase::Initialize(
     WorkerSendDataInterface* send_data_interface) {
   send_command_interface_ = CHECK_NOTNULL(send_command_interface);
   send_data_interface_ = CHECK_NOTNULL(send_data_interface);
+  // Caution: reads global variable.
+  num_cores_ = FLAGS_worker_threads;
 }
 
 bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
@@ -63,7 +65,7 @@ bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
                                             PartitionId partition_id,
                                             StageId stage_id,
                                             struct evbuffer* buffer) {
-  CHECK(is_initialized_);
+  CHECK(is_ready_);
   auto iter = thread_map_.find(
       FullPartitionId{application_id, variable_group_id, partition_id});
   if (iter == thread_map_.end()) {
@@ -76,7 +78,7 @@ bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
 }
 
 void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
-  CHECK(is_initialized_);
+  CHECK(is_ready_);
   CHECK_NOTNULL(buffer);
   LOG(FATAL) << "Not implemented.";
   // TODO(quhang): fill in.
@@ -94,7 +96,7 @@ void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
   }
 void WorkerSchedulerBase::ReceiveCommandFromController(
     struct evbuffer* buffer) {
-  CHECK(is_initialized_);
+  CHECK(is_ready_);
   auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
@@ -109,8 +111,6 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS, ProcessMigrateOutPartitions);
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
-    PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_WORKER,
-                    ProcessReportStatusOfWorker);
     PROCESS_MESSAGE(WORKER_CONTROL_PARTITIONS, ProcessControlPartitions);
     default:
       LOG(FATAL) << "Unexpected message category!";
@@ -119,11 +119,11 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
 #undef PROCESS_MESSAGE
 
 void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
-  is_initialized_ = true;
+  is_ready_ = true;
   self_worker_id_ = worker_id;
   message::ControllerRespondStatusOfWorker respond_status;
   respond_status.from_worker_id = self_worker_id_;
-  respond_status.num_cores = FLAGS_worker_threads;
+  respond_status.num_cores = num_cores_;
   send_command_interface_->SendCommandToController(
       message::SerializeMessageWithControlHeader(respond_status));
   StartExecution();
@@ -165,20 +165,27 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
     ++application_record_map_.at(application_id).local_partitions;
     WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
+    // Sets metadata of the thread context..
     thread_context->set_worker_id(self_worker_id_);
     thread_context->set_application_id(application_id);
     thread_context->set_variable_group_id(pair.first);
     thread_context->set_partition_id(pair.second);
+    // Sets priority level.
     thread_context->set_priority_level(PriorityLevel::FIRST);
+    // Sets related callback/interface.
     thread_context->set_activate_callback(std::bind(
         &WorkerSchedulerBase::ActivateThreadContext, this, thread_context));
     thread_context->set_send_command_interface(send_command_interface_);
     thread_context->set_send_data_interface(send_data_interface_);
+    // Sets the application.
     thread_context->set_canary_application(
         application_record_map_.at(application_id).loaded_application);
+    // Initializes the thread context.
     thread_context->Initialize();
     thread_map_[full_partition_id] = thread_context;
     thread_context->DeliverMessage(StageId::INIT, nullptr);
+    // Refreshes the routing such that pending messages for this partition can
+    // be delived.
     send_data_interface_->RefreshRouting();
   }
 }
@@ -194,7 +201,7 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
     --application_record_map_.at(application_id).local_partitions;
     UnloadPartition(iter->second);
     iter->second->Finalize();
-    // The thread context is not deleted, it remains there as a tomb.
+    // Caution: the thread context is not deleted, it remains there as a tomb.
     thread_map_.erase(iter);
   }
 }
@@ -207,14 +214,18 @@ void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
     const message::WorkerMigrateOutPartitions& worker_command) {
   LOG(FATAL) << "WORKER_MIGRATE_OUT_PARTITIONS";
 }
+
 void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     const message::WorkerReportStatusOfPartitions& worker_command) {
-  LOG(FATAL) << "WORKER_REPORT_STATUS_OF_PARTITIONS";
+  for (const auto& pair : worker_command.report_partitions) {
+    FullPartitionId full_partition_id{worker_command.application_id, pair.first,
+                                      pair.second};
+    auto iter = thread_map_.find(full_partition_id);
+    CHECK(iter != thread_map_.end()) << "Status report unavailable!";
+    iter->second->DeliverMessage(StageId::REQUEST_REPORT, nullptr);
+  }
 }
-void WorkerSchedulerBase::ProcessReportStatusOfWorker(
-    const message::WorkerReportStatusOfWorker& worker_command) {
-  LOG(FATAL) << "WORKER_REPORT_STATUS_OF_WORKER";
-}
+
 void WorkerSchedulerBase::ProcessControlPartitions(
     const message::WorkerControlPartitions& worker_command) {
   LOG(FATAL) << "WORKER_CONTROL_PARTITIONS";
@@ -257,7 +268,7 @@ void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
 
 void WorkerScheduler::StartExecution() {
   // Reads global variable: the number of worker threads.
-  thread_handle_list_.resize(FLAGS_worker_threads);
+  thread_handle_list_.resize(num_cores_);
   sched_param param{0};
   for (auto& handle : thread_handle_list_) {
     PCHECK(pthread_create(&handle, nullptr,
@@ -271,17 +282,10 @@ void WorkerScheduler::LoadApplicationBinary(
     ApplicationRecord* application_record) {
   CHECK_NOTNULL(application_record);
   VLOG(1) << "Load application banary: " << application_record->binary_location;
-
   application_record->loaded_application = CanaryApplication::LoadApplication(
       application_record->binary_location,
       application_record->application_parameter,
       &application_record->loading_handle);
-
-  // Instantiates the application object.
-  application_record->variable_info_map =
-      application_record->loaded_application->get_variable_info_map();
-  application_record->statement_info_map =
-      application_record->loaded_application->get_statement_info_map();
 }
 
 void WorkerScheduler::UnloadApplicationBinary(

@@ -191,6 +191,10 @@ void WorkerExecutionContext::Run() {
       case StageId::CONTROL_FLOW_DECISION:
         ProcessControlFlowDecision(command);
         break;
+      case StageId::REQUEST_REPORT:
+        CHECK(command == nullptr);
+        ProcessRequestReport();
+        break;
       default:
         LOG(FATAL) << "Unknown command stage id!";
     }
@@ -209,7 +213,14 @@ void WorkerExecutionContext::Run() {
   do {
     std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
     if (stage_id == StageId::COMPLETE) {
-      ReportStatus();
+      message::ControllerRespondPartitionDone report;
+      report.from_worker_id = get_worker_id();
+      report.application_id = get_application_id();
+      report.variable_group_id = get_variable_group_id();
+      report.partition_id = get_partition_id();
+      BuildStats(&report.running_stats);
+      get_send_command_interface()->SendCommandToController(
+          message::SerializeMessageWithControlHeader(report));
       break;
     } else if (stage_id == StageId::INVALID) {
       break;
@@ -219,24 +230,17 @@ void WorkerExecutionContext::Run() {
   } while (true);
 }
 
-void WorkerExecutionContext::ReportStatus() {
-  message::ControllerRespondStatusOfPartition report_status;
-  report_status.from_worker_id = get_worker_id();
-  report_status.application_id = get_application_id();
-  report_status.variable_group_id = get_variable_group_id();
-  report_status.partition_id = get_partition_id();
-  report_status.earliest_unfinished_stage_id =
+void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
+  running_stats->earliest_unfinished_stage_id =
       stage_graph_.get_earliest_unfinished_stage_id();
-  report_status.last_finished_stage_id =
+  running_stats->last_finished_stage_id =
       stage_graph_.get_last_finished_stage_id();
-  stage_graph_.retrieve_timestamp_statistics(
-      &report_status.timestamp_statistics);
-  stage_graph_.retrieve_cycle_statistics(&report_status.cycle_statistics);
-  get_send_command_interface()->SendCommandToController(
-      message::SerializeMessageWithControlHeader(report_status));
+  stage_graph_.retrieve_timestamp_stats(&running_stats->timestamp_stats);
+  stage_graph_.retrieve_cycle_stats(&running_stats->cycle_stats);
 }
 
 void WorkerExecutionContext::ProcessInitCommand() {
+  // Caution: initialization generates the initial task graph.
   stage_graph_.Initialize(get_variable_group_id());
   AllocatePartitionData();
 }
@@ -247,6 +251,17 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
   bool decision;
   DeserializeControlFlowDecision(command, &stage_id, &decision);
   stage_graph_.FeedControlFlowDecision(stage_id, decision);
+}
+
+void WorkerExecutionContext::ProcessRequestReport() {
+  message::ControllerRespondStatusOfPartition report;
+  report.from_worker_id = get_worker_id();
+  report.application_id = get_application_id();
+  report.variable_group_id = get_variable_group_id();
+  report.partition_id = get_partition_id();
+  BuildStats(&report.running_stats);
+  get_send_command_interface()->SendCommandToController(
+      message::SerializeMessageWithControlHeader(report));
 }
 
 void WorkerExecutionContext::RunGatherStage(

@@ -65,12 +65,12 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
     last_finished_stage_id_ =
         std::max(last_finished_stage_id_, complete_stage_id);
   }
-  // Updates running statistics.
+  // Updates running stats.
   if (statement_info.track_needed) {
     timestamp_storage_[complete_stage_id] =
         std::make_pair(stage_record.statement_id, timestamp);
   }
-  UpdateCycleStatistics(complete_stage_id, stage_record.statement_id, cycles);
+  UpdateCycleStats(complete_stage_id, stage_record.statement_id, cycles);
   // Updates variable access map, so that later spawned stages do not depend on
   // this complete stage.
   for (const auto& pair : statement_info.variable_access_map) {
@@ -121,9 +121,8 @@ void StageGraph::FeedControlFlowDecision(StageId stage_id,
   SpawnLocalStages();
 }
 
-void StageGraph::UpdateCycleStatistics(StageId stage_id,
-                                       StatementId statement_id,
-                                       double cycles) {
+void StageGraph::UpdateCycleStats(StageId stage_id, StatementId statement_id,
+                                  double cycles) {
   auto iter = cycle_storage_.rbegin();
   // Finds the record whose stage id is exactly before the given stage id.
   while (iter != cycle_storage_.rend() && iter->first > stage_id) {

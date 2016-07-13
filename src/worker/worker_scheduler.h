@@ -71,8 +71,6 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
     int local_partitions = 0;
     void* loading_handle = nullptr;
     CanaryApplication* loaded_application = nullptr;
-    const CanaryApplication::VariableInfoMap* variable_info_map = nullptr;
-    const CanaryApplication::StatementInfoMap* statement_info_map = nullptr;
   };
 
  public:
@@ -80,114 +78,105 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   WorkerSchedulerBase();
   //! Destroctor.
   virtual ~WorkerSchedulerBase();
-
-  // Initializes the worker scheduler.
+  //! Initializes the worker scheduler.
   void Initialize(WorkerSendCommandInterface* send_command_interface,
                   WorkerSendDataInterface* send_data_interface);
-
+  /*
+   * Callback exposed to the worker communication manager and the worker data
+   * router. These methods are called in the synchronous context.
+   */
   //! Delivers the routed data to a thread context, and returns false if no
   // thread context is found.
   bool ReceiveRoutedData(ApplicationId application_id,
                          VariableGroupId variable_group_id,
                          PartitionId partition_id, StageId stage_id,
                          struct evbuffer* buffer) override;
-
   //! Delivers direct data.
   void ReceiveDirectData(struct evbuffer* buffer) override;
-
   //! Processes worker commands.
   void ReceiveCommandFromController(struct evbuffer* buffer) override;
-
   //! Assigns a worker id, and starts execution.
   void AssignWorkerId(WorkerId worker_id) override;
 
- protected:
-  //! Starts execution threads.
-  virtual void StartExecution() = 0;
-
-  //! Loads the application binary.
-  virtual void LoadApplicationBinary(ApplicationRecord* application_record) = 0;
-
-  //! Unloads the application binary.
-  virtual void UnloadApplicationBinary(
-      ApplicationRecord* application_record) = 0;
-
-  //! Loads a partition and returns its thread context.
-  virtual WorkerLightThreadContext* LoadPartition(
-      FullPartitionId full_partition_id) = 0;
-
-  //! Unloads a partition and wraps up its thread context.
-  virtual void UnloadPartition(WorkerLightThreadContext* thread_context) = 0;
-
  private:
+  /*
+   * Processing various commands from the controller. These methods are
+   * called in the synchronous context.
+   */
   //! Loads an application.
   void ProcessLoadApplication(
       const message::WorkerLoadApplication& worker_command);
-
   //! Unloads an application.
   void ProcessUnloadApplication(
       const message::WorkerUnloadApplication& worker_command);
-
   //! Loads partitions.
   void ProcessLoadPartitions(
       const message::WorkerLoadPartitions& worker_command);
-
   //! Unloads partitions.
   void ProcessUnloadPartitions(
       const message::WorkerUnloadPartitions& worker_command);
-
   //! TODO(quhang): not implemented.
   void ProcessMigrateInPartitions(
       const message::WorkerMigrateInPartitions& worker_command);
-
   //! TODO(quhang): not implemented.
   void ProcessMigrateOutPartitions(
       const message::WorkerMigrateOutPartitions& worker_command);
-
-  //! TODO(quhang): not implemented.
+  //! Asks a partition to report status.
   void ProcessReportStatusOfPartitions(
       const message::WorkerReportStatusOfPartitions& worker_command);
-
-  //! TODO(quhang): not implemented.
-  void ProcessReportStatusOfWorker(
-      const message::WorkerReportStatusOfWorker& worker_command);
-
   //! TODO(quhang): not implemented.
   void ProcessControlPartitions(
       const message::WorkerControlPartitions& worker_command);
 
  protected:
+  /*
+   * Methods implemented by subclass to change the behavior of the scheduler.
+   */
+  //! Starts execution threads.
+  virtual void StartExecution() = 0;
+  //! Loads the application binary.
+  virtual void LoadApplicationBinary(ApplicationRecord* application_record) = 0;
+  //! Unloads the application binary.
+  virtual void UnloadApplicationBinary(
+      ApplicationRecord* application_record) = 0;
+  //! Loads a partition and returns its thread context.
+  virtual WorkerLightThreadContext* LoadPartition(
+      FullPartitionId full_partition_id) = 0;
+  //! Unloads a partition and wraps up its thread context.
+  virtual void UnloadPartition(WorkerLightThreadContext* thread_context) = 0;
+  /*
+   * Execution thread control. Called in asynchronous context.
+   */
   //! Activates a thread context.
   void ActivateThreadContext(WorkerLightThreadContext* thread_context);
-
   //! Retrieves an activated thread context.
   WorkerLightThreadContext* GetActivatedThreadContext();
-
   //! Execution routine.
   static void* ExecutionRoutine(void* arg);
 
  protected:
+  /*
+   * Scheduling-related data structure.
+   */
   //! Thread scheduling sychronization lock and condition variable.
   pthread_mutex_t scheduling_lock_;
   pthread_cond_t scheduling_cond_;
-
   //! All thread contexts.
   std::map<FullPartitionId, WorkerLightThreadContext*> thread_map_;
   //! Activated thread contexts.
   std::list<WorkerLightThreadContext*> activated_thread_queue_;
-
   //! Execution thread handlers.
   std::vector<pthread_t> thread_handle_list_;
-
- protected:
-  //! All application records.
+  /*
+   * Other data structure.
+   */
   std::map<ApplicationId, ApplicationRecord> application_record_map_;
-
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
   WorkerSendDataInterface* send_data_interface_ = nullptr;
-
-  bool is_initialized_ = false;
+  //! Whether a worker id is assigned.
+  bool is_ready_ = false;
   WorkerId self_worker_id_ = WorkerId::INVALID;
+  int num_cores_ = -1;
 };
 
 class WorkerScheduler : public WorkerSchedulerBase {

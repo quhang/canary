@@ -88,6 +88,8 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                         ProcessMigrationInPrepared);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_DONE,
                         ProcessMigrationInDone);
+        PROCESS_MESSAGE(CONTROLLER_RESPOND_PARTITION_DONE,
+                        ProcessPartitionDone);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_PARTITION,
                         ProcessStatusOfPartition);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER,
@@ -267,34 +269,30 @@ void ControllerScheduler::ProcessMigrationInDone(
   delete respond_message;
 }
 
+void ControllerScheduler::ProcessPartitionDone(
+    message::ControllerRespondPartitionDone* respond_message) {
+  const auto& running_stats = respond_message->running_stats;
+  UpdateRunningStats(respond_message->from_worker_id,
+                     respond_message->application_id,
+                     respond_message->variable_group_id,
+                     respond_message->partition_id, running_stats);
+  CHECK(running_stats.earliest_unfinished_stage_id == StageId::INVALID &&
+        running_stats.last_finished_stage_id == StageId::COMPLETE);
+  auto& application_record =
+      application_map_.at(respond_message->application_id);
+  if (++application_record.complete_partition ==
+      application_record.total_partition) {
+    CleanUpApplication(respond_message->application_id, &application_record);
+  }
+  delete respond_message;
+}
+
 void ControllerScheduler::ProcessStatusOfPartition(
     message::ControllerRespondStatusOfPartition* respond_message) {
-  InitializeLoggingFile();
-  fprintf(log_file_, "P %d %d %d W %d\n",
-          get_value(respond_message->application_id),
-          get_value(respond_message->variable_group_id),
-          get_value(respond_message->partition_id),
-          get_value(respond_message->from_worker_id));
-  const auto min_timestamp =
-      respond_message->timestamp_statistics.begin()->second.second;
-  for (auto& pair : respond_message->timestamp_statistics) {
-    fprintf(log_file_, "T %d %d %f\n", get_value(pair.first),
-            get_value(pair.second.first),
-            (pair.second.second - min_timestamp) * 1.e3);
-  }
-  for (auto& pair : respond_message->cycle_statistics) {
-    fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
-            get_value(pair.second.first), pair.second.second * 1.e3);
-  }
-  if (respond_message->earliest_unfinished_stage_id == StageId::INVALID &&
-      respond_message->last_finished_stage_id == StageId::COMPLETE) {
-    auto& application_record =
-        application_map_.at(respond_message->application_id);
-    if (++application_record.complete_partition ==
-        application_record.total_partition) {
-      CleanUpApplication(respond_message->application_id, &application_record);
-    }
-  }
+  UpdateRunningStats(
+      respond_message->from_worker_id, respond_message->application_id,
+      respond_message->variable_group_id, respond_message->partition_id,
+      respond_message->running_stats);
   delete respond_message;
 }
 
@@ -305,6 +303,28 @@ void ControllerScheduler::ProcessStatusOfWorker(
     worker_map_[from_worker_id].num_cores = respond_message->num_cores;
   }
   delete respond_message;
+}
+
+void ControllerScheduler::UpdateRunningStats(
+    WorkerId worker_id, ApplicationId application_id,
+    VariableGroupId variable_group_id, PartitionId partition_id,
+    const message::RunningStats& running_stats) {
+  InitializeLoggingFile();
+  fprintf(log_file_, "P %d %d %d W %d\n", get_value(application_id),
+          get_value(variable_group_id), get_value(partition_id),
+          get_value(worker_id));
+  const auto& timestamp_stats = running_stats.timestamp_stats;
+  const auto min_timestamp = timestamp_stats.cbegin()->second.second;
+  for (const auto& pair : timestamp_stats) {
+    fprintf(log_file_, "T %d %d %f\n", get_value(pair.first),
+            get_value(pair.second.first),
+            (pair.second.second - min_timestamp) * 1.e3);
+  }
+  const auto& cycle_stats = running_stats.cycle_stats;
+  for (const auto& pair : cycle_stats) {
+    fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
+            get_value(pair.second.first), pair.second.second * 1.e3);
+  }
 }
 
 void ControllerScheduler::CleanUpApplication(

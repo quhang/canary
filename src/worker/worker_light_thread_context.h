@@ -52,9 +52,15 @@
 
 namespace canary {
 
+namespace message {
+// Forward declaration.
+struct RunningStats;
+}  // namespace message
+
 /**
  * The execution context of a lightweight thread, which is responsible for
- * execution of a partition or other special tasks.
+ * execution of a partition. This base class stores basic metadata, and includes
+ * logic to handle command and data delivery.
  */
 class WorkerLightThreadContext {
  private:
@@ -144,6 +150,7 @@ class WorkerLightThreadContext {
                     std::list<struct evbuffer*>* buffer_list);
 
  private:
+  //! Metadata.
   WorkerId worker_id_ = WorkerId::INVALID;
   ApplicationId application_id_ = ApplicationId::INVALID;
   VariableGroupId variable_group_id_ = VariableGroupId::INVALID;
@@ -153,15 +160,14 @@ class WorkerLightThreadContext {
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
   WorkerSendDataInterface* send_data_interface_ = nullptr;
   const CanaryApplication* canary_application_ = nullptr;
-
   //! Synchronization lock.
   pthread_mutex_t internal_lock_;
   bool running_ = false;
-
   //! Received commands.
   std::list<CommandBuffer> command_list_;
   //! Received data.
   std::map<StageId, StageBuffer> stage_buffer_map_;
+  //! Ready stages.
   std::list<StageId> ready_stages_;
 };
 
@@ -178,19 +184,20 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void Run() override;
 
  private:
-  //! Reports running status to the controller.
-  void ReportStatus();
+  //! Builds running status.
+  void BuildStats(message::RunningStats* running_stats);
   //! Processes an initialization command.
   void ProcessInitCommand();
   //! Processes a control flow decision.
   void ProcessControlFlowDecision(struct evbuffer* command);
+  //! Processes a command that requests running stats.
+  void ProcessRequestReport();
 
   //! Runs the second step of a gather task.
   void RunGatherStage(StageId stage_id, StatementId statement_id,
                       std::list<struct evbuffer*>* buffer_list);
   //! Runs a stage, including the first step of a gather task.
   void RunStage(StageId stage_id, StatementId statement_id);
-
   //! Prepares a task context
   void PrepareTaskContext(
       StageId stage_id, StatementId statement_id,

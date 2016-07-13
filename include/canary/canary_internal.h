@@ -327,6 +327,7 @@ COUNTABLE_ENUM(PartitionId);
  * The id of a stage.
  */
 enum class StageId : int32_t {
+  REQUEST_REPORT = -5,
   CONTROL_FLOW_DECISION = -4,
   COMPLETE = -3, INIT = -2,
   INVALID = -1, FIRST = 0 };
@@ -376,6 +377,24 @@ struct FullPartitionId {
   }
 };
 
+/**
+ * The partial id of a partition.
+ */
+struct PartialPartitionId {
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(variable_group_id, partition_id);
+  }
+  bool operator<(const FullPartitionId& rhs) const {
+    if (variable_group_id < rhs.variable_group_id) return true;
+    if (variable_group_id > rhs.variable_group_id) return false;
+    if (partition_id < rhs.partition_id) return true;
+    return false;
+  }
+};
+
 }  // namespace canary
 
 namespace std {
@@ -392,6 +411,15 @@ struct hash<::canary::FullPartitionId> {
   size_t operator()(const ::canary::FullPartitionId& e) const {
     return (std::hash<::canary::ApplicationId>()(e.application_id) << 16) +
            (std::hash<::canary::VariableGroupId>()(e.variable_group_id) << 8) +
+           std::hash<::canary::PartitionId>()(e.partition_id);
+  }
+};
+
+//! Hash function for partial partition id.
+template <>
+struct hash<::canary::PartialPartitionId> {
+  size_t operator()(const ::canary::PartialPartitionId& e) const {
+    return (std::hash<::canary::VariableGroupId>()(e.variable_group_id) << 8) +
            std::hash<::canary::PartitionId>()(e.partition_id);
   }
 };

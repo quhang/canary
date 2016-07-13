@@ -138,6 +138,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
       message::ControllerRespondMigrationInPrepared* respond_message);
   void ProcessMigrationInDone(
       message::ControllerRespondMigrationInDone* respond_message);
+  void ProcessPartitionDone(
+      message::ControllerRespondPartitionDone* respond_message);
   void ProcessStatusOfPartition(
       message::ControllerRespondStatusOfPartition* respond_message);
   void ProcessStatusOfWorker(
@@ -146,6 +148,11 @@ class ControllerScheduler : public ControllerSchedulerBase {
   /*
    * Misc functions.
    */
+  //! Processes running stats.
+  void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
+                          VariableGroupId variable_group_id,
+                          PartitionId partition_id,
+                          const message::RunningStats& running_stats);
   //! Cleans up an application after it is complete.
   void CleanUpApplication(ApplicationId application_id,
                           ApplicationRecord* application_record);

@@ -171,15 +171,6 @@ struct WorkerReportStatusOfPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
 
-//! Asks a worker to report running status of the worker.
-struct WorkerReportStatusOfWorker {
-  template <typename Archive>
-  void serialize(Archive&) {  // NOLINT
-  }
-};
-REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_WORKER,
-                 WorkerReportStatusOfWorker);
-
 //! Controls the behavior of partitions.
 struct WorkerControlPartitions {
   std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
@@ -195,6 +186,25 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_CONTROL_PARTITIONS,
 /*
  * Worker to controller commands.
  */
+
+/**
+ * The running statistics of a partition.
+ */
+struct RunningStats {
+  //! Earliest unfinished stage may be INVALID.
+  StageId earliest_unfinished_stage_id;
+  //! Last finished stage may be COMPLETE.
+  StageId last_finished_stage_id;
+  //! double is a timestamp.
+  std::map<StageId, std::pair<StatementId, double>> timestamp_stats;
+  //! double is the cycle spent on the following stages in the same loop.
+  std::map<StageId, std::pair<StatementId, double>> cycle_stats;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(earliest_unfinished_stage_id, last_finished_stage_id);
+    archive(timestamp_stats, cycle_stats);
+  }
+};
 
 //! Responds that migration in is prepared.
 struct ControllerRespondMigrationInPrepared {
@@ -226,27 +236,59 @@ struct ControllerRespondMigrationInDone {
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_MIGRATION_IN_DONE,
                  ControllerRespondMigrationInDone);
 
-//! Responds with the running status of a partition.
+//! Responds that migration out is completed.
+struct ControllerRespondMigrationOutDone {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  //! Sends the running stats when a partition is migrated out.
+  RunningStats running_stats;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+    archive(running_stats);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_MIGRATION_OUT_DONE,
+                 ControllerRespondMigrationOutDone);
+
+//! Responds that a partition is complete.
+struct ControllerRespondPartitionDone {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  //! Sends the running stats when a partition is complete.
+  RunningStats running_stats;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+    archive(running_stats);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_PARTITION_DONE,
+                 ControllerRespondPartitionDone);
+
+//! Responds with the running status of a partition, only when requested by the
+// controller.
 struct ControllerRespondStatusOfPartition {
   WorkerId from_worker_id;
   ApplicationId application_id;
   VariableGroupId variable_group_id;
   PartitionId partition_id;
-  StageId earliest_unfinished_stage_id, last_finished_stage_id;
-  std::map<StageId, std::pair<StatementId, double>> timestamp_statistics;
-  std::map<StageId, std::pair<StatementId, double>> cycle_statistics;
+  RunningStats running_stats;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id);
     archive(application_id, variable_group_id, partition_id);
-    archive(earliest_unfinished_stage_id, last_finished_stage_id);
-    archive(timestamp_statistics);
-    archive(cycle_statistics);
+    archive(running_stats);
   }
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_PARTITION,
                  ControllerRespondStatusOfPartition);
-
 //! Responds with the configuration/running status of a worker.
 struct ControllerRespondStatusOfWorker {
   WorkerId from_worker_id;
@@ -258,7 +300,6 @@ struct ControllerRespondStatusOfWorker {
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_WORKER,
                  ControllerRespondStatusOfWorker);
-
 }  // namespace message
 }  // namespace canary
 #endif  // CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_

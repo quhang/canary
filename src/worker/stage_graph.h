@@ -114,12 +114,12 @@ class StageGraph {
     }
   }
   //! The timestamp of critical stages.
-  void retrieve_timestamp_statistics(
+  void retrieve_timestamp_stats(
       std::map<StageId, std::pair<StatementId, double>>* timestamp_storage) {
     timestamp_storage->swap(timestamp_storage_);
   }
   //! The cycles for stages.
-  void retrieve_cycle_statistics(
+  void retrieve_cycle_stats(
       std::map<StageId, std::pair<StatementId, double>>* cycle_storage) {
     cycle_storage->swap(cycle_storage_);
   }
@@ -138,9 +138,9 @@ class StageGraph {
   }
 
  private:
-  //! Updates cycle statistics.
-  void UpdateCycleStatistics(StageId stage_id, StatementId statement_id,
-                             double cycles);
+  //! Updates cycle stats.
+  void UpdateCycleStats(StageId stage_id, StatementId statement_id,
+                        double cycles);
   //! Spawns local stages until there are enough uncomplete stages or there are
   // no more statement to execute.
   void SpawnLocalStages();
@@ -182,7 +182,7 @@ class StageGraph {
   bool is_inside_loop_ = false;
   int spawned_loops_ = 0;
 
-  //! Running statistics.
+  //! Running stats.
   StageId last_finished_stage_id_ = StageId::INVALID;
   std::map<StageId, std::pair<StatementId, double>> timestamp_storage_;
   std::map<StageId, std::pair<StatementId, double>> cycle_storage_;
