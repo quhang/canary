@@ -91,6 +91,8 @@
  */
 DECLARE_string(controller_host);
 DECLARE_string(controller_service);
+DECLARE_string(controller_log_dir);
+DECLARE_string(controller_log_name);
 DECLARE_string(launch_service);
 DECLARE_string(worker_service);
 DECLARE_int32(worker_threads);

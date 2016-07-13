@@ -247,11 +247,10 @@ struct ControllerRespondStatusOfPartition {
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_PARTITION,
                  ControllerRespondStatusOfPartition);
 
-//! Responds with the running status of a worker.
+//! Responds with the configuration/running status of a worker.
 struct ControllerRespondStatusOfWorker {
   WorkerId from_worker_id;
   int num_cores = -1;
-  // CPU utilization.
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id, num_cores);

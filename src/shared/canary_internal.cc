@@ -42,6 +42,8 @@
 DEFINE_string(controller_host, "localhost", "The controller hostname.");
 DEFINE_string(controller_service, "29992",
               "The controller port for worker to connect.");
+DEFINE_string(controller_log_dir, "./", "The logging directory.");
+DEFINE_string(controller_log_name, "controller.txt", "The logging name.");
 DEFINE_string(launch_service, "19991", "The job launching port.");
 DEFINE_string(worker_service, "39993", "The worker port for exchanging data.");
 

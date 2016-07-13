@@ -121,6 +121,11 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
 void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
   is_initialized_ = true;
   self_worker_id_ = worker_id;
+  message::ControllerRespondStatusOfWorker respond_status;
+  respond_status.from_worker_id = self_worker_id_;
+  respond_status.num_cores = FLAGS_worker_threads;
+  send_command_interface_->SendCommandToController(
+      message::SerializeMessageWithControlHeader(respond_status));
   StartExecution();
 }
 
@@ -253,10 +258,12 @@ void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
 void WorkerScheduler::StartExecution() {
   // Reads global variable: the number of worker threads.
   thread_handle_list_.resize(FLAGS_worker_threads);
+  sched_param param{0};
   for (auto& handle : thread_handle_list_) {
-    // TODO(quhang): set thread priority.
     PCHECK(pthread_create(&handle, nullptr,
                           &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
+    // Set worker thread priority lower than SCHED_OTHER.
+    PCHECK(pthread_setschedparam(handle, SCHED_BATCH, &param) == 0);
   }
 }
 

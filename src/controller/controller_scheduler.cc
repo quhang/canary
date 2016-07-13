@@ -40,6 +40,7 @@
 #include "controller/controller_scheduler.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <vector>
 
 namespace canary {
@@ -232,6 +233,17 @@ void ControllerScheduler::ProcessLaunchApplication(
   const ApplicationId assigned_application_id = (next_application_id_++);
   auto& application_record = application_map_[assigned_application_id];
   FillInApplicationLaunchInfo(*launch_message, &application_record);
+  InitializeLoggingFile();
+  std::string output_application_parameter;
+  std::remove_copy_if(
+      launch_message->application_parameter.begin(),
+      launch_message->application_parameter.end(),
+      std::back_inserter(output_application_parameter),
+      [](auto c) { return c == ' ' || c == '\n' || c == '\t'; });
+  fprintf(log_file_, "L %d %s %s\n", get_value(assigned_application_id),
+          launch_message->binary_location.c_str(),
+          output_application_parameter.c_str());
+  FlushLoggingFile();
   AssignPartitionToWorker(&application_record);
   // Sends the partition map to workers.
   send_command_interface_->AddApplication(
@@ -257,6 +269,23 @@ void ControllerScheduler::ProcessMigrationInDone(
 
 void ControllerScheduler::ProcessStatusOfPartition(
     message::ControllerRespondStatusOfPartition* respond_message) {
+  InitializeLoggingFile();
+  fprintf(log_file_, "P %d %d %d W %d\n",
+          get_value(respond_message->application_id),
+          get_value(respond_message->variable_group_id),
+          get_value(respond_message->partition_id),
+          get_value(respond_message->from_worker_id));
+  const auto min_timestamp =
+      respond_message->timestamp_statistics.begin()->second.second;
+  for (auto& pair : respond_message->timestamp_statistics) {
+    fprintf(log_file_, "T %d %d %f\n", get_value(pair.first),
+            get_value(pair.second.first),
+            (pair.second.second - min_timestamp) * 1.e3);
+  }
+  for (auto& pair : respond_message->cycle_statistics) {
+    fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
+            get_value(pair.second.first), pair.second.second * 1.e3);
+  }
   if (respond_message->earliest_unfinished_stage_id == StageId::INVALID &&
       respond_message->last_finished_stage_id == StageId::COMPLETE) {
     auto& application_record =
@@ -266,36 +295,64 @@ void ControllerScheduler::ProcessStatusOfPartition(
       CleanUpApplication(respond_message->application_id, &application_record);
     }
   }
-  LOG(INFO) << "P " << get_value(respond_message->application_id) << ' '
-            << get_value(respond_message->variable_group_id) << ' '
-            << get_value(respond_message->partition_id) << ' ' << "W "
-            << get_value(respond_message->from_worker_id);
-  const auto min_timestamp =
-      respond_message->timestamp_statistics.begin()->second.second;
-  for (auto& pair : respond_message->timestamp_statistics) {
-    LOG(INFO) << "T " << get_value(pair.first) << ' '
-              << get_value(pair.second.first) << ' '
-              << (pair.second.second - min_timestamp) * 1.e3;
-  }
-  for (auto& pair : respond_message->cycle_statistics) {
-    LOG(INFO) << "C " << get_value(pair.first) << ' '
-              << get_value(pair.second.first) << ' '
-              << pair.second.second * 1.e3;
-  }
   delete respond_message;
 }
 
 void ControllerScheduler::ProcessStatusOfWorker(
     message::ControllerRespondStatusOfWorker* respond_message) {
+  auto from_worker_id = respond_message->from_worker_id;
+  if (worker_map_.find(from_worker_id) != worker_map_.end()) {
+    worker_map_[from_worker_id].num_cores = respond_message->num_cores;
+  }
   delete respond_message;
 }
 
 void ControllerScheduler::CleanUpApplication(
     ApplicationId application_id, ApplicationRecord* application_record) {
-  // Unload partitions.
-  // Unload application.
+  LOG(INFO) << "Application " << get_value(application_id) << " is complete.";
+  FlushLoggingFile();
+
+  // Unloads partitions.
+  for (auto& pair : worker_map_) {
+    auto& owned_partitions = pair.second.owned_partitions;
+    if (owned_partitions.find(application_id) == owned_partitions.end()) {
+      continue;
+    }
+    if (owned_partitions.at(application_id).empty()) {
+      owned_partitions.erase(application_id);
+      continue;
+    }
+    message::WorkerUnloadPartitions unload_partitions_command;
+    unload_partitions_command.application_id = application_id;
+    for (auto& full_partition_id : owned_partitions.at(application_id)) {
+      unload_partitions_command.unload_partitions.emplace_back(
+          full_partition_id.variable_group_id, full_partition_id.partition_id);
+    }
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(unload_partitions_command));
+    owned_partitions.erase(application_id);
+  }
+  // Unloads application.
+  for (auto& pair : worker_map_) {
+    auto& loaded_applications = pair.second.loaded_applications;
+    if (loaded_applications.find(application_id) == loaded_applications.end()) {
+      continue;
+    }
+    message::WorkerUnloadApplication unload_application_command;
+    unload_application_command.application_id = application_id;
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(unload_application_command));
+    loaded_applications.erase(application_id);
+  }
   // Unload application binary.
+  CanaryApplication::UnloadApplication(application_record->loading_handle,
+                                       application_record->loaded_application);
   // Unload partition map.
+  send_command_interface_->DropApplication(application_id);
+  // Erases the application record.
+  application_map_.erase(application_id);
 }
 
 void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {
@@ -313,6 +370,20 @@ void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
   CHECK(worker_id != WorkerId::INVALID);
   CHECK(worker_map_.find(worker_id) == worker_map_.end());
   worker_map_[worker_id].num_cores = -1;
+}
+
+void ControllerScheduler::InitializeLoggingFile() {
+  if (!log_file_) {
+    log_file_ = fopen(
+        (FLAGS_controller_log_dir + FLAGS_controller_log_name).c_str(), "a");
+    fprintf(log_file_, "B\n");
+  }
+}
+
+void ControllerScheduler::FlushLoggingFile() {
+  if (log_file_) {
+    PCHECK(fflush(log_file_) == 0);
+  }
 }
 
 }  // namespace canary

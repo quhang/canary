@@ -143,8 +143,16 @@ class ControllerScheduler : public ControllerSchedulerBase {
   void ProcessStatusOfWorker(
       message::ControllerRespondStatusOfWorker* respond_message);
 
+  /*
+   * Misc functions.
+   */
+  //! Cleans up an application after it is complete.
   void CleanUpApplication(ApplicationId application_id,
                           ApplicationRecord* application_record);
+  //! Initializes logging file.
+  void InitializeLoggingFile();
+  //! Flushes logging file.
+  void FlushLoggingFile();
 
   /*
    * Application launching related.
@@ -173,6 +181,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
   ApplicationId next_application_id_ = ApplicationId::FIRST;
 
  protected:
+  FILE* log_file_ = nullptr;
   std::map<WorkerId, WorkerRecord> worker_map_;
   std::map<ApplicationId, ApplicationRecord> application_map_;
 };
