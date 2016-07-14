@@ -5,16 +5,16 @@
 #include <cstring>
 
 #include <algorithm>
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <memory>
-#include <utility>
-#include <math.h>
-#include <pthread.h>
+#include <array>
 #include <assert.h>
 #include <float.h>
-
+#include <fstream>
+#include <iostream>
+#include <math.h>
+#include <memory>
+#include <pthread.h>
+#include <utility>
+#include <vector>
 
 #include <cereal/archives/binary.hpp>
 #include <cereal/archives/xml.hpp>
@@ -22,6 +22,7 @@
 
 #include "fluid.h"
 #include "cellpool.h"
+#include "../helper.h"
 
 DEFINE_int32(app_partition_x, 1, "Partitioning in the x dimension.");
 DEFINE_int32(app_partition_y, 1, "Partitioning in the y dimension.");
@@ -37,54 +38,6 @@ struct GlobalState {
   template <typename Archive> void serialize(Archive&) {}
 };
 
-/**
- * The grid that describes a region of cells.
- */
-struct Grid {
-  // The region.
-  int sx, sy, sz, ex, ey, ez;
-  // d[x] = e[x] - s[x].
-  int dx, dy, dz;
-  // The cell count.
-  int count;
-  void CalculateLength() {
-    dx = ex - sx;
-    dy = ey - sy;
-    dz = ez - sz;
-    count = dx * dy * dz;
-  }
-  void ExpandToGhostGrid(int lim_x, int lim_y, int lim_z) {
-    if (sx > 0) {
-      --sx;
-    }
-    if (sy > 0) {
-      --sy;
-    }
-    if (sz > 0) {
-      --sz;
-    }
-    if (ex < lim_x - 1) {
-      ++ex;
-    }
-    if (ey < lim_y - 1) {
-      ++ey;
-    }
-    if (ez < lim_z - 1) {
-      ++ez;
-    }
-    CalculateLength();
-  }
-  bool Contain(int ix, int iy, int iz) const {
-    return (ix >= sx) && (ix < ex) && (iy >= sy) && (iy < ey) && (iz >= sz) &&
-           (iz < ez);
-  }
-
-  template <typename Archive>
-  void serialize(Archive& archive) {  // NOLINT
-    archive(sx, sy, sz, ex, ey, ez, dx, dy, dz, count);
-  }
-};
-
 /*
  * Data of a partition
  */
@@ -96,46 +49,47 @@ class PartitionData {
   virtual ~PartitionData();
 
  private:
+  //! Memory pool.
   cellpool local_pool_;
 
   float energy_sum_ = 0;
 
-  // Simulation parameters.
+  //! Simulation parameters.
   fptype restParticlesPerMeter_ = 0, h_ = 0, hSq_ = 0;
   fptype densityCoeff_ = 0, pressureCoeff_ = 0, viscosityCoeff_ = 0;
 
   // Number of cells in each each dimension.
-  int nx_ = 0, ny_ = 0, nz_ = 0;
+  // int nx_ = 0, ny_ = 0, nz_ = 0;
 
   // The size of a cell.
-  Vec3 delta_;
+  // Vec3 delta_;
 
   // Number of partitioning in each dimension.
-  int split_x_ = 0, split_y_ = 0, split_z_ = 0, split_total_ = 0;
+  // int split_x_ = 0, split_y_ = 0, split_z_ = 0, split_total_ = 0;
   // The index of the partition.
   int partition_x_ = 0, partition_y_ = 0, partition_z_ = 0, partition_rank_ = 0;
 
+  //! Particles.
   std::vector<Cell> cells_, cells2_;
   std::vector<int> cnumPars_, cnumPars2_;
   std::vector<Cell*> last_cells_;
   // Rank -> Metadata.
   struct Metadata {
     // Global index/local index.
-    std::list<std::pair<int, int>> send_to_owner_local_indices;
-    std::list<std::pair<int, int>> send_to_ghost_local_indices;
+    std::list<std::pair<int, int>> local_to_ghost_indices;
+    std::list<std::pair<int, int>> ghost_to_ghost_indices;
     template <typename Archive>
     void serialize(Archive& archive) {  // NOLINT
-      archive(send_to_owner_local_indices);
-      archive(send_to_ghost_local_indices);
+      archive(local_to_ghost_indices);
+      archive(ghost_to_ghost_indices);
     }
   };
   // Caution: has to be ordered map.
   std::map<int, Metadata> exchange_metadata_;
-  int total_neighbor_partitions_ = 0;
 
-  Grid local_grid_, ghost_grid_;
+  helper::Grid local_grid_, ghost_grid_;
 
-  Vec3 domainMinFull, domainMaxFull;
+  // Vec3 domainMinFull, domainMaxFull;
 
  public:
   template <typename Archive>
@@ -143,10 +97,10 @@ class PartitionData {
     archive(energy_sum_);
     archive(restParticlesPerMeter_, h_, hSq_);
     archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
-    archive(nx_, ny_, nz_);
-    archive(delta_);
-    archive(split_x_, split_y_, split_z_, split_total_);
-    archive(partition_x_, partition_y_, partition_z_, partition_rank_);
+    //archive(nx_, ny_, nz_);
+    //archive(delta_);
+    //archive(split_x_, split_y_, split_z_, split_total_);
+    //archive(partition_x_, partition_y_, partition_z_, partition_rank_);
 
     archive(cells_.size());
     for (int index = 0; index < (int)cells_.size(); ++index) {
@@ -154,9 +108,8 @@ class PartitionData {
     }
 
     archive(exchange_metadata_);
-    archive(total_neighbor_partitions_);
     archive(local_grid_, ghost_grid_);
-    archive(domainMinFull, domainMaxFull);
+    //archive(domainMinFull, domainMaxFull);
   }
 
   template <typename Archive>
@@ -164,10 +117,10 @@ class PartitionData {
     archive(energy_sum_);
     archive(restParticlesPerMeter_, h_, hSq_);
     archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
-    archive(nx_, ny_, nz_);
-    archive(delta_);
-    archive(split_x_, split_y_, split_z_, split_total_);
-    archive(partition_x_, partition_y_, partition_z_, partition_rank_);
+    // archive(nx_, ny_, nz_);
+    // archive(delta_);
+    // archive(split_x_, split_y_, split_z_, split_total_);
+    // archive(partition_x_, partition_y_, partition_z_, partition_rank_);
 
     size_t size_cells;
     archive(size_cells);
@@ -183,35 +136,22 @@ class PartitionData {
     cnumPars2_.resize(size_cells, 0);
 
     archive(exchange_metadata_);
-    archive(total_neighbor_partitions_);
     archive(local_grid_, ghost_grid_);
-    archive(domainMinFull, domainMaxFull);
+    //archive(domainMinFull, domainMaxFull);
   }
   int GetNumNeighbors() { return exchange_metadata_.size(); }
 
  protected:
-  int GetLocalIndex(int global_i, int global_j, int global_k) const {
-    CHECK(ghost_grid_.Contain(global_i, global_j, global_k));
-    return (global_i - ghost_grid_.sx) +
-           ((global_j - ghost_grid_.sy) +
-            (global_k - ghost_grid_.sz) * ghost_grid_.dy) *
-               ghost_grid_.dx;
-  }
-  int GetGlobalIndex(int global_i, int global_j, int global_k) const {
-    return global_i + (global_j + global_k * ny_) * nx_;
-  }
-  int GetLocalIndexFromGlobalIndex(int global_index) const {
-    const int nxy = nx_ * ny_;
-    const int global_k = global_index / nxy;
-    global_index -= global_k * nxy;
-    const int global_j = global_index / nx_;
-    global_index -= global_j * nx_;
-    return GetLocalIndex(global_index, global_j, global_k);
-  }
-  int SampleInterval(int num_interval, int num_length, int index) const {
-    return index * (num_length / num_interval) +
-           std::min(index, num_length % num_interval);
-  }
+  // inline int GetLocalIndex(int global_i, int global_j, int global_k) const {
+  //   CHECK(ghost_grid_.Contain(global_i, global_j, global_k));
+  //   return ghost_grid_.GetLocalRank(global_i, global_j, global_k);
+  // }
+  // inline int GetGlobalIndex(int global_i, int global_j, int global_k) const {
+  //   return ghost_grid_.GetGlobalRank(globa_i, global_j, global_k);
+  // }
+  // int GetLocalIndexFromGlobalIndex(int global_index) const {
+  //   return ghost_grid_.GlobalRankToLocalRank(global_index);
+  // }
   template <typename Archive>
   void SerializeFullCell(Archive& archive, int index) const;
   template <typename Archive>
@@ -223,7 +163,7 @@ class PartitionData {
 
  public:
   void InitSim(char const* fileName, int split_x, int split_y, int split_z,
-               int partition_rank);
+               int subgrid_rank);
   void ClearParticlesMT();
   void RebuildGridMT();
   int InitNeighCellList(int ci, int cj, int ck, int* neighCells) const;
@@ -250,23 +190,11 @@ class PartitionData {
 
 void PartitionData::InitSim(
     char const* fileName, int split_x, int split_y, int split_z,
-    int partition_rank) {
-  split_x_ = split_x;
-  split_y_ = split_y;
-  split_z_ = split_z;
-  partition_rank_ = partition_rank;
-  split_total_ = split_x * split_y * split_z;
-  CHECK_GE(split_x_, 1);
-  CHECK_GE(split_y_, 1);
-  CHECK_GE(split_z_, 1);
-  CHECK_GE(partition_rank_, 0);
-  CHECK_GT(split_total_, partition_rank);
-
-  // Load input particles
+    int subgrid_rank) {
+  // Loads input particles
   std::ifstream file(fileName, std::ios::binary);
   CHECK(file) << "Error opening file.";
-
-  // Read numParticles and resetParticlesPerMeter.
+  // Reads numParticles and resetParticlesPerMeter.
   float restParticlesPerMeter_le;
   int numParticles_le;
   int numParticles;
@@ -279,10 +207,6 @@ void PartitionData::InitSim(
     restParticlesPerMeter_ = restParticlesPerMeter_le;
     numParticles = numParticles_le;
   }
-
-  // Initialize the pool.
-  // cellpool_init(&local_pool_, numParticles / split_total_);
-
   // Initialize simulation parameters.
   h_ = kernelRadiusMultiplier / restParticlesPerMeter_;
   hSq_ = h_ * h_;
@@ -295,133 +219,82 @@ void PartitionData::InitSim(
   densityCoeff_ = particleMass * coeff1;
   pressureCoeff_ = 3.0 * coeff2 * 0.50 * stiffnessPressure * particleMass;
   viscosityCoeff_ = viscosity * coeff3 * particleMass;
-
-  // Initialize simulation sizes.
-  domainMaxFull.x =
-      FLAGS_app_fold_x * (domainMaxPart.x - domainMinPart.x) + domainMinPart.x;
-  domainMaxFull.y =
-      FLAGS_app_fold_y * (domainMaxPart.y - domainMinPart.y) + domainMinPart.y;
-  domainMaxFull.z =
-      FLAGS_app_fold_z * (domainMaxPart.z - domainMinPart.z) + domainMinPart.z;
-  domainMinFull = domainMinPart;
-  Vec3 range = domainMaxFull - domainMinFull;
-  nx_ = (int)(range.x / h_);
-  ny_ = (int)(range.y / h_);
-  nz_ = (int)(range.z / h_);
-  CHECK_GE(nx_, 1);
-  CHECK_GE(ny_, 1);
-  CHECK_GE(nz_, 1);
-  delta_.x = range.x / nx_;
-  delta_.y = range.y / ny_;
-  delta_.z = range.z / nz_;
-  CHECK_GE(delta_.x, h_);
-  CHECK_GE(delta_.y, h_);
-  CHECK_GE(delta_.z, h_);
-  CHECK_GE(nx_, split_x_);
-  CHECK_GE(ny_, split_y_);
-  CHECK_GE(nz_, split_z_);
-
-  int temp_partition_rank = partition_rank;
-  partition_z_ = temp_partition_rank / (split_x_ * split_y_);
-  temp_partition_rank -= partition_z_ * (split_x_ * split_y_);
-  partition_y_ = temp_partition_rank / split_x_;
-  temp_partition_rank -= partition_y_ * split_x_;
-  partition_x_ = temp_partition_rank;
-  local_grid_.sx = SampleInterval(split_x_, nx_, partition_x_);
-  local_grid_.ex = SampleInterval(split_x_, nx_, partition_x_ + 1);
-  local_grid_.sy = SampleInterval(split_y_, ny_, partition_y_);
-  local_grid_.ey = SampleInterval(split_y_, ny_, partition_y_ + 1);
-  local_grid_.sz = SampleInterval(split_z_, nz_, partition_z_);
-  local_grid_.ez = SampleInterval(split_z_, nz_, partition_z_ + 1);
-  local_grid_.CalculateLength();
-  ghost_grid_ = local_grid_;
-  ghost_grid_.ExpandToGhostGrid(nx_, ny_, nz_);
-
-  // printf("Partition#%d: [%d-%d,%d-%d,%d-%d] out of %d*%d*%d\n",
-  //        partition_rank_,
-  //        local_grid_.sx, local_grid_.ex,
-  //        local_grid_.sy, local_grid_.ey,
-  //        local_grid_.sz, local_grid_.ez,
-  //        nx_, ny_, nz_);
-
-  total_neighbor_partitions_ = 0;
-  {
-    ++total_neighbor_partitions_;
-    auto& metadata = exchange_metadata_[partition_rank_];
-    for (int iz = ghost_grid_.sz; iz < ghost_grid_.ez; ++iz)
-      for (int iy = ghost_grid_.sy; iy < ghost_grid_.ey; ++iy)
-        for (int ix = ghost_grid_.sx; ix < ghost_grid_.ex; ++ix) {
-          if (!local_grid_.Contain(ix, iy, iz)) {
-            int global_index = GetGlobalIndex(ix, iy, iz);
-            int index = GetLocalIndex(ix, iy, iz);
-            metadata.send_to_ghost_local_indices.emplace_back(global_index,
-                                                              index);
-          }
+  // Sets up grid.
+  const helper::Point domain_min{
+    domainMinPart.x, domainMinPart.y, domainMinPart.z};
+  const helper::Point domain_size{
+    FLAGS_app_fold_x * (domainMaxPart.x - domainMinPart.x),
+    FLAGS_app_fold_y * (domainMaxPart.y - domainMinPart.y),
+    FLAGS_app_fold_z * (domainMaxPart.z - domainMinPart.z)};
+  const helper::Point domain_max{
+    domain_size + domainMinPart.x,
+    domain_size + domainMinPart.y,
+    domain_size + domainMinPart.z};
+  local_grid_.Initialize(
+      {domain_min, domain_max},  // Domain size.
+      cast_point<int>(domain_size / h_),  // Grid size.
+      {split_x, split_y, split_z},
+      subgrid_rank);
+  ghost_grid_.Initialize(
+      {domain_min, domain_max},  // Domain size.
+      cast_point<int>(domain_size / h_),  // Grid size.
+      {split_x, split_y, split_z},
+      subgrid_rank, 1);
+  // Sets up neighboring data exchanging metadata.
+  auto& metadata = exchange_metadata_[subgrid_rank];
+  for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
+    for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
+      for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex(); ++ix) {
+        if (!local_grid_.Contain(ix, iy, iz)) {
+          const int global_index = GetGlobalCellRank(ix, iy, iz);
+          const int index = GetLocalCellRank(ix, iy, iz);
+          metadata.ghost_to_ghost_indices.emplace_back(global_index, index);
         }
-  }
-
+      }
   for (int di = -1; di <= 1; ++di)
     for (int dj = -1; dj <= 1; ++dj)
       for (int dk = -1; dk <= 1; ++dk) {
         if (di == 0 && dj == 0 && dk == 0) {
           continue;
         }
-        int neighbor_x = partition_x_ + di;
-        int neighbor_y = partition_y_ + dj;
-        int neighbor_z = partition_z_ + dk;
-        if (neighbor_x < 0 || neighbor_x >= split_x_ || neighbor_y < 0 ||
-            neighbor_y >= split_y_ || neighbor_z < 0 ||
-            neighbor_z >= split_z_) {
+        Grid neighbor_ghost_grid;
+        if (!GetNeighborGrid(dx, dy, dz, 1, &neighbor_ghost_grid)) {
           continue;
         }
-        ++total_neighbor_partitions_;
-        Grid neighbor_grid;
-        neighbor_grid.sx = SampleInterval(split_x_, nx_, neighbor_x);
-        neighbor_grid.ex = SampleInterval(split_x_, nx_, neighbor_x + 1);
-        neighbor_grid.sy = SampleInterval(split_y_, ny_, neighbor_y);
-        neighbor_grid.ey = SampleInterval(split_y_, ny_, neighbor_y + 1);
-        neighbor_grid.sz = SampleInterval(split_z_, nz_, neighbor_z);
-        neighbor_grid.ez = SampleInterval(split_z_, nz_, neighbor_z + 1);
-        neighbor_grid.CalculateLength();
-        Grid neighbor_ghost_grid = neighbor_grid;
-        neighbor_ghost_grid.ExpandToGhostGrid(nx_, ny_, nz_);
-        int neighbor_rank =
-            neighbor_x + (neighbor_y + neighbor_z * split_y_) * split_x_;
-        auto& metadata = exchange_metadata_[neighbor_rank];
-        for (int iz = ghost_grid_.sz; iz < ghost_grid_.ez; ++iz)
-          for (int iy = ghost_grid_.sy; iy < ghost_grid_.ey; ++iy)
-            for (int ix = ghost_grid_.sx; ix < ghost_grid_.ex; ++ix) {
-              int global_index = GetGlobalIndex(ix, iy, iz);
-              int index = GetLocalIndex(ix, iy, iz);
+        auto& metadata = exchange_metadata_[
+            neighbor_ghost_grid.GetSubgridRank()];
+        for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
+          for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
+            for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex();
+                 ++ix) {
+              const int global_index = GetGlobalCellRank(ix, iy, iz);
+              const int index = GetLocalCellRank(ix, iy, iz);
               if (neighbor_ghost_grid.Contain(ix, iy, iz)) {
                 if (local_grid_.Contain(ix, iy, iz)) {
-                  metadata.send_to_owner_local_indices.emplace_back(
+                  metadata.local_to_ghost_indices.emplace_back(
                       global_index, index);
                 } else {
-                  metadata.send_to_ghost_local_indices.emplace_back(
+                  metadata.ghost_to_ghost_indices.emplace_back(
                       global_index, index);
                 }
               }
             }
       }
-
-  // make sure Cell structure is multiple of estiamted cache line size
+  // Makes sure Cell structure is multiple of estiamted cache line size.
   static_assert(sizeof(Cell) % CACHELINE_SIZE == 0, "wrong padding");
-  // make sure helper Cell structure is in sync with real Cell structure
+  // Makes sure helper Cell structure is in sync with real Cell structure.
   static_assert(
       offsetof(struct Cell_aux, padding) == offsetof(struct Cell, padding),
       "wrong padding");
-
-  cells_.resize(ghost_grid_.count);
-  cells2_.resize(ghost_grid_.count);
-  cnumPars_.resize(ghost_grid_.count, 0);
-  cnumPars2_.resize(ghost_grid_.count, 0);
-  last_cells_.resize(ghost_grid_.count, nullptr);
-
-  // Always use single precision float variables b/c file format uses single
-  // precision float
+  // Initializes all cells.
+  cells_.resize(ghost_grid_.get_count());
+  cells2_.resize(ghost_grid_.get_count());
+  cnumPars_.resize(ghost_grid_.get_count(), 0);
+  cnumPars2_.resize(ghost_grid_.get_count(), 0);
+  last_cells_.resize(ghost_grid_.get_count(), nullptr);
+  // Always uses single precision float variables b/c file format uses single
+  // precision float.
   float unfold_px, unfold_py, unfold_pz, hvx, hvy, hvz, vx, vy, vz;
-  float sum = 0;
   for (int i = 0; i < numParticles; ++i) {
     file.read((char*)&unfold_px, FILE_SIZE_FLOAT);
     file.read((char*)&unfold_py, FILE_SIZE_FLOAT);
@@ -444,6 +317,7 @@ void PartitionData::InitSim(
       vz = bswap_float(vz);
     }
 
+    // TODO
     for (int fold_x = 0; fold_x < FLAGS_app_fold_x; ++fold_x)
       for (int fold_y = 0; fold_y < FLAGS_app_depth; ++fold_y)
         for (int fold_z = 0; fold_z < FLAGS_app_fold_z; ++fold_z) {
@@ -498,19 +372,17 @@ void PartitionData::InitSim(
           cell->v[np].x = vx;
           cell->v[np].y = vy;
           cell->v[np].z = vz;
-          sum += vx * vx + vy * vy + vz * vz;
           ++cnumPars_[index];
         }
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 PartitionData::PartitionData() {
   cellpool_init(&local_pool_, 1000);
 }
 
 PartitionData::~PartitionData() {
-  // first return extended cells to cell pools
+  // The head cell in the class, no need to deallocate.
   for (auto& cell : cells_) {
     while (cell.next) {
       Cell* temp = cell.next;
@@ -521,42 +393,36 @@ PartitionData::~PartitionData() {
   cellpool_destroy(&local_pool_);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 
-/**
- * Clear the first array. The first array should be empty.
+/*
+ * Execution logic.
  */
+
+//! Clears the first array. It assumes cells are already returned to the memory
+// pool.
 void PartitionData::ClearParticlesMT() {
-  for (int iz = ghost_grid_.sz; iz < ghost_grid_.ez; ++iz)
-    for (int iy = ghost_grid_.sy; iy < ghost_grid_.ey; ++iy)
-      for (int ix = ghost_grid_.sx; ix < ghost_grid_.ex; ++ix) {
-        int index = GetLocalIndex(ix, iy, iz);
+  for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
+    for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
+      for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex(); ++ix) {
+        const int index = ghost_grid_.GetCellLocalRank(ix, iy, iz);
         cnumPars_[index] = 0;
         cells_[index].next = NULL;
         last_cells_[index] = &cells_[index];
       }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Move particles from second array to first array.
- */
+//! Moves particles from second array to first array.
 void PartitionData::RebuildGridMT() {
-  // Note, in parallel versions the below swaps occure outside RebuildGrid()
-  // swap src and dest arrays with particles std::swap(cells, cells2); swap src
-  // and dest arrays with counts of particles std::swap(cnumPars, cnumPars2);
-
-  // iterate through source cell lists
-  for (int iz = local_grid_.sz; iz < local_grid_.ez; ++iz)
-    for (int iy = local_grid_.sy; iy < local_grid_.ey; ++iy)
-      for (int ix = local_grid_.sx; ix < local_grid_.ex; ++ix) {
-        int index2 = GetLocalIndex(ix, iy, iz);
+  // Iterates through source cell lists.
+  for (int iz = local_grid_.get_sz(); iz < local_grid_.get_ez(); ++iz)
+    for (int iy = local_grid_.get_sy(); iy < local_grid_.get_ey(); ++iy)
+      for (int ix = local_grid_.get_sx(); ix < local_grid_.get_ex(); ++ix) {
+        const int index2 = ghost_grid_.GetCellLocalRank(ix, iy, iz);
         Cell* cell2 = &cells2_[index2];
-        int np2 = cnumPars2_[index2];
-        // iterate through source particles
+        const int np2 = cnumPars2_[index2];
+        // Iterates through source particles.
         for (int j = 0; j < np2; ++j) {
-          // get destination for source particle
+          // Gets destination for source particle.
           int ci =
               (int)((cell2->p[j % PARTICLES_PER_CELL].x - domainMinFull.x) /
                     delta_.x);
@@ -567,6 +433,8 @@ void PartitionData::RebuildGridMT() {
               (int)((cell2->p[j % PARTICLES_PER_CELL].z - domainMinFull.z) /
                     delta_.z);
 
+          // This assumes that particles cannot travel more than one grid cell
+          // per time step.
           if (ci < ghost_grid_.sx)
             ci = ghost_grid_.sx;
           else if (ci > (ghost_grid_.ex - 1))
@@ -580,10 +448,6 @@ void PartitionData::RebuildGridMT() {
           else if (ck > (ghost_grid_.ez - 1))
             ck = ghost_grid_.ez - 1;
 
-          // this assumes that particles cannot travel more than one grid cell
-          // per time step
-          // Failed.
-          CHECK(ghost_grid_.Contain(ci, cj, ck));
           int index = GetLocalIndex(ci, cj, ck);
 
           Cell* cell = last_cells_[index];
@@ -635,11 +499,7 @@ void PartitionData::RebuildGridMT() {
       }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Calculate the geometrically neighboring cells.
- */
+//! Calculate the geometrically neighboring cells.
 int PartitionData::InitNeighCellList(int ci, int cj, int ck,
                                      int* neighCells) const {
   int numNeighCells = 0;
@@ -667,11 +527,7 @@ int PartitionData::InitNeighCellList(int ci, int cj, int ck,
   return numNeighCells;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Calculate densities as an average of densities of neighboring cells.
- */
+//! Calculate densities as an average of densities of neighboring cells.
 void PartitionData::ComputeDensitiesMT() {
   int neighCells[3 * 3 * 3];
 
@@ -718,11 +574,7 @@ void PartitionData::ComputeDensitiesMT() {
       }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Update densities locally.
- */
+//! Update densities locally.
 void PartitionData::ComputeDensities2MT() {
   const fptype tc = hSq_ * hSq_ * hSq_;
   for (int iz = local_grid_.sz; iz < local_grid_.ez; ++iz)
@@ -742,11 +594,7 @@ void PartitionData::ComputeDensities2MT() {
       }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Update accelerations by examining neighboring cells.
- */
+//! Update accelerations by examining neighboring cells.
 void PartitionData::ComputeForcesMT() {
   int neighCells[3 * 3 * 3];
   for (int iz = local_grid_.sz; iz < local_grid_.ez; ++iz)
@@ -1031,13 +879,13 @@ void PartitionData::SendExchangeGhostCells(
     std::stringstream ss;
     {
       cereal::BinaryOutputArchive oarchive(ss);
-      oarchive(metadata.send_to_owner_local_indices.size());
-      for (const auto& in_pair : metadata.send_to_owner_local_indices) {
+      oarchive(metadata.local_to_ghost_indices.size());
+      for (const auto& in_pair : metadata.local_to_ghost_indices) {
         oarchive(in_pair.first);
         SerializeFullCell(oarchive, in_pair.second);
       }
-      oarchive(metadata.send_to_ghost_local_indices.size());
-      for (const auto& in_pair : metadata.send_to_ghost_local_indices) {
+      oarchive(metadata.ghost_to_ghost_indices.size());
+      for (const auto& in_pair : metadata.ghost_to_ghost_indices) {
         oarchive(in_pair.first);
         SerializeFullCell(oarchive, in_pair.second);
       }
@@ -1070,7 +918,7 @@ void PartitionData::DeserializeFullCell(Archive& archive, int index) {
 void PartitionData::RecvExchangeGhostCells(
     const std::vector<std::vector<char>>& recv_buffer) {
   for (auto& element :
-       exchange_metadata_[partition_rank_].send_to_ghost_local_indices) {
+       exchange_metadata_[partition_rank_].ghost_to_ghost_indices) {
     int local_index = element.second;
     Cell* cell = &cells_[local_index];
     while (cell->next) {
@@ -1144,8 +992,8 @@ void PartitionData::SendDensityGhost(
     std::stringstream ss;
     {
       cereal::BinaryOutputArchive oarchive(ss);
-      oarchive(element.second.send_to_owner_local_indices.size());
-      for (auto& metadata : element.second.send_to_owner_local_indices) {
+      oarchive(element.second.local_to_ghost_indices.size());
+      for (auto& metadata : element.second.local_to_ghost_indices) {
         oarchive(metadata.first);
         SerializeDensity(oarchive, metadata.second);
       }

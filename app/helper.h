@@ -44,6 +44,10 @@
 
 namespace helper {
 
+template <typename T, size_t size>
+void operator+=
+
+
 /*
  * For the best performance, all the functions are in place.
  */
