@@ -8,69 +8,13 @@
 #include <vector>
 
 #include "canary/canary.h"
+#include "../helper.h"
 
 static int FLAG_app_partitions = 2;  // Number of partitions.
 static double FLAG_app_tolerance = 0.1;  // Tolerance threshold.
 static int FLAG_app_samples = 100;  // Number of total samples.
 
-
 constexpr int DIMENSION = 20;
-
-namespace {
-
-// Helper function for dot multiply.
-template <typename T, size_t size>
-T array_dot(const std::array<T, size>& left, const std::array<T, size>& right) {
-  T result = 0;
-  auto left_iter = left.cbegin();
-  auto right_iter = right.cbegin();
-  while (left_iter != left.cend() && right_iter != right.cend()) {
-    result += (*left_iter) * (*right_iter);
-    ++left_iter;
-    ++right_iter;
-  }
-  return result;
-}
-
-// Helper function: output += input_multi * input.
-template <typename T, size_t size>
-void array_accumulate(const std::array<T, size>& input, T input_multi,
-                      std::array<T, size>* output) {
-  auto input_iter = input.cbegin();
-  auto output_iter = output->begin();
-  while (input_iter != input.cend() && output_iter != output->end()) {
-    *output_iter += input_multi*(*input_iter);
-    ++input_iter;
-    ++output_iter;
-  }
-}
-
-// Helper function: output += input_multi * input.
-template <typename T, size_t size>
-void array_substract(const std::array<T, size>& input,
-                     std::array<T, size>* output) {
-  auto input_iter = input.cbegin();
-  auto output_iter = output->begin();
-  while (input_iter != input.cend() && output_iter != output->end()) {
-    *output_iter -= *input_iter;
-    ++input_iter;
-    ++output_iter;
-  }
-}
-
-// Helper function: output += input_multi * input.
-template <typename T, size_t size>
-void array_add(const std::array<T, size>& input, std::array<T, size>* output) {
-  auto input_iter = input.cbegin();
-  auto output_iter = output->begin();
-  while (input_iter != input.cend() && output_iter != output->end()) {
-    *output_iter += *input_iter;
-    ++input_iter;
-    ++output_iter;
-  }
-}
-
-}  // namespace
 
 namespace canary {
 
@@ -88,8 +32,8 @@ class LogisticWhileApplication : public CanaryApplication {
     auto d_feature = DeclareVariable<FeatureVector>(FLAG_app_partitions);
     auto d_local_gradient = DeclareVariable<Point>();
     auto d_local_w = DeclareVariable<Point>();
-    auto d_global_w = DeclareVariable<Point>(1);
     auto d_global_gradient = DeclareVariable<Point>();
+    auto d_global_w = DeclareVariable<Point>(1);
 
     WriteAccess(d_feature);
     Transform([=](CanaryTaskContext* task_context) {
@@ -103,7 +47,7 @@ class LogisticWhileApplication : public CanaryApplication {
         Point& point = pair.first;
         std::generate_n(point.begin(), point.size() - 1, generator);
         point.back() = 1;
-        pair.second = (array_dot(point, reference) > 0);
+        pair.second = (helper::array_dot(point, reference) > 0);
       }
     });
 
@@ -125,12 +69,8 @@ class LogisticWhileApplication : public CanaryApplication {
       const auto& global_w = task_context->ReadVariable(d_global_w);
       const auto& global_gradient =
           task_context->ReadVariable(d_global_gradient);
-      for (int i = 0; i < DIMENSION; ++i) {
-        if (std::abs(global_gradient[i] / global_w[i]) >= FLAG_app_tolerance) {
-          return true;
-        }
-      }
-      return false;
+      return (helper::array_square(global_gradient) /
+              helper::array_square(global_w) >= FLAG_app_tolerance);
     });
 
     TrackNeeded();
@@ -157,10 +97,11 @@ class LogisticWhileApplication : public CanaryApplication {
       for (const auto& pair : feature) {
         const Point& point = pair.first;
         const bool flag = pair.second;
-        const double multi =
-            flag ? +(1. / (1. + std::exp(-array_dot(local_w, point))) - 1.)
-                 : -(1. / (1. + std::exp(+array_dot(local_w, point))) - 1.);
-        array_accumulate(point, multi, local_gradient);
+        const auto dot = helper::array_dot(local_w, point);
+        const double factor =
+            flag ? +(1. / (1. + std::exp(-dot)) - 1.)
+                 : -(1. / (1. + std::exp(+dot)) - 1.);
+        helper::array_acc(point, factor, local_gradient);
       }
     });
 
@@ -174,7 +115,8 @@ class LogisticWhileApplication : public CanaryApplication {
       EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
       auto global_gradient = task_context->WriteVariable(d_global_gradient);
       std::fill(global_gradient->begin(), global_gradient->end(), 0);
-      task_context->Reduce(global_gradient, array_add<double, DIMENSION>);
+      task_context->Reduce(global_gradient,
+                           helper::array_add<double, DIMENSION>);
       return 0;
     });
 
@@ -184,7 +126,7 @@ class LogisticWhileApplication : public CanaryApplication {
       const auto& global_gradient =
           task_context->ReadVariable(d_global_gradient);
       auto global_w = task_context->WriteVariable(d_global_w);
-      array_substract(global_gradient, global_w);
+      helper::array_sub(global_gradient, global_w);
       return 0;
     });
 
@@ -195,7 +137,7 @@ class LogisticWhileApplication : public CanaryApplication {
       const auto& global_w = task_context->ReadVariable(d_global_w);
       Point output;
       std::fill(output.begin(), output.end(), 0);
-      array_accumulate(global_w, 1. / global_w.front(), &output);
+      helper::array_acc(global_w, 1. / global_w.front(), &output);
       printf("w=");
       for (auto data : output) {
         printf("%f ", data);

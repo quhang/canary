@@ -43,6 +43,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "shared/canary_internal.h"
 
@@ -58,21 +59,20 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
  public:
   //! Constructor.
   ControllerSchedulerBase() {}
-
   //! Destructor.
   virtual ~ControllerSchedulerBase() {}
-
   //! Initialize.
   void Initialize(network::EventMainThread* event_main_thread,
                   ControllerSendCommandInterface* send_command_interface);
 
+  /*
+   * Callbacks exposed to the synchronous context.
+   */
   //! Called when receiving a command. The message header is kept, and the
   // buffer ownership is transferred.
   void ReceiveCommand(struct evbuffer* buffer) override;
-
   //! Called when a worker is down, even if it is shut down by the controller.
   void NotifyWorkerIsDown(WorkerId worker_id) override;
-
   //! Called when a worker is up. The up notification and down notification are
   // paired.
   void NotifyWorkerIsUp(WorkerId worker_id) override;
@@ -80,10 +80,8 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
  protected:
   //! Called when receiving commands from a worker.
   virtual void InternalReceiveCommand(struct evbuffer* buffer) = 0;
-
   //! Called when a worker is down, even if it is shut down by the controller.
   virtual void InternalNotifyWorkerIsDown(WorkerId worker_id) = 0;
-
   //! Called when a worker is up. The up notification and down notification are
   // paired.
   virtual void InternalNotifyWorkerIsUp(WorkerId worker_id) = 0;
@@ -121,10 +119,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
  protected:
   //! Called when receiving commands from a worker.
   void InternalReceiveCommand(struct evbuffer* buffer) override;
-
   //! Called when a worker is down, even if it is shut down by the controller.
   void InternalNotifyWorkerIsDown(WorkerId worker_id) override;
-
   //! Called when a worker is up. The up notification and down notification are
   // paired.
   void InternalNotifyWorkerIsUp(WorkerId worker_id) override;
@@ -146,30 +142,19 @@ class ControllerScheduler : public ControllerSchedulerBase {
       message::ControllerRespondStatusOfWorker* respond_message);
 
   /*
-   * Misc functions.
-   */
-  //! Processes running stats.
-  void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
-                          VariableGroupId variable_group_id,
-                          PartitionId partition_id,
-                          const message::RunningStats& running_stats);
-  //! Cleans up an application after it is complete.
-  void CleanUpApplication(ApplicationId application_id,
-                          ApplicationRecord* application_record);
-  //! Initializes logging file.
-  void InitializeLoggingFile();
-  //! Flushes logging file.
-  void FlushLoggingFile();
-
-  /*
    * Application launching related.
    */
+  //! Whether there are enough workers for launching an application.
+  bool HaveEnoughWorkerForLaunching(int fix_num_worker);
   //! Fills in initial info in the application record.
   void FillInApplicationLaunchInfo(
       const message::LaunchApplication& launch_message,
       ApplicationRecord* application_record);
   //! Assigns partitions to workers.
   void AssignPartitionToWorker(ApplicationRecord* application_record);
+  //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
+  // manner using the number of cores as a weight.
+  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
   //! Gets the next assigned worker id.
   WorkerId NextAssignWorkerId();
   //! Loads an application on all workers.
@@ -183,8 +168,27 @@ class ControllerScheduler : public ControllerSchedulerBase {
   //! Requests workers to load partitions.
   void RequestLoadPartitions(ApplicationId application_id);
 
+  /*
+   * Misc functions.
+   */
+  //! Cleans up an application after it is complete.
+  void CleanUpApplication(ApplicationId application_id,
+                          ApplicationRecord* application_record);
+  //! Processes running stats.
+  void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
+                          VariableGroupId variable_group_id,
+                          PartitionId partition_id,
+                          const message::RunningStats& running_stats);
+  //! Initializes logging file.
+  void InitializeLoggingFile();
+  //! Flushes logging file.
+  void FlushLoggingFile();
+  //! Transforms the application parameter string to printable string.
+  static std::string TransformString(const std::string& input);
+
  private:
   WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
+  int last_assigned_partitions_ = 0;
   ApplicationId next_application_id_ = ApplicationId::FIRST;
 
  protected:

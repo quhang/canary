@@ -111,140 +111,42 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
 }
 #undef PROCESS_MESSAGE
 
-void ControllerScheduler::FillInApplicationLaunchInfo(
-    const message::LaunchApplication& launch_message,
-    ApplicationRecord* application_record) {
-  application_record->binary_location = launch_message.binary_location;
-  application_record->application_parameter =
-      launch_message.application_parameter;
-  application_record->loaded_application = CanaryApplication::LoadApplication(
-      launch_message.binary_location, launch_message.application_parameter,
-      &application_record->loading_handle);
-  application_record->variable_group_info_map =
-      application_record->loaded_application->get_variable_group_info_map();
-  application_record->total_partition = 0;
-  application_record->complete_partition = 0;
-  for (auto& pair : *application_record->variable_group_info_map) {
-    application_record->total_partition += pair.second.parallelism;
+void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {
+  CHECK(worker_id != WorkerId::INVALID);
+  auto iter = worker_map_.find(worker_id);
+  CHECK(iter != worker_map_.end());
+  if (!iter->second.owned_partitions.empty()) {
+    LOG(WARNING) << "Worker is down while there are active partitions ("
+                 << get_value(worker_id) << ")!";
   }
+  worker_map_.erase(iter);
 }
 
-void ControllerScheduler::AssignPartitionToWorker(
-    ApplicationRecord* application_record) {
-  auto& per_app_partition_map = application_record->per_app_partition_map;
-  const auto& variable_group_info_map =
-      *application_record->variable_group_info_map;
-  per_app_partition_map.SetNumVariableGroup(variable_group_info_map.size());
-  for (const auto& pair : variable_group_info_map) {
-    per_app_partition_map.SetPartitioning(pair.first, pair.second.parallelism);
-    // Birdshot randomized placement.
-    std::vector<WorkerId> worker_id_list(pair.second.parallelism);
-    for (auto& worker_id : worker_id_list) {
-      worker_id = NextAssignWorkerId();
-    }
-    std::random_shuffle(worker_id_list.begin(), worker_id_list.end());
-    auto iter = worker_id_list.begin();
-    for (int index = 0; index < pair.second.parallelism; ++index) {
-      per_app_partition_map.SetWorkerId(
-          pair.first, static_cast<PartitionId>(index), *(iter++));
-    }
-  }
+void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
+  CHECK(worker_id != WorkerId::INVALID);
+  CHECK(worker_map_.find(worker_id) == worker_map_.end());
+  worker_map_[worker_id].num_cores = -1;
 }
 
-WorkerId ControllerScheduler::NextAssignWorkerId() {
-  CHECK(!worker_map_.empty());
-  for (auto iter : worker_map_)
-    if (iter.first > last_assigned_worker_id_) {
-      last_assigned_worker_id_ = iter.first;
-      return last_assigned_worker_id_;
-    }
-  last_assigned_worker_id_ = worker_map_.begin()->first;
-  return last_assigned_worker_id_;
-}
-
-void ControllerScheduler::RequestLoadApplicationOnAllWorkers(
-    ApplicationId application_id, const ApplicationRecord& application_record) {
-  message::WorkerLoadApplication load_application_command;
-  load_application_command.application_id = application_id;
-  load_application_command.binary_location = application_record.binary_location;
-  load_application_command.application_parameter =
-      application_record.application_parameter;
-  for (auto& pair : worker_map_) {
-    send_command_interface_->SendCommandToWorker(
-        pair.first,
-        message::SerializeMessageWithControlHeader(load_application_command));
-    pair.second.loaded_applications.insert(application_id);
-  }
-}
-
-void ControllerScheduler::UpdateWorkerOwnedPartitions(
-    ApplicationId application_id,
-    const PerApplicationPartitionMap& per_app_partition_map) {
-  for (int index1 = 0; index1 < per_app_partition_map.QueryNumVariableGroup();
-       ++index1) {
-    const auto variable_group_id = static_cast<VariableGroupId>(index1);
-    for (int index2 = 0;
-         index2 < per_app_partition_map.QueryPartitioning(variable_group_id);
-         ++index2) {
-      const auto partition_id = static_cast<PartitionId>(index2);
-      const auto worker_id =
-          per_app_partition_map.QueryWorkerId(variable_group_id, partition_id);
-      const FullPartitionId full_partition_id{application_id, variable_group_id,
-                                              partition_id};
-      worker_map_.at(worker_id).owned_partitions[application_id].insert(
-          full_partition_id);
-    }
-  }
-}
-
-void ControllerScheduler::RequestLoadPartitions(ApplicationId application_id) {
-  for (auto& pair : worker_map_) {
-    const auto& owned_partitions = pair.second.owned_partitions;
-    if (owned_partitions.find(application_id) == owned_partitions.end()) {
-      continue;
-    }
-    if (owned_partitions.at(application_id).empty()) {
-      continue;
-    }
-    message::WorkerLoadPartitions load_partitions_command;
-    load_partitions_command.application_id = application_id;
-    for (auto& full_partition_id : owned_partitions.at(application_id)) {
-      load_partitions_command.load_partitions.emplace_back(
-          full_partition_id.variable_group_id, full_partition_id.partition_id);
-    }
-    send_command_interface_->SendCommandToWorker(
-        pair.first,
-        message::SerializeMessageWithControlHeader(load_partitions_command));
-  }
-}
-
+/*
+ * Processes commands.
+ */
 void ControllerScheduler::ProcessLaunchApplication(
     message::LaunchApplication* launch_message) {
   CHECK_NE(launch_message->fix_num_worker, 0);
-  if (launch_message->fix_num_worker != -1 &&
-      static_cast<int>(worker_map_.size()) < launch_message->fix_num_worker) {
-    LOG(WARNING) << "Launching application failed: not enough workers!";
+  if (!HaveEnoughWorkerForLaunching(launch_message->fix_num_worker)) {
+    LOG(WARNING) << "Not enough workers for launching an application!";
     delete launch_message;
     return;
   }
-  if (launch_message->fix_num_worker == -1 && worker_map_.empty()) {
-    LOG(WARNING) << "Launching application failed: no worker!";
-    delete launch_message;
-    return;
-  }
+  // Assigns application id.
   const ApplicationId assigned_application_id = (next_application_id_++);
   auto& application_record = application_map_[assigned_application_id];
   FillInApplicationLaunchInfo(*launch_message, &application_record);
   InitializeLoggingFile();
-  std::string output_application_parameter;
-  std::remove_copy_if(
-      launch_message->application_parameter.begin(),
-      launch_message->application_parameter.end(),
-      std::back_inserter(output_application_parameter),
-      [](auto c) { return c == ' ' || c == '\n' || c == '\t'; });
   fprintf(log_file_, "L %d %s %s\n", get_value(assigned_application_id),
           launch_message->binary_location.c_str(),
-          output_application_parameter.c_str());
+          TransformString(launch_message->application_parameter).c_str());
   FlushLoggingFile();
   AssignPartitionToWorker(&application_record);
   // Sends the partition map to workers.
@@ -303,6 +205,156 @@ void ControllerScheduler::ProcessStatusOfWorker(
     worker_map_[from_worker_id].num_cores = respond_message->num_cores;
   }
   delete respond_message;
+}
+
+/*
+ * Application launching related.
+ */
+bool ControllerScheduler::HaveEnoughWorkerForLaunching(int fix_num_worker) {
+  if (fix_num_worker != -1 &&
+      static_cast<int>(worker_map_.size()) < fix_num_worker) {
+    // Not enough workers.
+    return false;
+  }
+  if (fix_num_worker == -1 && worker_map_.empty()) {
+    // No workers.
+    return false;
+  }
+  return true;
+}
+
+void ControllerScheduler::FillInApplicationLaunchInfo(
+    const message::LaunchApplication& launch_message,
+    ApplicationRecord* application_record) {
+  application_record->binary_location = launch_message.binary_location;
+  application_record->application_parameter =
+      launch_message.application_parameter;
+  application_record->loaded_application = CanaryApplication::LoadApplication(
+      launch_message.binary_location, launch_message.application_parameter,
+      &application_record->loading_handle);
+  application_record->variable_group_info_map =
+      application_record->loaded_application->get_variable_group_info_map();
+  application_record->total_partition = 0;
+  application_record->complete_partition = 0;
+  for (auto& pair : *application_record->variable_group_info_map) {
+    application_record->total_partition += pair.second.parallelism;
+  }
+}
+
+void ControllerScheduler::AssignPartitionToWorker(
+    ApplicationRecord* application_record) {
+  auto& per_app_partition_map = application_record->per_app_partition_map;
+  const auto& variable_group_info_map =
+      *application_record->variable_group_info_map;
+  per_app_partition_map.SetNumVariableGroup(variable_group_info_map.size());
+  for (const auto& pair : variable_group_info_map) {
+    per_app_partition_map.SetPartitioning(pair.first, pair.second.parallelism);
+    // Birdshot randomized placement.
+    std::vector<WorkerId> worker_id_list;
+    GetWorkerAssignment(pair.second.parallelism, &worker_id_list);
+    std::random_shuffle(worker_id_list.begin(), worker_id_list.end());
+    auto iter = worker_id_list.begin();
+    for (int index = 0; index < pair.second.parallelism; ++index) {
+      per_app_partition_map.SetWorkerId(
+          pair.first, static_cast<PartitionId>(index), *(iter++));
+    }
+  }
+}
+
+void ControllerScheduler::GetWorkerAssignment(
+    int num_slot, std::vector<WorkerId>* assignment) {
+  assignment->clear();
+  assignment->resize(num_slot);
+  for (auto& worker_id : *assignment) {
+    auto iter = worker_map_.find(last_assigned_worker_id_);
+    if (iter == worker_map_.end()) {
+      // Assigns a partition to the next worker.
+      worker_id = NextAssignWorkerId();
+      last_assigned_partitions_ = 1;
+      continue;
+    }
+    if (iter->second.num_cores == -1) {
+      LOG(WARNING) << "The number of cores for a worker is unknown!";
+      CHECK_EQ(last_assigned_partitions_, 1);
+      worker_id = NextAssignWorkerId();
+      last_assigned_partitions_ = 1;
+    } else {
+      if (last_assigned_partitions_ < iter->second.num_cores) {
+        worker_id = last_assigned_worker_id_;
+        ++last_assigned_partitions_;
+      } else {
+        worker_id = NextAssignWorkerId();
+        last_assigned_partitions_ = 1;
+      }
+    }
+  }
+}
+
+WorkerId ControllerScheduler::NextAssignWorkerId() {
+  CHECK(!worker_map_.empty());
+  auto iter = worker_map_.upper_bound(last_assigned_worker_id_);
+  if (iter == worker_map_.end()) {
+    last_assigned_worker_id_ = worker_map_.begin()->first;
+  } else {
+    last_assigned_worker_id_ = iter->first;
+  }
+  return last_assigned_worker_id_;
+}
+
+void ControllerScheduler::RequestLoadApplicationOnAllWorkers(
+    ApplicationId application_id, const ApplicationRecord& application_record) {
+  message::WorkerLoadApplication load_application_command;
+  load_application_command.application_id = application_id;
+  load_application_command.binary_location = application_record.binary_location;
+  load_application_command.application_parameter =
+      application_record.application_parameter;
+  for (auto& pair : worker_map_) {
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(load_application_command));
+    pair.second.loaded_applications.insert(application_id);
+  }
+}
+
+void ControllerScheduler::UpdateWorkerOwnedPartitions(
+    ApplicationId application_id,
+    const PerApplicationPartitionMap& per_app_partition_map) {
+  for (int index1 = 0; index1 < per_app_partition_map.QueryNumVariableGroup();
+       ++index1) {
+    const auto variable_group_id = static_cast<VariableGroupId>(index1);
+    for (int index2 = 0;
+         index2 < per_app_partition_map.QueryPartitioning(variable_group_id);
+         ++index2) {
+      const auto partition_id = static_cast<PartitionId>(index2);
+      const auto worker_id =
+          per_app_partition_map.QueryWorkerId(variable_group_id, partition_id);
+      const FullPartitionId full_partition_id{application_id, variable_group_id,
+                                              partition_id};
+      worker_map_.at(worker_id).owned_partitions[application_id].insert(
+          full_partition_id);
+    }
+  }
+}
+
+void ControllerScheduler::RequestLoadPartitions(ApplicationId application_id) {
+  for (auto& pair : worker_map_) {
+    const auto& owned_partitions = pair.second.owned_partitions;
+    if (owned_partitions.find(application_id) == owned_partitions.end()) {
+      continue;
+    }
+    if (owned_partitions.at(application_id).empty()) {
+      continue;
+    }
+    message::WorkerLoadPartitions load_partitions_command;
+    load_partitions_command.application_id = application_id;
+    for (auto& full_partition_id : owned_partitions.at(application_id)) {
+      load_partitions_command.load_partitions.emplace_back(
+          full_partition_id.variable_group_id, full_partition_id.partition_id);
+    }
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(load_partitions_command));
+  }
 }
 
 void ControllerScheduler::UpdateRunningStats(
@@ -375,23 +427,6 @@ void ControllerScheduler::CleanUpApplication(
   application_map_.erase(application_id);
 }
 
-void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {
-  CHECK(worker_id != WorkerId::INVALID);
-  auto iter = worker_map_.find(worker_id);
-  CHECK(iter != worker_map_.end());
-  if (!iter->second.owned_partitions.empty()) {
-    LOG(WARNING) << "Worker is down while there are active partitions ("
-                 << get_value(worker_id) << ")!";
-  }
-  worker_map_.erase(iter);
-}
-
-void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
-  CHECK(worker_id != WorkerId::INVALID);
-  CHECK(worker_map_.find(worker_id) == worker_map_.end());
-  worker_map_[worker_id].num_cores = -1;
-}
-
 void ControllerScheduler::InitializeLoggingFile() {
   if (!log_file_) {
     log_file_ = fopen(
@@ -404,6 +439,14 @@ void ControllerScheduler::FlushLoggingFile() {
   if (log_file_) {
     PCHECK(fflush(log_file_) == 0);
   }
+}
+
+std::string ControllerScheduler::TransformString(const std::string& input) {
+  std::string result;
+  std::remove_copy_if(
+      input.begin(), input.end(), std::back_inserter(result),
+      [](auto c) { return c == ' ' || c == '\n' || c == '\t'; });
+  return std::move(result);
 }
 
 }  // namespace canary

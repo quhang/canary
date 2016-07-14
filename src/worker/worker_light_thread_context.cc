@@ -55,7 +55,9 @@ bool WorkerLightThreadContext::Enter() {
   PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
   const bool success =
       (!running_) && (!ready_stages_.empty() || !command_list_.empty());
-  running_ = true;
+  if (!running_ && success) {
+    running_ = true;
+  }
   pthread_mutex_unlock(&internal_lock_);
   return success;
 }
@@ -94,9 +96,7 @@ void WorkerLightThreadContext::DeliverMessage(StageId stage_id,
     if (stage_buffer.expected_buffer ==
         static_cast<int>(stage_buffer.buffer_list.size())) {
       ready_stages_.push_back(stage_id);
-      if (!running_) {
-        to_activate = true;
-      }
+      to_activate = !running_;
     }
     pthread_mutex_unlock(&internal_lock_);
   } else {
@@ -365,12 +365,10 @@ void WorkerExecutionContext::PrepareTaskContext(
   task_context->send_data_interface_ = get_send_data_interface();
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
-      VLOG(1) << "Read " << get_value(pair.first);
       task_context->read_partition_data_map_[pair.first] =
           local_partition_data_.at(pair.first);
     } else {
       CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
-      VLOG(1) << "Write " << get_value(pair.first);
       task_context->write_partition_data_map_[pair.first] =
           local_partition_data_.at(pair.first);
     }
