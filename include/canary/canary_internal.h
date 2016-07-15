@@ -100,6 +100,8 @@ DECLARE_int32(worker_threads);
 namespace canary {
 //! Wrapper for evbuffer, to be serialized/deserialized.
 struct RawEvbuffer {
+  RawEvbuffer() : buffer(nullptr) {}
+  explicit RawEvbuffer(struct evbuffer* input) : buffer(input) {}
   struct evbuffer* buffer;
 };
 }  // namespace canary

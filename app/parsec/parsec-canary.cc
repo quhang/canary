@@ -32,7 +32,8 @@ static int FLAG_app_fold_y = 1;             // Fold in y.
 static int FLAG_app_fold_z = 1;             // Fold in z.
 static int FLAG_app_fold_depth_y = 1;       // Fold depth in y.
 static int FLAG_app_frames = 10;            // Frames.
-static std::string FLAG_app_filename = "";  // Input file name.
+static std::string FLAG_app_filename =
+    "../app/parsec/in_15K.fluid";  // Input file name.
 
 struct GlobalState {
   template <typename Archive>
@@ -141,19 +142,24 @@ class PartitionData {
   float ComputeEnergy();
 
   void SendExchangeGhostCells(std::vector<int>* neighbors,
-                              std::vector<std::vector<char>>* send_buffer);
-  void RecvExchangeGhostCells(
-      const std::vector<std::vector<char>>& recv_buffer);
+                              std::vector<struct evbuffer*>* send_buffer);
+  void RecvExchangeGhostCells(std::vector<struct evbuffer*>* recv_buffer);
   void SendDensityGhost(std::vector<int>* neighbors,
-                        std::vector<std::vector<char>>* send_buffer);
-  void RecvDensityGhost(const std::vector<std::vector<char>>& recv_buffer);
+                        std::vector<struct evbuffer*>* send_buffer);
+  void RecvDensityGhost(std::vector<struct evbuffer*>* recv_buffer);
 };
 
-void PartitionData::InitSim(char const* fileName, int split_x, int split_y,
+PartitionData::PartitionData() { cellpool_init(&local_pool_, 1000); }
+
+PartitionData::~PartitionData() {
+  cellpool_destroy(&local_pool_);
+}
+
+void PartitionData::InitSim(char const* filename, int split_x, int split_y,
                             int split_z, int subgrid_rank) {
   // Loads input particles
-  std::ifstream file(fileName, std::ios::binary);
-  CHECK(file) << "Error opening file.";
+  std::ifstream file(filename, std::ios::binary);
+  CHECK(file) << "Error opening file: " << filename;
   // Reads numParticles and resetParticlesPerMeter.
   float restParticlesPerMeter_le;
   int numParticles_le;
@@ -315,20 +321,6 @@ void PartitionData::InitSim(char const* fileName, int split_x, int split_y,
           ++cnumPars_[index];
         }
   }
-}
-
-PartitionData::PartitionData() { cellpool_init(&local_pool_, 1000); }
-
-PartitionData::~PartitionData() {
-  // The head cell in the class, no need to deallocate.
-  for (auto& cell : cells_) {
-    while (cell.next) {
-      Cell* temp = cell.next;
-      cell.next = temp->next;
-      cellpool_returncell(&local_pool_, temp);
-    }
-  }
-  cellpool_destroy(&local_pool_);
 }
 
 /*
@@ -783,7 +775,7 @@ void PartitionData::SerializeFullCell(Archive& archive, int index) const {
 }
 
 void PartitionData::SendExchangeGhostCells(
-    std::vector<int>* neighbors, std::vector<std::vector<char>>* send_buffer) {
+    std::vector<int>* neighbors, std::vector<struct evbuffer*>* send_buffer) {
   neighbors->clear();
   neighbors->reserve(exchange_metadata_.size());
   send_buffer->clear();
@@ -791,9 +783,10 @@ void PartitionData::SendExchangeGhostCells(
   for (const auto& pair : exchange_metadata_) {
     neighbors->push_back(pair.first);
     auto const& metadata = pair.second;
-    std::stringstream ss;
+    struct evbuffer* buffer = evbuffer_new();
+    send_buffer->push_back(buffer);
     {
-      cereal::BinaryOutputArchive oarchive(ss);
+      ::canary::CanaryOutputArchive oarchive(buffer);
       oarchive(metadata.local_to_ghost_indices.size());
       for (const auto& in_pair : metadata.local_to_ghost_indices) {
         oarchive(in_pair.first);
@@ -805,10 +798,6 @@ void PartitionData::SendExchangeGhostCells(
         SerializeFullCell(oarchive, in_pair.second);
       }
     }  // Serialization done.
-    send_buffer->emplace_back(ss.tellp());
-    if (!send_buffer->back().empty()) {
-      memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
-    }
   }
 }
 
@@ -833,7 +822,7 @@ void PartitionData::DeserializeFullCell(Archive& archive, int index) {
 }
 
 void PartitionData::RecvExchangeGhostCells(
-    const std::vector<std::vector<char>>& recv_buffer) {
+    std::vector<struct evbuffer*>* recv_buffer) {
   for (
       auto& element :
       exchange_metadata_[ghost_grid_.GetSubgridRank()].ghost_to_ghost_indices) {
@@ -848,78 +837,59 @@ void PartitionData::RecvExchangeGhostCells(
     last_cells_[local_index] = cell;
   }
 
-  const size_t max_size = recv_buffer.size();
-  std::vector<std::unique_ptr<std::stringstream>> ss_vector(max_size);
-  std::vector<std::unique_ptr<cereal::BinaryInputArchive>> iarchive_vector(
-      max_size);
-  for (size_t index = 0; index < max_size; ++index) {
-    ss_vector[index].reset(new std::stringstream(
-        std::string(recv_buffer[index].data(), recv_buffer[index].size())));
-    iarchive_vector[index].reset(
-        new cereal::BinaryInputArchive(*ss_vector[index]));
-  }
   // Caution: the following code makes sure that the ghost cells are merged
   // exactly the same way.
-  for (size_t index = 0; index < max_size; ++index) {
-    auto& iarchive = *iarchive_vector[index];
-    size_t owner_cells = 0;
-    iarchive(owner_cells);
-    while (owner_cells-- > 0) {
-      int global_index;
-      iarchive(global_index);
-      int local_index = ghost_grid_.GlobalCellRankToLocal(global_index);
-      DeserializeFullCell(iarchive, local_index);
+  for (int i = 0; i < 2; ++i)
+    for (auto buffer : *recv_buffer) {
+      ::canary::CanaryInputArchive iarchive(buffer);
+      size_t owner_cells = 0;
+      iarchive(owner_cells);
+      while (owner_cells-- > 0) {
+        int global_index;
+        iarchive(global_index);
+        int local_index = ghost_grid_.GlobalCellRankToLocal(global_index);
+        DeserializeFullCell(iarchive, local_index);
+      }
     }
-  }
-  for (size_t index = 0; index < max_size; ++index) {
-    auto& iarchive = *iarchive_vector[index];
-    size_t ghost_cells = 0;
-    iarchive(ghost_cells);
-    while (ghost_cells-- > 0) {
-      int global_index;
-      iarchive(global_index);
-      int local_index = ghost_grid_.GlobalCellRankToLocal(global_index);
-      DeserializeFullCell(iarchive, local_index);
-    }
+  for (auto buffer : *recv_buffer) {
+    CHECK_EQ(evbuffer_get_length(buffer), 0u);
+    evbuffer_free(buffer);
   }
 }
 
 template <typename Archive>
 void PartitionData::SerializeDensity(Archive& archive, int index) const {
-  const Cell* cell = &cells_[index];
-  int np = cnumPars_[index];
+  const int np = cnumPars_[index];
   archive(np);
+  const Cell* cell = &cells_[index];
   for (int j = 0; j < np; ++j) {
-    if ((j % PARTICLES_PER_CELL == 0) && (j != 0)) {
+    const int incell_index = j % PARTICLES_PER_CELL;
+    archive(cell->density[incell_index]);
+    if (incell_index == PARTICLES_PER_CELL - 1) {
       cell = cell->next;
     }
-    // archive(cell->density[j % PARTICLES_PER_CELL], cell->v[j %
-    // PARTICLES_PER_CELL]);
-    archive(cell->density[j % PARTICLES_PER_CELL]);
   }
 }
 
 void PartitionData::SendDensityGhost(
-    std::vector<int>* neighbors, std::vector<std::vector<char>>* send_buffer) {
+    std::vector<int>* neighbors, std::vector<struct evbuffer*>* send_buffer) {
   neighbors->clear();
   neighbors->reserve(exchange_metadata_.size());
   send_buffer->clear();
   send_buffer->reserve(exchange_metadata_.size());
-  for (auto element : exchange_metadata_) {
-    neighbors->push_back(element.first);
-    std::stringstream ss;
+  for (auto pair : exchange_metadata_) {
+    neighbors->push_back(pair.first);
+    auto const& metadata = pair.second;
+    struct evbuffer* buffer = evbuffer_new();
+    send_buffer->push_back(buffer);
     {
-      cereal::BinaryOutputArchive oarchive(ss);
-      oarchive(element.second.local_to_ghost_indices.size());
-      for (auto& metadata : element.second.local_to_ghost_indices) {
-        oarchive(metadata.first);
-        SerializeDensity(oarchive, metadata.second);
+      ::canary::CanaryOutputArchive oarchive(buffer);
+      oarchive(metadata.local_to_ghost_indices.size());
+      for (auto& inpair: metadata.local_to_ghost_indices) {
+        oarchive(inpair.first);
+        SerializeDensity(oarchive, inpair.second);
       }
     }  // Serialization done.
-    send_buffer->emplace_back(ss.tellp());
-    if (!send_buffer->back().empty()) {
-      memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
-    }
   }
 }
 
@@ -933,23 +903,16 @@ void PartitionData::DeserializeDensity(Archive& archive, int index) {
     if ((count % PARTICLES_PER_CELL == 0) && (count != 0)) {
       cell = cell->next;
     }
-    // Vec3 v;
-    // archive(cell->density[count % PARTICLES_PER_CELL], v);
     archive(cell->density[count % PARTICLES_PER_CELL]);
-    // CHECK(v == cell->v[count % PARTICLES_PER_CELL])
-    //     << " " << v.x << " " << v.y << " " << v.z
-    //     << " " << cell->v[count % PARTICLES_PER_CELL].x
-    //     << " " << cell->v[count % PARTICLES_PER_CELL].y
-    //     << " " << cell->v[count % PARTICLES_PER_CELL].z;
   }
   CHECK_EQ(cell, last_cells_[index]);
 }
 
 void PartitionData::RecvDensityGhost(
-    const std::vector<std::vector<char>>& recv_buffer) {
-  for (auto& recv_data : recv_buffer) {
-    std::stringstream ss(std::string(recv_data.data(), recv_data.size()));
-    cereal::BinaryInputArchive iarchive(ss);
+    std::vector<struct evbuffer*>* recv_buffer) {
+  // exactly the same way.
+  for (auto buffer : *recv_buffer) {
+    ::canary::CanaryInputArchive iarchive(buffer);
     size_t density_cells = 0;
     iarchive(density_cells);
     while (density_cells-- > 0) {
@@ -958,6 +921,10 @@ void PartitionData::RecvDensityGhost(
       int index = ghost_grid_.GlobalCellRankToLocal(global_index);
       DeserializeDensity(iarchive, index);
     }
+  }
+  for (auto buffer : *recv_buffer) {
+    CHECK_EQ(evbuffer_get_length(buffer), 0u);
+    evbuffer_free(buffer);
   }
 }
 
@@ -1007,10 +974,11 @@ class ParsecApplication : public CanaryApplication {
     Scatter([=](CanaryTaskContext* task_context) {
       auto partition = task_context->WriteVariable(d_partition);
       std::vector<int> neighbors;
-      std::vector<std::vector<char>> send_buffer;
+      std::vector<struct evbuffer*> send_buffer;
       partition->SendExchangeGhostCells(&neighbors, &send_buffer);
       for (size_t index = 0; index < neighbors.size(); ++index) {
-        task_context->OrderedScatter(neighbors[index], send_buffer[index]);
+        task_context->OrderedScatter(neighbors[index],
+                                     RawEvbuffer(send_buffer[index]));
       }
     });
 
@@ -1019,13 +987,13 @@ class ParsecApplication : public CanaryApplication {
       auto partition = task_context->WriteVariable(d_partition);
       const int num_neighbor = partition->GetNumNeighbors();
       EXPECT_GATHER_SIZE(num_neighbor);
-      auto recv_buffer = task_context->OrderedGather<std::vector<char>>();
-      std::vector<std::vector<char>> sort_buffer;
+      auto recv_buffer = task_context->OrderedGather<RawEvbuffer>();
+      std::vector<struct evbuffer*> sort_buffer;
       sort_buffer.reserve(recv_buffer.size());
       for (auto& pair : recv_buffer) {
-        sort_buffer.emplace_back(std::move(pair.second));
+        sort_buffer.push_back(pair.second.buffer);
       }
-      partition->RecvExchangeGhostCells(sort_buffer);
+      partition->RecvExchangeGhostCells(&sort_buffer);
       return 0;
     });
 
@@ -1042,10 +1010,11 @@ class ParsecApplication : public CanaryApplication {
     Scatter([=](CanaryTaskContext* task_context) {
       auto partition = task_context->WriteVariable(d_partition);
       std::vector<int> neighbors;
-      std::vector<std::vector<char>> send_buffer;
+      std::vector<struct evbuffer*> send_buffer;
       partition->SendDensityGhost(&neighbors, &send_buffer);
       for (size_t index = 0; index < neighbors.size(); ++index) {
-        task_context->OrderedScatter(neighbors[index], send_buffer[index]);
+        task_context->OrderedScatter(neighbors[index],
+                                     RawEvbuffer(send_buffer[index]));
       }
     });
 
@@ -1054,13 +1023,13 @@ class ParsecApplication : public CanaryApplication {
       auto partition = task_context->WriteVariable(d_partition);
       const int num_neighbor = partition->GetNumNeighbors();
       EXPECT_GATHER_SIZE(num_neighbor);
-      auto recv_buffer = task_context->OrderedGather<std::vector<char>>();
-      std::vector<std::vector<char>> sort_buffer;
+      auto recv_buffer = task_context->OrderedGather<RawEvbuffer>();
+      std::vector<struct evbuffer*> sort_buffer;
       sort_buffer.reserve(recv_buffer.size());
       for (auto& pair : recv_buffer) {
-        sort_buffer.emplace_back(std::move(pair.second));
+        sort_buffer.push_back(pair.second.buffer);
       }
-      partition->RecvDensityGhost(sort_buffer);
+      partition->RecvDensityGhost(&sort_buffer);
       return 0;
     });
 
@@ -1101,11 +1070,15 @@ class ParsecApplication : public CanaryApplication {
     ss << parameter;
     {
       cereal::XMLInputArchive archive(ss);
-      archive(FLAG_app_partition_x, FLAG_app_partition_y, FLAG_app_partition_z);
-      archive(FLAG_app_fold_x, FLAG_app_fold_y, FLAG_app_fold_z);
-      archive(FLAG_app_fold_depth_y);
-      archive(FLAG_app_frames);
-      archive(FLAG_app_filename);
+      LoadFlag("partition_x", FLAG_app_partition_x, archive);
+      LoadFlag("partition_y", FLAG_app_partition_y, archive);
+      LoadFlag("partition_z", FLAG_app_partition_z, archive);
+      LoadFlag("fold_x", FLAG_app_fold_z, archive);
+      LoadFlag("fold_y", FLAG_app_fold_z, archive);
+      LoadFlag("fold_z", FLAG_app_fold_z, archive);
+      LoadFlag("fold_depth_y", FLAG_app_fold_depth_y, archive);
+      LoadFlag("frames", FLAG_app_frames, archive);
+      LoadFlag("filename", FLAG_app_filename, archive);
     }
   }
 };

@@ -10,9 +10,9 @@
 #include "canary/canary.h"
 #include "../helper.h"
 
-static int FLAG_app_partitions = 2;   // Number of partitions.
-static int FLAG_app_iterations = 50;  // Number of iterations.
-static int FLAG_app_samples = 100;    // Number of total samples.
+static int FLAG_app_partitions = 1;   // Number of partitions.
+static int FLAG_app_iterations = 10;  // Number of iterations.
+static int FLAG_app_samples = 1000;    // Number of total samples.
 
 constexpr int DIMENSION = 20;
 constexpr int NUM_CLUSTER = 10;
@@ -192,9 +192,9 @@ class KmeanLoopApplication : public CanaryApplication {
     ss << parameter;
     {
       cereal::XMLInputArchive archive(ss);
-      archive(FLAG_app_partitions);
-      archive(FLAG_app_iterations);
-      archive(FLAG_app_samples);
+      LoadFlag("partitions", FLAG_app_partitions, archive);
+      LoadFlag("iterations", FLAG_app_iterations, archive);
+      LoadFlag("samples", FLAG_app_samples, archive);
     }
   }
 };

@@ -155,9 +155,12 @@ class CanaryTaskContext {
     std::map<int, T> receive_buffer;
     int src_partition_id;
     for (auto buffer : receive_buffer_) {
-      CanaryInputArchive archive(buffer);
-      archive(src_partition_id);
-      archive(receive_buffer[src_partition_id]);
+      {
+        CanaryInputArchive archive(buffer);
+        archive(src_partition_id);
+        archive(receive_buffer[src_partition_id]);
+      }
+      evbuffer_free(buffer);
     }
     return std::move(receive_buffer);
   }

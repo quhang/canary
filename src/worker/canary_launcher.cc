@@ -38,6 +38,8 @@
  */
 
 #include <cereal/archives/xml.hpp>
+#include <algorithm>
+#include <iterator>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -89,7 +91,11 @@ int main(int argc, char** argv) {
     cereal::XMLOutputArchive archive(ss);
     for (int i = 1; i < argc; ++i) {
       std::string token(argv[i]);
-      archive(token);
+      auto iter = std::find(token.begin(), token.end(), '=');
+      CHECK(iter != token.end())
+          << "Application argument needs to be specified as key=value";
+      archive(cereal::make_nvp(std::string(token.begin(), iter),
+                               std::string(std::next(iter), token.end())));
     }
   }
   message::LaunchApplication launch_application;

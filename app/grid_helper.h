@@ -214,9 +214,19 @@ class Grid {
   }
   //! Whether a cell is in the grid.
   inline bool ContainDomain(float cord_x, float cord_y, float cord_z) const {
-    return cord_x >= subdomain_.first.x && cord_y >= subdomain_.first.y &&
-           cord_z >= subdomain_.first.z && cord_x < subdomain_.second.x &&
-           cord_y < subdomain_.second.y && cord_z < subdomain_.second.z;
+    int global_x = (int)((cord_x - domain_.first.x) / cell_size_.x);
+    int global_y = (int)((cord_y - domain_.first.y) / cell_size_.y);
+    int global_z = (int)((cord_z - domain_.first.z) / cell_size_.z);
+    global_x = std::max(std::min(global_x, grid_.second.x - 1), grid_.first.x);
+    global_y = std::max(std::min(global_y, grid_.second.y - 1), grid_.first.y);
+    global_z = std::max(std::min(global_z, grid_.second.z - 1), grid_.first.z);
+    return Contain(global_x, global_y, global_z);
+  }
+  //! Whether a cell is in the grid.
+  inline bool Contain(int global_x, int global_y, int global_z) const {
+    return global_x >= subgrid_.first.x && global_y >= subgrid_.first.y &&
+           global_z >= subgrid_.first.z && global_x < subgrid_.second.x &&
+           global_y < subgrid_.second.y && global_z < subgrid_.second.z;
   }
   //! Gets the local cell rank from a global cell cord.
   inline int GetLocalCellRankDomain(float cord_x, float cord_y,
@@ -234,12 +244,6 @@ class Grid {
                           (int)((cord_z - domain_.first.z) / cell_size_.z)),
                  subgrid_.first.z);
     return GetLocalCellRank(x, y, z);
-  }
-  //! Whether a cell is in the grid.
-  inline bool Contain(int global_x, int global_y, int global_z) const {
-    return global_x >= subgrid_.first.x && global_y >= subgrid_.first.y &&
-           global_z >= subgrid_.first.z && global_x < subgrid_.second.x &&
-           global_y < subgrid_.second.y && global_z < subgrid_.second.z;
   }
   //! Gets the local cell rank from a global cell index.
   inline int GetLocalCellRank(int global_x, int global_y, int global_z) const {

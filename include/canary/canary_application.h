@@ -43,6 +43,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include "cereal/archives/xml.hpp"
 
 #include "canary/canary_internal.h"
 
@@ -325,6 +326,14 @@ class CanaryApplication {
    */
   virtual void Program() = 0;
   virtual void LoadParameter(const std::string& parameter) = 0;
+  template <typename T>
+  void LoadFlag(const std::string& name, T& value,
+                cereal::XMLInputArchive& archive) {
+    try {
+      archive(cereal::make_nvp(name, value));
+    } catch (cereal::Exception&) {
+    }
+  }
 
   //! Fills in missing metadata.
   void FillInProgram();
