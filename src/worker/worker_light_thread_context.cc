@@ -241,7 +241,7 @@ void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
 
 void WorkerExecutionContext::ProcessInitCommand() {
   // Caution: initialization generates the initial task graph.
-  stage_graph_.Initialize(get_variable_group_id());
+  stage_graph_.Initialize(get_variable_group_id(), get_partition_id());
   AllocatePartitionData();
 }
 

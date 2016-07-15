@@ -43,9 +43,11 @@
 
 namespace canary {
 
-void StageGraph::Initialize(VariableGroupId self_variable_group_id) {
+void StageGraph::Initialize(VariableGroupId self_variable_group_id,
+                            PartitionId self_partition_id) {
   CHECK_NOTNULL(statement_info_map_);
   self_variable_group_id_ = self_variable_group_id;
+  self_partition_id_ = self_partition_id;
   CHECK(self_variable_group_id_ != VariableGroupId::INVALID);
   SpawnLocalStages();
 }
@@ -66,7 +68,7 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
         std::max(last_finished_stage_id_, complete_stage_id);
   }
   // Updates running stats.
-  if (statement_info.track_needed) {
+  if (self_partition_id_ == PartitionId::FIRST && statement_info.track_needed) {
     timestamp_storage_[complete_stage_id] =
         std::make_pair(stage_record.statement_id, timestamp);
   }

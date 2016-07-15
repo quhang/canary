@@ -959,6 +959,7 @@ class ParsecApplication : public CanaryApplication {
 
     Loop(FLAG_app_frames);
 
+    TrackNeeded();
     WriteAccess(d_partition);
     Transform([=](CanaryTaskContext* task_context) {
       auto partition = task_context->WriteVariable(d_partition);

@@ -88,7 +88,8 @@ class StageGraph {
     statement_info_map_ = statement_info_map;
   }
   //! Initializes the stage graph when first launched.
-  void Initialize(VariableGroupId self_variable_group_id);
+  void Initialize(VariableGroupId self_variable_group_id,
+                  PartitionId self_partition_id);
   //! Reports complete stage.
   void CompleteStage(StageId complete_stage_id, double timestamp,
                      double cycles);
@@ -127,7 +128,7 @@ class StageGraph {
   //! Serialization/deserialization.
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(self_variable_group_id_);
+    archive(self_variable_group_id_, self_partition_id_);
     archive(uncomplete_stage_map_, ready_stage_queue_);
     archive(variable_access_map_);
     archive(received_control_flow_decisions_);
@@ -158,6 +159,8 @@ class StageGraph {
 
   //! Self variable group id.
   VariableGroupId self_variable_group_id_ = VariableGroupId::INVALID;
+  //! Self partition id.
+  PartitionId self_partition_id_ = PartitionId::INVALID;
 
   //! Spawned but uncomplete stages.
   std::map<StageId, StageRecord> uncomplete_stage_map_;
