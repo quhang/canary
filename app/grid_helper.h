@@ -303,7 +303,8 @@ class Grid {
   void InitializeLocalGrid() {
     // Calculates subdomain.
     subdomain_size_ = domain_size_ / cast_point<float>(split_);
-    subdomain_.first = subdomain_size_ * cast_point<float>(subgrid_index_);
+    subdomain_.first =
+        domain_.first + subdomain_size_ * cast_point<float>(subgrid_index_);
     subdomain_.second = subdomain_.first + subdomain_size_;
     // Calculates subgrid.
     const auto full_subgrid_size = grid_size_ / split_;

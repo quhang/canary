@@ -24,15 +24,15 @@
 #include "cellpool.h"
 #include "../grid_helper.h"
 
-DEFINE_int32(app_partition_x, 1, "Partitioning in the x dimension.");
-DEFINE_int32(app_partition_y, 1, "Partitioning in the y dimension.");
-DEFINE_int32(app_partition_z, 1, "Partitioning in the z dimension.");
-DEFINE_int32(app_fold_x, 1, "Folding in the x dimension.");
-DEFINE_int32(app_fold_y, 1, "Folding in the y dimension.");
-DEFINE_int32(app_fold_z, 1, "Folding in the z dimension.");
-DEFINE_int32(app_depth, 1, "Folding depth in the y dimension.");
-DEFINE_int32(app_frames, 10, "Partitioning in the z dimension.");
-DEFINE_string(app_filename, "", "Input file name.");
+static int FLAG_app_partition_x = 1;  // Partitioning in x.
+static int FLAG_app_partition_y = 1;  // Partitioning in y.
+static int FLAG_app_partition_z = 1;  // Partitioning in z.
+static int FLAG_app_fold_x = 1;  // Fold in x.
+static int FLAG_app_fold_y = 1;  // Fold in y.
+static int FLAG_app_fold_z = 1;  // Fold in z.
+static int FLAG_app_fold_depth_y = 1;  // Fold depth in y.
+static int FLAG_app_frames = 10;  // Frames.
+static std::string FLAG_app_filename = "";  // Input file name.
 
 struct GlobalState {
   template <typename Archive>
@@ -183,9 +183,9 @@ void PartitionData::InitSim(char const* fileName, int split_x, int split_y,
   const helper::Point domain_min{domainMinPart.x, domainMinPart.y,
                                  domainMinPart.z};
   const helper::Point domain_size{
-      FLAGS_app_fold_x * (domainMaxPart.x - domainMinPart.x),
-      FLAGS_app_fold_y * (domainMaxPart.y - domainMinPart.y),
-      FLAGS_app_fold_z * (domainMaxPart.z - domainMinPart.z)};
+      FLAG_app_fold_x * (domainMaxPart.x - domainMinPart.x),
+      FLAG_app_fold_y * (domainMaxPart.y - domainMinPart.y),
+      FLAG_app_fold_z * (domainMaxPart.z - domainMinPart.z)};
   const helper::Point domain_max{domain_size.x + domainMinPart.x,
                                  domain_size.y + domainMinPart.y,
                                  domain_size.z + domainMinPart.z};
@@ -286,9 +286,9 @@ void PartitionData::InitSim(char const* fileName, int split_x, int split_y,
       vz = bswap_float(vz);
     }
 
-    for (int fold_x = 0; fold_x < FLAGS_app_fold_x; ++fold_x)
-      for (int fold_y = 0; fold_y < FLAGS_app_depth; ++fold_y)
-        for (int fold_z = 0; fold_z < FLAGS_app_fold_z; ++fold_z) {
+    for (int fold_x = 0; fold_x < FLAG_app_fold_x; ++fold_x)
+      for (int fold_y = 0; fold_y < FLAG_app_fold_depth_y; ++fold_y)
+        for (int fold_z = 0; fold_z < FLAG_app_fold_z; ++fold_z) {
           float px = unfold_px + fold_x * (domainMaxPart.x - domainMinPart.x);
           float py = unfold_py + fold_y * (domainMaxPart.y - domainMinPart.y);
           float pz = unfold_pz + fold_z * (domainMaxPart.z - domainMinPart.z);
@@ -356,9 +356,8 @@ void PartitionData::RebuildGridMT() {
       for (int ix = local_grid_.get_sx(); ix < local_grid_.get_ex(); ++ix) {
         const int index2 = ghost_grid_.GetLocalCellRank(ix, iy, iz);
         Cell* cell2 = &cells2_[index2];
-        const int np2 = cnumPars2_[index2];
         // Iterates through source particles.
-        for (int j = 0; j < np2; ++j) {
+        for (int j = 0; j < cnumPars2_[index2]; ++j) {
           const int incell_index2 = j % PARTICLES_PER_CELL;
           // This assumes that particles cannot travel more than one grid cell
           // per time step.
@@ -389,7 +388,7 @@ void PartitionData::RebuildGridMT() {
               cellpool_returncell(&local_pool_, temp);
             }
           }
-        }  // for(int j = 0; j < np2; ++j)
+        }
         // Returns cells to pool that are not statically allocated head of lists
         if ((cell2 != NULL) && (cell2 != &cells2_[index2])) {
           cellpool_returncell(&local_pool_, cell2);
@@ -807,7 +806,9 @@ void PartitionData::SendExchangeGhostCells(
       }
     }  // Serialization done.
     send_buffer->emplace_back(ss.tellp());
-    memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
+    if (!send_buffer->back().empty()) {
+      memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
+    }
   }
 }
 
@@ -916,7 +917,9 @@ void PartitionData::SendDensityGhost(
       }
     }  // Serialization done.
     send_buffer->emplace_back(ss.tellp());
-    memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
+    if (!send_buffer->back().empty()) {
+      memcpy(&send_buffer->back()[0], ss.str().c_str(), ss.tellp());
+    }
   }
 }
 
@@ -966,18 +969,18 @@ class ParsecApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
-    CHECK_LE(FLAGS_app_depth, FLAGS_app_fold_y);
+    CHECK_LE(FLAG_app_fold_depth_y, FLAG_app_fold_y);
 
     const auto NUM_PARTITION =
-        FLAGS_app_partition_x * FLAGS_app_partition_y * FLAGS_app_partition_z;
+        FLAG_app_partition_x * FLAG_app_partition_y * FLAG_app_partition_z;
     auto d_partition = DeclareVariable<::PartitionData>(NUM_PARTITION);
     auto d_global = DeclareVariable<::GlobalState>(1);
 
     WriteAccess(d_partition);
     Transform([=](CanaryTaskContext* task_context) {
       auto partition = task_context->WriteVariable(d_partition);
-      partition->InitSim(FLAGS_app_filename.c_str(), FLAGS_app_partition_x,
-                         FLAGS_app_partition_y, FLAGS_app_partition_z,
+      partition->InitSim(FLAG_app_filename.c_str(), FLAG_app_partition_x,
+                         FLAG_app_partition_y, FLAG_app_partition_z,
                          task_context->GetPartitionId());
     });
 
@@ -987,7 +990,7 @@ class ParsecApplication : public CanaryApplication {
       CHECK_NOTNULL(global);
     });
 
-    Loop(FLAGS_app_frames);
+    Loop(FLAG_app_frames);
 
     WriteAccess(d_partition);
     Transform([=](CanaryTaskContext* task_context) {
@@ -1057,7 +1060,7 @@ class ParsecApplication : public CanaryApplication {
       for (auto& pair : recv_buffer) {
         sort_buffer.emplace_back(std::move(pair.second));
       }
-      partition->RecvExchangeGhostCells(sort_buffer);
+      partition->RecvDensityGhost(sort_buffer);
       return 0;
     });
 
@@ -1076,9 +1079,9 @@ class ParsecApplication : public CanaryApplication {
 
     EndLoop();
 
-    ReadAccess(d_partition);
+    WriteAccess(d_partition);
     Scatter([=](CanaryTaskContext* task_context) {
-      const auto& partition = task_context->WriteVariable(d_partition);
+      auto partition = task_context->WriteVariable(d_partition);
       task_context->Scatter(0, partition->ComputeEnergy());
     });
 
@@ -1096,7 +1099,18 @@ class ParsecApplication : public CanaryApplication {
   void LoadParameter(const std::string& parameter) override {
     std::stringstream ss;
     ss << parameter;
-    { cereal::XMLInputArchive archive(ss); }
+    {
+      cereal::XMLInputArchive archive(ss);
+      archive(FLAG_app_partition_x,
+              FLAG_app_partition_y,
+              FLAG_app_partition_z);
+      archive(FLAG_app_fold_x,
+              FLAG_app_fold_y,
+              FLAG_app_fold_z);
+      archive(FLAG_app_fold_depth_y);
+      archive(FLAG_app_frames);
+      archive(FLAG_app_filename);
+    }
   }
 };
 
