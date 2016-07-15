@@ -24,14 +24,14 @@
 #include "cellpool.h"
 #include "../grid_helper.h"
 
-static int FLAG_app_partition_x = 1;  // Partitioning in x.
-static int FLAG_app_partition_y = 1;  // Partitioning in y.
-static int FLAG_app_partition_z = 1;  // Partitioning in z.
-static int FLAG_app_fold_x = 1;  // Fold in x.
-static int FLAG_app_fold_y = 1;  // Fold in y.
-static int FLAG_app_fold_z = 1;  // Fold in z.
-static int FLAG_app_fold_depth_y = 1;  // Fold depth in y.
-static int FLAG_app_frames = 10;  // Frames.
+static int FLAG_app_partition_x = 1;        // Partitioning in x.
+static int FLAG_app_partition_y = 1;        // Partitioning in y.
+static int FLAG_app_partition_z = 1;        // Partitioning in z.
+static int FLAG_app_fold_x = 1;             // Fold in x.
+static int FLAG_app_fold_y = 1;             // Fold in y.
+static int FLAG_app_fold_z = 1;             // Fold in z.
+static int FLAG_app_fold_depth_y = 1;       // Fold depth in y.
+static int FLAG_app_frames = 10;            // Frames.
 static std::string FLAG_app_filename = "";  // Input file name.
 
 struct GlobalState {
@@ -1101,12 +1101,8 @@ class ParsecApplication : public CanaryApplication {
     ss << parameter;
     {
       cereal::XMLInputArchive archive(ss);
-      archive(FLAG_app_partition_x,
-              FLAG_app_partition_y,
-              FLAG_app_partition_z);
-      archive(FLAG_app_fold_x,
-              FLAG_app_fold_y,
-              FLAG_app_fold_z);
+      archive(FLAG_app_partition_x, FLAG_app_partition_y, FLAG_app_partition_z);
+      archive(FLAG_app_fold_x, FLAG_app_fold_y, FLAG_app_fold_z);
       archive(FLAG_app_fold_depth_y);
       archive(FLAG_app_frames);
       archive(FLAG_app_filename);

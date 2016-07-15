@@ -222,13 +222,16 @@ class Grid {
   inline int GetLocalCellRankDomain(float cord_x, float cord_y,
                                     float cord_z) const {
     const int x =
-        std::max(std::min(subgrid_.second.x - 1, (int)(cord_x / cell_size_.x)),
+        std::max(std::min(subgrid_.second.x - 1,
+                          (int)((cord_x - domain_.first.x) / cell_size_.x)),
                  subgrid_.first.x);
     const int y =
-        std::max(std::min(subgrid_.second.x - 1, (int)(cord_y / cell_size_.y)),
+        std::max(std::min(subgrid_.second.x - 1,
+                          (int)((cord_y - domain_.first.y) / cell_size_.y)),
                  subgrid_.first.y);
     const int z =
-        std::max(std::min(subgrid_.second.z - 1, (int)(cord_z / cell_size_.z)),
+        std::max(std::min(subgrid_.second.z - 1,
+                          (int)((cord_z - domain_.first.z) / cell_size_.z)),
                  subgrid_.first.z);
     return GetLocalCellRank(x, y, z);
   }
