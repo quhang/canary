@@ -44,18 +44,14 @@
 
 namespace helper {
 
-template <typename T, size_t size>
-void operator+=
-
-
 /*
  * For the best performance, all the functions are in place.
  */
 
 // output += input.
 template <typename T, size_t size>
-inline void array_add(
-    const std::array<T, size>& input, std::array<T, size>* output) {
+inline void array_add(const std::array<T, size>& input,
+                      std::array<T, size>* output) {
   auto input_iter = input.cbegin();
   auto output_iter = output->begin();
   while (input_iter != input.cend()) {
@@ -67,8 +63,8 @@ inline void array_add(
 
 // output += input.
 template <typename T, size_t size>
-inline void array_sub(
-    const std::array<T, size>& input, std::array<T, size>* output) {
+inline void array_sub(const std::array<T, size>& input,
+                      std::array<T, size>* output) {
   auto input_iter = input.cbegin();
   auto output_iter = output->begin();
   while (input_iter != input.cend()) {
@@ -85,7 +81,7 @@ inline void array_acc(const std::array<T, size>& input, T input_factor,
   auto input_iter = input.cbegin();
   auto output_iter = output->begin();
   while (input_iter != input.cend()) {
-    *output_iter += input_factor * *input_iter;
+    *output_iter += input_factor * (*input_iter);
     ++input_iter;
     ++output_iter;
   }
@@ -98,7 +94,7 @@ inline void array_mul(const std::array<T, size>& input, T input_factor,
   auto input_iter = input.cbegin();
   auto output_iter = output->begin();
   while (input_iter != input.cend()) {
-    *output_iter = input_factor * *input_iter;
+    *output_iter = input_factor * (*input_iter);
     ++input_iter;
     ++output_iter;
   }
@@ -106,8 +102,8 @@ inline void array_mul(const std::array<T, size>& input, T input_factor,
 
 // Dot multiply.
 template <typename T, size_t size>
-inline T array_dot(
-    const std::array<T, size>& left, const std::array<T, size>& right) {
+inline T array_dot(const std::array<T, size>& left,
+                   const std::array<T, size>& right) {
   T result = 0;
   auto left_iter = left.cbegin();
   auto right_iter = right.cbegin();

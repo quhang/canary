@@ -40,6 +40,7 @@
 #ifndef CANARY_APP_GRID_HELPER_H_
 #define CANARY_APP_GRID_HELPER_H_
 
+#include <algorithm>
 #include <iostream>
 #include <utility>
 
@@ -49,7 +50,8 @@ namespace internal {
 /**
  * A 3-dimension point, which supports dimension-wide operations.
  */
-template <typename T> struct PointBase {
+template <typename T>
+struct PointBase {
  private:
   typedef PointBase<T> Self;
 
@@ -61,31 +63,57 @@ template <typename T> struct PointBase {
   PointBase(T in_x, T in_y, T in_z) : x(in_x), y(in_y), z(in_z) {}
   //! Serialization funciton.
   template <class Archive>
-  void serialize(Archive &archive) { archive(x, y, z); }
+  void serialize(Archive& archive) {
+    archive(x, y, z);
+  }
   //! In-place assignment operators.
   inline Self& operator+=(const Self& v) {
-    x += v.x; y += v.y; z += v.z; return *this;
+    x += v.x;
+    y += v.y;
+    z += v.z;
+    return *this;
   }
   inline Self& operator+=(T s) {
-    x += s; y += s; z += s; return *this;
+    x += s;
+    y += s;
+    z += s;
+    return *this;
   }
   inline Self& operator-=(const Self& v) {
-    x -= v.x; y -= v.y; z -= v.z; return *this;
+    x -= v.x;
+    y -= v.y;
+    z -= v.z;
+    return *this;
   }
   inline Self& operator-=(T s) {
-    x -= s; y -= s; z -= s; return *this;
+    x -= s;
+    y -= s;
+    z -= s;
+    return *this;
   }
   inline Self& operator*=(const Self& v) {
-    x *= v.x; y *= v.y; z *= v.z; return *this;
+    x *= v.x;
+    y *= v.y;
+    z *= v.z;
+    return *this;
   }
   inline Self& operator*=(T s) {
-    x *= s; y *= s; z *= s; return *this;
+    x *= s;
+    y *= s;
+    z *= s;
+    return *this;
   }
-  inline Self &operator/=(const Self& v) {
-    x /= v.x; y /= v.y; z /= v.z; return *this;
+  inline Self& operator/=(const Self& v) {
+    x /= v.x;
+    y /= v.y;
+    z /= v.z;
+    return *this;
   }
   inline Self& operator/=(T s) {
-    x /= s; y /= s; z /= s; return *this;
+    x /= s;
+    y /= s;
+    z /= s;
+    return *this;
   }
   //! Out-of-place operators.
   inline Self operator-() const { return Self(-x, -y, -z); }
@@ -93,20 +121,20 @@ template <typename T> struct PointBase {
   inline Self operator-(T s) const { return Self(x - s, y - s, z - s); }
   inline Self operator*(T s) const { return Self(x * s, y * s, z * s); }
   inline Self operator/(T s) const { return Self(x / s, y / s, z / s); }
-  inline Self operator+(const Self &v) const {
+  inline Self operator+(const Self& v) const {
     return Self(x + v.x, y + v.y, z + v.z);
   }
-  inline Self operator-(const Self &v) const {
+  inline Self operator-(const Self& v) const {
     return Self(x - v.x, y - v.y, z - v.z);
   }
-  inline Self operator*(const Self &v) const {
+  inline Self operator*(const Self& v) const {
     return Self(x * v.x, y * v.y, z * v.z);
   }
-  inline Self operator/(const Self &v) const {
+  inline Self operator/(const Self& v) const {
     return Self(x / v.x, y / v.y, z / v.z);
   }
   //! Statistics.
-  inline Product() const { return x * y * z; }
+  inline T Product() const { return x * y * z; }
 };
 }  // namespace internal
 
@@ -131,7 +159,7 @@ inline std::istream& operator>>(std::istream& is, internal::PointBase<T>& obj) {
   return is;
 }
 
-/*
+/**
  * Stores the metadata of A grid.
  *
  * A grid is split into many subgrids. Each grid or subgrid is a cube of cells,
@@ -139,13 +167,8 @@ inline std::istream& operator>>(std::istream& is, internal::PointBase<T>& obj) {
  */
 class Grid {
  public:
-  //! Constructor.
-  Grid() {
-    initialized_ = false;
-  }
   void Initialize(const std::pair<Point, Point>& domain,
-                  const IntPoint& grid_size,
-                  const IntPoint& split,
+                  const IntPoint& grid_size, const IntPoint& split,
                   int subgrid_rank, int ghost_bandwidth = 0) {
     // Initializes global domain.
     domain_ = domain;
@@ -153,6 +176,8 @@ class Grid {
     // Initializes global grid: the right boundary is exclusive.
     grid_size_ = grid_size;
     grid_ = std::make_pair(IntPoint{0, 0, 0}, grid_size);
+    // Calculates a cell size.
+    cell_size_ = domain_size_ / cast_point<float>(grid_size_);
     // Initializes the rank and index of the load grid.
     split_ = split;
     subgrid_rank_ = subgrid_rank;
@@ -163,11 +188,16 @@ class Grid {
     InitializeLocalGrid();
     initialized_ = true;
   }
-  //! Destructor.
-  virtual ~Grid() {}
-  // TODO
   template <typename Archive>
-  void serialize(Archive& archive) {}
+  void serialize(Archive& archive) {
+    archive(initialized_);
+    archive(domain_, domain_size_, grid_, grid_size_);
+    archive(cell_size_);
+    archive(split_);
+    archive(subgrid_rank_, subgrid_index_);
+    archive(ghost_bandwidth_);
+    archive(subdomain_, subdomain_size_, subgrid_, subgrid_size_);
+  }
   //! For debugging.
   void Print() {
     auto& ss = std::cout;
@@ -175,78 +205,83 @@ class Grid {
     ss << "domainsize=" << domain_size_ << "\n";
     ss << "grid=(" << grid_.first << ")-(" << grid_.second << ")\n";
     ss << "gridsize=" << grid_size_ << "\n";
-    ss << "subdomain=(" << subdomain_.first << ")-(" << subdomain_.second << ")\n";
+    ss << "subdomain=(" << subdomain_.first << ")-(" << subdomain_.second
+       << ")\n";
     ss << "subdomainsize=" << subdomain_size_ << "\n";
     ss << "subgridindex=" << subgrid_index_ << "\n";
     ss << "subgrid=(" << subgrid_.first << ")-(" << subgrid_.second << ")\n";
     ss << "subgridsize=" << subgrid_size_ << "\n";
   }
   //! Whether a cell is in the grid.
-  inline bool Contain(int global_i, int global_j, int global_k) const {
-    return global_i >= subgrid_.first.x &&
-        global_j >= subgrid_.first.y &&
-        global_k >= subgrid_.first.z &&
-        global_i < subgrid_.second.x &&
-        global_j < subgrid_.second.y &&
-        global_k < subgrid_.second.z;
+  inline bool ContainDomain(float cord_x, float cord_y, float cord_z) const {
+    return cord_x >= subdomain_.first.x && cord_y >= subdomain_.first.y &&
+           cord_z >= subdomain_.first.z && cord_x < subdomain_.second.x &&
+           cord_y < subdomain_.second.y && cord_z < subdomain_.second.z;
   }
-
-  inline int GetLocalCellRank(int global_i, int global_j, int global_k) const {
-    return (global_i - subgrid_.first.x) +
-        ((global_j - subgrid_.first.y) +
-         (global_k - subgrid_.first.z) * subgrid_size_.y) * subgrid_size_.x;
+  //! Gets the local cell rank from a global cell cord.
+  inline int GetLocalCellRankDomain(float cord_x, float cord_y,
+                                    float cord_z) const {
+    const int x =
+        std::max(std::min(subgrid_.second.x - 1, (int)(cord_x / cell_size_.x)),
+                 subgrid_.first.x);
+    const int y =
+        std::max(std::min(subgrid_.second.x - 1, (int)(cord_y / cell_size_.y)),
+                 subgrid_.first.y);
+    const int z =
+        std::max(std::min(subgrid_.second.z - 1, (int)(cord_z / cell_size_.z)),
+                 subgrid_.first.z);
+    return GetLocalCellRank(x, y, z);
   }
-  inline int GetGlobalCellRank(int global_i, int global_j, int global_k) const {
-    return global_i + (global_j + global_k * grid_size_.y) * grid_size_.x;
+  //! Whether a cell is in the grid.
+  inline bool Contain(int global_x, int global_y, int global_z) const {
+    return global_x >= subgrid_.first.x && global_y >= subgrid_.first.y &&
+           global_z >= subgrid_.first.z && global_x < subgrid_.second.x &&
+           global_y < subgrid_.second.y && global_z < subgrid_.second.z;
   }
+  //! Gets the local cell rank from a global cell index.
+  inline int GetLocalCellRank(int global_x, int global_y, int global_z) const {
+    return (global_x - subgrid_.first.x) +
+           ((global_y - subgrid_.first.y) +
+            (global_z - subgrid_.first.z) * subgrid_size_.y) *
+               subgrid_size_.x;
+  }
+  //! Gets the global cell rank from a global cell index.
+  inline int GetGlobalCellRank(int global_x, int global_y, int global_z) const {
+    return global_x + (global_y + global_z * grid_size_.y) * grid_size_.x;
+  }
+  //! Transform a global cell rank to a local cell rank.
   inline int GlobalCellRankToLocal(int global_rank) const {
     const auto& global_index = rank_to_index(global_rank, grid_size_);
-    return GetLocalRank(global_index.x, global_index.y, global_index.z);
+    return GetLocalCellRank(global_index.x, global_index.y, global_index.z);
   }
+  //! Gets the neighbor subgrid, and returns true if success.
   bool GetNeighborSubgrid(int dx, int dy, int dz, int ghost_bandwidth,
                           Grid* grid) {
     IntPoint neighbor_index = subgrid_index_;
     neighbor_index.x += dx;
     neighbor_index.y += dy;
     neighbor_index.z += dz;
-    if (neighbor_index.x < 0 ||
-        neighbor_index.y < 0 ||
-        neighbor_index.z < 0 ||
-        neighbor_index.x >= split_.x ||
-        neighbor_index.y >= split_.y ||
+    if (neighbor_index.x < 0 || neighbor_index.y < 0 || neighbor_index.z < 0 ||
+        neighbor_index.x >= split_.x || neighbor_index.y >= split_.y ||
         neighbor_index.z >= split_.z) {
       return false;
     }
     grid->Initialize(domain_, grid_size_, split_,
-                     index_to_rank(neighbor_index, split_),
-                     ghost_bandwidth);
+                     index_to_rank(neighbor_index, split_), ghost_bandwidth);
     return true;
   }
-  int GetSubgridRank() const {
-    return index_to_rank(subgrid_index_, split_);
-  }
-
-  inline int get_sx() const {
-    return subgrid_.first.x;
-  }
-  inline int get_sy() const {
-    return subgrid_.first.y;
-  }
-  inline int get_sz() const {
-    return subgrid_.first.z;
-  }
-  inline int get_ex() const {
-    return subgrid_.second.x;
-  }
-  inline int get_ey() const {
-    return subgrid_.second.y;
-  }
-  inline int get_ez() const {
-    return subgrid_.second.z;
-  }
-  inline int get_count() const {
-    return subgrid_size_.Product();
-  }
+  //! Gets the rank of the subgrid.
+  int GetSubgridRank() const { return index_to_rank(subgrid_index_, split_); }
+  //! Helper functions for accesssing all the cells.
+  inline int get_sx() const { return subgrid_.first.x; }
+  inline int get_sy() const { return subgrid_.first.y; }
+  inline int get_sz() const { return subgrid_.first.z; }
+  inline int get_ex() const { return subgrid_.second.x; }
+  inline int get_ey() const { return subgrid_.second.y; }
+  inline int get_ez() const { return subgrid_.second.z; }
+  inline int get_count() const { return subgrid_size_.Product(); }
+  std::pair<Point, Point> get_domain() const { return domain_; }
+  IntPoint get_grid_size() const { return grid_size_; }
 
  private:
   //! Transforms an index to a rank.
@@ -254,7 +289,7 @@ class Grid {
     return index.x + (index.y + index.z * split.y) * split.x;
   }
   //! Transforms a rank to an index.
-  inline IntPoint rank_to_index(int rank, const IntPoint& split) {
+  inline IntPoint rank_to_index(int rank, const IntPoint& split) const {
     const int x = rank % split.x;
     rank -= x;
     rank /= split.x;
@@ -293,12 +328,11 @@ class Grid {
       subgrid_.first -= ghost_bandwidth_;
       subgrid_.second += ghost_bandwidth_;
       subgrid_size_ = subgrid_.second - subgrid_.first;
-      const auto cell_size = domain_size_ / cast_point<float>(grid_size_);
-      subdomain_.first -= cell_size * ghost_bandwidth_;
-      subdomain_.second += cell_size * ghost_bandwidth_;
+      subdomain_.first -= cell_size_ * ghost_bandwidth_;
+      subdomain_.second += cell_size_ * ghost_bandwidth_;
       subdomain_size_ = subdomain_.second - subdomain_.first;
+      TrimExternalBoundary();
     }
-    TrimExternalBoundary();
   }
   //! Trim out of region cells.
   void TrimExternalBoundary() {
@@ -315,13 +349,15 @@ class Grid {
     subdomain_.second.y = std::min(subdomain_.second.y, domain_.second.y);
     subdomain_.second.z = std::min(subdomain_.second.z, domain_.second.z);
   }
-
+  //! Initialization flag.
   bool initialized_ = false;
   //! Global grid.
   std::pair<Point, Point> domain_;
   Point domain_size_;
   std::pair<IntPoint, IntPoint> grid_;
   IntPoint grid_size_;
+  //! Size of a cell.
+  Point cell_size_;
   //! Partiioning info.
   IntPoint split_;
   int subgrid_rank_;
