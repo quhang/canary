@@ -16,7 +16,6 @@
 #include <utility>
 #include <vector>
 
-#include <cereal/archives/binary.hpp>
 #include <cereal/archives/xml.hpp>
 #include "canary/canary.h"
 
