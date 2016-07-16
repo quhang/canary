@@ -263,7 +263,7 @@ class Grid {
   }
   //! Gets the neighbor subgrid, and returns true if success.
   bool GetNeighborSubgrid(int dx, int dy, int dz, int ghost_bandwidth,
-                          Grid* grid) {
+                          Grid* grid) const {
     IntPoint neighbor_index = subgrid_index_;
     neighbor_index.x += dx;
     neighbor_index.y += dy;
