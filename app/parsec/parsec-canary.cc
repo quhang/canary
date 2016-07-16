@@ -16,22 +16,21 @@
 #include <utility>
 #include <vector>
 
-#include <cereal/archives/binary.hpp>
 #include <cereal/archives/xml.hpp>
 #include "canary/canary.h"
 
-#include "fluid.h"
 #include "cellpool.h"
+#include "fluid.h"
 #include "../grid_helper.h"
 
-static int FLAG_app_partition_x = 1;        // Partitioning in x.
-static int FLAG_app_partition_y = 1;        // Partitioning in y.
-static int FLAG_app_partition_z = 1;        // Partitioning in z.
-static int FLAG_app_fold_x = 1;             // Fold in x.
-static int FLAG_app_fold_y = 1;             // Fold in y.
-static int FLAG_app_fold_z = 1;             // Fold in z.
-static int FLAG_app_fold_depth_y = 1;       // Fold depth in y.
-static int FLAG_app_frames = 10;            // Frames.
+static int FLAG_app_partition_x = 1;   // Partitioning in x.
+static int FLAG_app_partition_y = 1;   // Partitioning in y.
+static int FLAG_app_partition_z = 1;   // Partitioning in z.
+static int FLAG_app_fold_x = 1;        // Fold in x.
+static int FLAG_app_fold_y = 1;        // Fold in y.
+static int FLAG_app_fold_z = 1;        // Fold in z.
+static int FLAG_app_fold_depth_y = 1;  // Fold depth in y.
+static int FLAG_app_frames = 10;       // Frames.
 static std::string FLAG_app_filename =
     "../app/parsec/in_15K.fluid";  // Input file name.
 
@@ -40,7 +39,7 @@ struct GlobalState {
   void serialize(Archive&) {}
 };
 
-/*
+/**
  * Data of a partition
  */
 class PartitionData {
@@ -50,11 +49,83 @@ class PartitionData {
   //! Deallocate the cell pool in the destructor.
   virtual ~PartitionData();
 
+ public:
+  template <typename Archive>
+  void save(Archive& archive) const {  // NOLINT
+    archive(restParticlesPerMeter_, h_, hSq_);
+    archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
+    archive(cells_.size());
+    for (int index = 0; index < (int)cells_.size(); ++index) {
+      SerializeFullCell(archive, index);
+    }
+    archive(exchange_metadata_);
+    archive(local_grid_, ghost_grid_);
+  }
+
+  template <typename Archive>
+  void load(Archive& archive) {  // NOLINT
+    archive(restParticlesPerMeter_, h_, hSq_);
+    archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
+    size_t size_cells;
+    archive(size_cells);
+    cells_.resize(size_cells);
+    cnumPars_.resize(size_cells, 0);
+    last_cells_.resize(size_cells, nullptr);
+    for (int index = 0; index < (int)cells_.size(); ++index) {
+      last_cells_[index] = &cells_[index];
+      DeserializeFullCell(archive, index);
+    }
+    cells2_.resize(size_cells);
+    cnumPars2_.resize(size_cells, 0);
+    archive(exchange_metadata_);
+    archive(local_grid_, ghost_grid_);
+  }
+  //! Gets the number of neighbors.
+  int GetNumNeighbors() const { return exchange_metadata_.size(); }
+
+ public:
+  void InitSim(char const* filename, int split_x, int split_y, int split_z,
+               int subgrid_rank);
+  void InitMetadata();
+  void ClearParticlesMT();
+  void RebuildGridMT();
+  int InitNeighCellList(int ci, int cj, int ck, int* neighCells) const;
+  void ComputeDensitiesMT();
+  void ComputeDensities2MT();
+  void ComputeForcesMT();
+  void ProcessCollisionsMT();
+  void AdvanceParticlesMT();
+  void ProcessCollisions2MT();
+  void DataSwap() {
+    std::swap(cells_, cells2_);
+    std::swap(cnumPars_, cnumPars2_);
+  }
+  float ComputeEnergy();
+
+ public:
+  /*
+   * Serialization related functions.
+   */
+  void SendExchangeGhostCells(std::vector<int>* neighbors,
+                              std::vector<struct evbuffer*>* send_buffer);
+  void RecvExchangeGhostCells(std::vector<struct evbuffer*>* recv_buffer);
+  void SendDensityGhost(std::vector<int>* neighbors,
+                        std::vector<struct evbuffer*>* send_buffer);
+  void RecvDensityGhost(std::vector<struct evbuffer*>* recv_buffer);
+
+ private:
+  template <typename Archive>
+  void SerializeFullCell(Archive& archive, int index) const;
+  template <typename Archive>
+  void DeserializeFullCell(Archive& archive, int index);
+  template <typename Archive>
+  void SerializeDensity(Archive& archive, int index) const;
+  template <typename Archive>
+  void DeserializeDensity(Archive& archive, int index);
+
  private:
   //! Memory pool.
   cellpool local_pool_;
-  //! Energy sum.
-  float energy_sum_ = 0;
   //! Simulation parameters.
   fptype restParticlesPerMeter_ = 0, h_ = 0, hSq_ = 0;
   fptype densityCoeff_ = 0, pressureCoeff_ = 0, viscosityCoeff_ = 0;
@@ -77,83 +148,11 @@ class PartitionData {
   std::map<int, Metadata> exchange_metadata_;
   //! Grid.
   helper::Grid local_grid_, ghost_grid_;
-
- public:
-  template <typename Archive>
-  void save(Archive& archive) const {  // NOLINT
-    archive(energy_sum_);
-    archive(restParticlesPerMeter_, h_, hSq_);
-    archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
-    archive(cells_.size());
-    for (int index = 0; index < (int)cells_.size(); ++index) {
-      SerializeFullCell(archive, index);
-    }
-    archive(exchange_metadata_);
-    archive(local_grid_, ghost_grid_);
-  }
-
-  template <typename Archive>
-  void load(Archive& archive) {  // NOLINT
-    archive(energy_sum_);
-    archive(restParticlesPerMeter_, h_, hSq_);
-    archive(densityCoeff_, pressureCoeff_, viscosityCoeff_);
-    size_t size_cells;
-    archive(size_cells);
-    cells_.resize(size_cells);
-    cnumPars_.resize(size_cells, 0);
-    last_cells_.resize(size_cells, nullptr);
-    for (int index = 0; index < (int)cells_.size(); ++index) {
-      last_cells_[index] = &cells_[index];
-      DeserializeFullCell(archive, index);
-    }
-    cells2_.resize(size_cells);
-    cnumPars2_.resize(size_cells, 0);
-    archive(exchange_metadata_);
-    archive(local_grid_, ghost_grid_);
-  }
-  int GetNumNeighbors() { return exchange_metadata_.size(); }
-
- private:
-  template <typename Archive>
-  void SerializeFullCell(Archive& archive, int index) const;
-  template <typename Archive>
-  void DeserializeFullCell(Archive& archive, int index);
-  template <typename Archive>
-  void SerializeDensity(Archive& archive, int index) const;
-  template <typename Archive>
-  void DeserializeDensity(Archive& archive, int index);
-
- public:
-  void InitSim(char const* fileName, int split_x, int split_y, int split_z,
-               int subgrid_rank);
-  void ClearParticlesMT();
-  void RebuildGridMT();
-  int InitNeighCellList(int ci, int cj, int ck, int* neighCells) const;
-  void ComputeDensitiesMT();
-  void ComputeDensities2MT();
-  void ComputeForcesMT();
-  void ProcessCollisionsMT();
-  void AdvanceParticlesMT();
-  void ProcessCollisions2MT();
-  void DataSwap() {
-    std::swap(cells_, cells2_);
-    std::swap(cnumPars_, cnumPars2_);
-  }
-  float ComputeEnergy();
-
-  void SendExchangeGhostCells(std::vector<int>* neighbors,
-                              std::vector<struct evbuffer*>* send_buffer);
-  void RecvExchangeGhostCells(std::vector<struct evbuffer*>* recv_buffer);
-  void SendDensityGhost(std::vector<int>* neighbors,
-                        std::vector<struct evbuffer*>* send_buffer);
-  void RecvDensityGhost(std::vector<struct evbuffer*>* recv_buffer);
 };
 
 PartitionData::PartitionData() { cellpool_init(&local_pool_, 1000); }
 
-PartitionData::~PartitionData() {
-  cellpool_destroy(&local_pool_);
-}
+PartitionData::~PartitionData() { cellpool_destroy(&local_pool_); }
 
 void PartitionData::InitSim(char const* filename, int split_x, int split_y,
                             int split_z, int subgrid_rank) {
@@ -204,49 +203,7 @@ void PartitionData::InitSim(char const* filename, int split_x, int split_y,
       helper::cast_point<int>(domain_size / h_),  // Grid size.
       {split_x, split_y, split_z}, subgrid_rank, 1);
   // Sets up neighboring data exchanging metadata.
-  {
-    auto& metadata = exchange_metadata_[subgrid_rank];
-    for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
-      for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
-        for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex(); ++ix) {
-          if (!local_grid_.Contain(ix, iy, iz)) {
-            const int global_index = ghost_grid_.GetGlobalCellRank(ix, iy, iz);
-            const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
-            metadata.ghost_to_ghost_indices.emplace_back(global_index, index);
-          }
-        }
-  }
-  for (int di = -1; di <= 1; ++di)
-    for (int dj = -1; dj <= 1; ++dj)
-      for (int dk = -1; dk <= 1; ++dk) {
-        if (di == 0 && dj == 0 && dk == 0) {
-          continue;
-        }
-        helper::Grid neighbor_ghost_grid;
-        if (!ghost_grid_.GetNeighborSubgrid(di, dj, dk, 1,
-                                            &neighbor_ghost_grid)) {
-          continue;
-        }
-        auto& metadata =
-            exchange_metadata_[neighbor_ghost_grid.GetSubgridRank()];
-        for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
-          for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
-            for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex();
-                 ++ix) {
-              const int global_index =
-                  ghost_grid_.GetGlobalCellRank(ix, iy, iz);
-              const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
-              if (neighbor_ghost_grid.Contain(ix, iy, iz)) {
-                if (local_grid_.Contain(ix, iy, iz)) {
-                  metadata.local_to_ghost_indices.emplace_back(global_index,
-                                                               index);
-                } else {
-                  metadata.ghost_to_ghost_indices.emplace_back(global_index,
-                                                               index);
-                }
-              }
-            }
-      }
+  InitMetadata();
   // Makes sure Cell structure is multiple of estiamted cache line size.
   static_assert(sizeof(Cell) % CACHELINE_SIZE == 0, "wrong padding");
   // Makes sure helper Cell structure is in sync with real Cell structure.
@@ -321,6 +278,53 @@ void PartitionData::InitSim(char const* filename, int split_x, int split_y,
           ++cnumPars_[index];
         }
   }
+}
+
+void PartitionData::InitMetadata() {
+  const int subgrid_rank = ghost_grid_.GetSubgridRank();
+  {
+    auto& metadata = exchange_metadata_[subgrid_rank];
+    for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
+      for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
+        for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex(); ++ix) {
+          if (!local_grid_.Contain(ix, iy, iz)) {
+            const int global_index = ghost_grid_.GetGlobalCellRank(ix, iy, iz);
+            const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
+            metadata.ghost_to_ghost_indices.emplace_back(global_index, index);
+          }
+        }
+  }
+  for (int di = -1; di <= 1; ++di)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int dk = -1; dk <= 1; ++dk) {
+        if (di == 0 && dj == 0 && dk == 0) {
+          continue;
+        }
+        helper::Grid neighbor_ghost_grid;
+        if (!ghost_grid_.GetNeighborSubgrid(di, dj, dk, 1,
+                                            &neighbor_ghost_grid)) {
+          continue;
+        }
+        auto& metadata =
+            exchange_metadata_[neighbor_ghost_grid.GetSubgridRank()];
+        for (int iz = ghost_grid_.get_sz(); iz < ghost_grid_.get_ez(); ++iz)
+          for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
+            for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex();
+                 ++ix) {
+              const int global_index =
+                  ghost_grid_.GetGlobalCellRank(ix, iy, iz);
+              const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
+              if (neighbor_ghost_grid.Contain(ix, iy, iz)) {
+                if (local_grid_.Contain(ix, iy, iz)) {
+                  metadata.local_to_ghost_indices.emplace_back(global_index,
+                                                               index);
+                } else {
+                  metadata.ghost_to_ghost_indices.emplace_back(global_index,
+                                                               index);
+                }
+              }
+            }
+      }
 }
 
 /*
@@ -553,7 +557,6 @@ void PartitionData::ComputeForcesMT() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
 // ProcessCollisions() with container walls
 // Under the assumptions that
 // a) a particle will not penetrate a wall
@@ -698,7 +701,6 @@ void PartitionData::ProcessCollisions2MT() {
       }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 
 /**
  * Update positions based on accelerations locally.
@@ -734,7 +736,7 @@ void PartitionData::AdvanceParticlesMT() {
 }
 
 float PartitionData::ComputeEnergy() {
-  energy_sum_ = 0;
+  float energy_sum = 0;
   for (int iz = local_grid_.get_sz(); iz < local_grid_.get_ez(); ++iz)
     for (int iy = local_grid_.get_sy(); iy < local_grid_.get_ey(); ++iy)
       for (int ix = local_grid_.get_sx(); ix < local_grid_.get_ex(); ++ix) {
@@ -742,7 +744,9 @@ float PartitionData::ComputeEnergy() {
         Cell* cell = &cells_[index];
         int np = cnumPars_[index];
         for (int j = 0; j < np; ++j) {
-          energy_sum_ += cell->v[j % PARTICLES_PER_CELL].GetLengthSq();
+          energy_sum +=
+              cell->density[j % PARTICLES_PER_CELL] *
+              cell->v[j % PARTICLES_PER_CELL].GetLength();
 
           // move pointer to next cell in list if end of array is reached
           if (j % PARTICLES_PER_CELL == PARTICLES_PER_CELL - 1) {
@@ -750,7 +754,7 @@ float PartitionData::ComputeEnergy() {
           }
         }
       }
-  return energy_sum_;
+  return energy_sum;
 }
 
 /*
@@ -885,7 +889,7 @@ void PartitionData::SendDensityGhost(
     {
       ::canary::CanaryOutputArchive oarchive(buffer);
       oarchive(metadata.local_to_ghost_indices.size());
-      for (auto& inpair: metadata.local_to_ghost_indices) {
+      for (auto& inpair : metadata.local_to_ghost_indices) {
         oarchive(inpair.first);
         SerializeDensity(oarchive, inpair.second);
       }
@@ -928,10 +932,11 @@ void PartitionData::RecvDensityGhost(
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 namespace canary {
 
+/**
+ * Parsec application.
+ */
 class ParsecApplication : public CanaryApplication {
  public:
   // The program.
