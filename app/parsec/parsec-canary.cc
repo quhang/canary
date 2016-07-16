@@ -100,7 +100,7 @@ class PartitionData {
     std::swap(cells_, cells2_);
     std::swap(cnumPars_, cnumPars2_);
   }
-  float ComputeEnergy();
+  float ComputeEnergy() const;
 
  public:
   /*
@@ -735,13 +735,13 @@ void PartitionData::AdvanceParticlesMT() {
       }
 }
 
-float PartitionData::ComputeEnergy() {
+float PartitionData::ComputeEnergy() const {
   float energy_sum = 0;
   for (int iz = local_grid_.get_sz(); iz < local_grid_.get_ez(); ++iz)
     for (int iy = local_grid_.get_sy(); iy < local_grid_.get_ey(); ++iy)
       for (int ix = local_grid_.get_sx(); ix < local_grid_.get_ex(); ++ix) {
         int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
-        Cell* cell = &cells_[index];
+        const Cell* cell = &cells_[index];
         int np = cnumPars_[index];
         for (int j = 0; j < np; ++j) {
           energy_sum +=
@@ -1054,10 +1054,10 @@ class ParsecApplication : public CanaryApplication {
 
     EndLoop();
 
-    WriteAccess(d_partition);
+    ReadAccess(d_partition);
     Scatter([=](CanaryTaskContext* task_context) {
-      auto partition = task_context->WriteVariable(d_partition);
-      task_context->Scatter(0, partition->ComputeEnergy());
+      const auto& partition = task_context->ReadVariable(d_partition);
+      task_context->Scatter(0, partition.ComputeEnergy());
     });
 
     WriteAccess(d_global);

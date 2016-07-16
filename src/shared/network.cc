@@ -204,11 +204,17 @@ int allocate_and_connect_socket(const std::string& host,
 }
 
 EventMainThread::EventMainThread() {
+  struct timeval sec_zero {
+    0, 0
+  };
+  struct timeval sec_one {
+    1, 0
+  };
   event_base_ = CHECK_NOTNULL(event_base_new());
-  zero_timeval_ = CHECK_NOTNULL(
-      event_base_init_common_timeout(event_base_, new timeval{0, 0}));
-  delay_timeval_ = CHECK_NOTNULL(
-      event_base_init_common_timeout(event_base_, new timeval{1, 0}));
+  zero_timeval_ =
+      CHECK_NOTNULL(event_base_init_common_timeout(event_base_, &sec_zero));
+  delay_timeval_ =
+      CHECK_NOTNULL(event_base_init_common_timeout(event_base_, &sec_one));
 }
 EventMainThread::~EventMainThread() { event_base_free(event_base_); }
 
