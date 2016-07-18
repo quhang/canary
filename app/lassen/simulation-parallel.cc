@@ -158,7 +158,7 @@ void SimulationParallel::constructFacetToDomain(
 ////////////////////////////////////////////////////////////////////////////////
 void SimulationParallel::nodeCommunicationCreateMsg(
     const std::vector<int> &communicatingNodes,
-    std::vector<GlobalID> &sendBuffer) {
+    std::vector<GlobalID> &sendBuffer) const {
   sendBuffer.resize(communicatingNodes.size());
   for (size_t i = 0; i < communicatingNodes.size(); ++i) {
     int nodeIndex = communicatingNodes[i];
@@ -205,7 +205,7 @@ void SimulationParallel::nodeCommunicationComplete(
 
 ////////////////////////////////////////////////////////////////////////////////
 void SimulationParallel::gatherNodeData(
-    std::vector<std::vector<NodeData> > &sendBuffer) {
+    std::vector<std::vector<NodeData> > &sendBuffer) const {
   for (size_t i = 0; i < narrowBandNodes.size(); ++i) {
     int nodeIndex = narrowBandNodes[i];
     int startDomain = nodeToDomainOffset[nodeIndex];

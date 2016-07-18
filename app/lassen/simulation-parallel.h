@@ -4,8 +4,6 @@
 #include "simulation.h"
 #include "lassen.h"
 
-#include "shared/internal.h"
-
 namespace Lassen {
 
 // forward declare
@@ -44,14 +42,14 @@ class SimulationParallel : public Simulation {
 
  protected:
   void nodeCommunicationCreateMsg(const std::vector<int> &communicatingNodes,
-                                  std::vector<GlobalID> &sendBuffer);
+                                  std::vector<GlobalID> &sendBuffer) const;
   void nodeCommunicationProcessMsg(
       int neighborIndex, const std::vector<GlobalID> &buffer,
       std::vector<std::pair<int, int> > &nodeToDomainPair);
   void nodeCommunicationComplete(
       std::vector<std::pair<int, int> > &nodeToDomainPair);
 
-  void gatherNodeData(std::vector<std::vector<NodeData> > &sendBuffer);
+  void gatherNodeData(std::vector<std::vector<NodeData> > &sendBuffer) const;
   void accumulateNodeData(const std::vector<NodeData> &recvBuffer);
 
  public:
@@ -71,13 +69,13 @@ class SimulationParallel : public Simulation {
 // Used in the synchronizeNodeData algorithm
 struct NodeData {
   NodeData() {}
-  NodeData(GlobalID globalID, Real level, Real timeReached, Real velocity,
-           const Point &imagePoint)
-      : globalID(globalID),
-        level(level),
-        timeReached(timeReached),
-        velocity(velocity),
-        imagePoint(imagePoint) {}
+  NodeData(GlobalID iglobalID, Real ilevel, Real itimeReached, Real ivelocity,
+           const Point &iimagePoint)
+      : globalID(iglobalID),
+        level(ilevel),
+        timeReached(itimeReached),
+        velocity(ivelocity),
+        imagePoint(iimagePoint) {}
 
   GlobalID globalID;
   Real level;
