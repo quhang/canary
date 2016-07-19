@@ -44,8 +44,8 @@
 #include <set>
 #include <utility>
 
-#include "shared/canary_internal.h"
 #include "shared/canary_application.h"
+#include "shared/canary_internal.h"
 
 namespace canary {
 

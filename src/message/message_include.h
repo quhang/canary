@@ -40,9 +40,9 @@
 #ifndef CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
 #define CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_
 
-#include "message/data_plane_control_message.h"
 #include "message/command_message.h"
 #include "message/data_message.h"
+#include "message/data_plane_control_message.h"
 #include "message/launch_message.h"
 
 #endif  // CANARY_SRC_MESSAGE_MESSAGE_INCLUDE_H_

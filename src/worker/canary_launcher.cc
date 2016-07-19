@@ -37,10 +37,10 @@
  * @brief Class CanaryLauncher.
  */
 
-#include <cereal/archives/xml.hpp>
 #include <algorithm>
-#include <iterator>
+#include <cereal/archives/xml.hpp>  // NOLINT
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 

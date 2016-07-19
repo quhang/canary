@@ -50,8 +50,8 @@
 
 #include "controller/controller_communication_interface.h"
 #include "message/message_include.h"
-#include "shared/partition_map.h"
 #include "shared/network.h"
+#include "shared/partition_map.h"
 
 namespace canary {
 

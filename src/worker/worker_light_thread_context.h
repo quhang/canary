@@ -47,8 +47,8 @@
 
 #include "shared/canary_application.h"
 #include "worker/canary_task_context.h"
-#include "worker/worker_communication_interface.h"
 #include "worker/stage_graph.h"
+#include "worker/worker_communication_interface.h"
 
 namespace canary {
 

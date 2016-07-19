@@ -41,13 +41,13 @@
 #define CANARY_SRC_MESSAGE_DATA_PLANE_CONTROL_MESSAGE_H_
 
 #include <map>
-#include <utility>
 #include <string>
+#include <utility>
 
 #include "shared/canary_internal.h"
 
-#include "shared/partition_map.h"
 #include "message/message.h"
+#include "shared/partition_map.h"
 
 namespace canary {
 namespace message {
