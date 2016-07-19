@@ -68,6 +68,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
     ApplicationId application_id = ApplicationId::INVALID;
     std::string binary_location;
     std::string application_parameter;
+    StageId first_barrier_stage = StageId::INVALID;
     int local_partitions = 0;
     void* loading_handle = nullptr;
     CanaryApplication* loaded_application = nullptr;
@@ -124,9 +125,6 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Asks a partition to report status.
   void ProcessReportStatusOfPartitions(
       const message::WorkerReportStatusOfPartitions& worker_command);
-  //! TODO(quhang): not implemented.
-  void ProcessControlPartitions(
-      const message::WorkerControlPartitions& worker_command);
 
  protected:
   /*

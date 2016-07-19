@@ -58,6 +58,11 @@ struct RunningStats;
 }  // namespace message
 
 /**
+ * These messages are for internal command communication.
+ */
+namespace internal_message {}  // namespace internal_message
+
+/**
  * The execution context of a lightweight thread, which is responsible for
  * execution of a partition. This base class stores basic metadata, and includes
  * logic to handle command and data delivery.
@@ -187,7 +192,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   //! Builds running status.
   void BuildStats(message::RunningStats* running_stats);
   //! Processes an initialization command.
-  void ProcessInitCommand();
+  void ProcessInitCommand(struct evbuffer* command);
   //! Processes a control flow decision.
   void ProcessControlFlowDecision(struct evbuffer* command);
   //! Processes a command that requests running stats.

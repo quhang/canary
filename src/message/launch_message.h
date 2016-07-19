@@ -52,11 +52,12 @@ struct LaunchApplication {
   std::string binary_location;
   std::string application_parameter;
   int fix_num_worker = -1;
+  int first_barrier_stage = -1;
 
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(binary_location, application_parameter);
-    archive(fix_num_worker);
+    archive(fix_num_worker, first_barrier_stage);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);

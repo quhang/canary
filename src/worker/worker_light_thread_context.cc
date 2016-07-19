@@ -185,8 +185,7 @@ void WorkerExecutionContext::Run() {
   while (RetrieveCommand(&command_stage_id, &command)) {
     switch (command_stage_id) {
       case StageId::INIT:
-        CHECK(command == nullptr);
-        ProcessInitCommand();
+        ProcessInitCommand(command);
         break;
       case StageId::CONTROL_FLOW_DECISION:
         ProcessControlFlowDecision(command);
@@ -194,6 +193,18 @@ void WorkerExecutionContext::Run() {
       case StageId::REQUEST_REPORT:
         CHECK(command == nullptr);
         ProcessRequestReport();
+        break;
+      case StageId::PAUSE_EXECUTION:
+        // TODO
+        LOG(FATAL) << "Not implemented.";
+        break;
+      case StageId::INSTALL_BARRIER:
+        // TODO
+        LOG(FATAL) << "Not implemented.";
+        break;
+      case StageId::RELEASE_BARRIER:
+        CHECK(command == nullptr);
+        stage_graph_.ReleaseBarrier();
         break;
       default:
         LOG(FATAL) << "Unknown command stage id!";
@@ -222,6 +233,9 @@ void WorkerExecutionContext::Run() {
       get_send_command_interface()->SendCommandToController(
           message::SerializeMessageWithControlHeader(report));
       break;
+    } else if (stage_id == StageId::REACH_BARRIER) {
+      // TODO(quhang): responds to the controller.
+      break;
     } else if (stage_id == StageId::INVALID) {
       break;
     } else {
@@ -239,9 +253,18 @@ void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
   stage_graph_.retrieve_cycle_stats(&running_stats->cycle_stats);
 }
 
-void WorkerExecutionContext::ProcessInitCommand() {
+void WorkerExecutionContext::ProcessInitCommand(struct evbuffer* command) {
   // Caution: initialization generates the initial task graph.
   stage_graph_.Initialize(get_variable_group_id(), get_partition_id());
+  StageId first_barrier_stage;
+  {
+    CanaryInputArchive archive(command);
+    archive(first_barrier_stage);
+    evbuffer_free(command);
+  }
+  if (first_barrier_stage != StageId::INVALID) {
+    stage_graph_.InsertBarrier(first_barrier_stage);
+  }
   AllocatePartitionData();
 }
 

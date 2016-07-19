@@ -82,9 +82,11 @@ struct WorkerLoadApplication {
   ApplicationId application_id;
   std::string binary_location;
   std::string application_parameter;
+  StageId first_barrier_stage;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, binary_location, application_parameter);
+    archive(application_id, binary_location, application_parameter,
+            first_barrier_stage);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_APPLICATION,
@@ -171,17 +173,39 @@ struct WorkerReportStatusOfPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
 
-//! Controls the behavior of partitions.
-struct WorkerControlPartitions {
+/*
+ * Progress control.
+ */
+//! Asks a worker to pause the execution of corresponding partitions.
+struct WorkerPauseExecution {
   std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
-  StageId next_barrier_stage;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(control_partitions, next_barrier_stage);
+    archive(control_partitions);
   }
 };
-REGISTER_MESSAGE(WORKER_COMMAND, WORKER_CONTROL_PARTITIONS,
-                 WorkerControlPartitions);
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_PAUSE_EXECUTION, WorkerPauseExecution);
+
+//! Asks a worker to installs a barrier on corresponding partitions.
+struct WorkerInstallBarrier {
+  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  StageId barrier_stage;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(control_partitions, barrier_stage);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_INSTALL_BARRIER, WorkerInstallBarrier);
+
+//! Asks a worker to release the barrier of corresponding partitions.
+struct WorkerReleaseBarrier {
+  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(control_partitions);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_RELEASE_BARRIER, WorkerReleaseBarrier);
 
 /*
  * Worker to controller commands.
@@ -300,6 +324,41 @@ struct ControllerRespondStatusOfWorker {
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_WORKER,
                  ControllerRespondStatusOfWorker);
+
+//! Responds when the execution of a partition is paused.
+struct ControllerRespondPauseExecution {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  RunningStats running_stats;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+    archive(running_stats);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_PAUSE_EXECUTION,
+                 ControllerRespondPauseExecution);
+
+//! Responds when a barrier is reached.
+struct ControllerRespondReachBarrier {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  RunningStats running_stats;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id);
+    archive(application_id, variable_group_id, partition_id);
+    archive(running_stats);
+  }
+};
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_REACH_BARRIER,
+                 ControllerRespondReachBarrier);
+
 }  // namespace message
 }  // namespace canary
 #endif  // CANARY_SRC_MESSAGE_COMMAND_MESSAGE_H_

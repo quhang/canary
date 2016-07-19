@@ -103,6 +103,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
   struct ApplicationRecord {
     std::string binary_location;
     std::string application_parameter;
+    StageId first_barrier_stage = StageId::INVALID;
     void* loading_handle = nullptr;
     CanaryApplication* loaded_application = nullptr;
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =

@@ -52,6 +52,7 @@
 
 DEFINE_string(launch_binary, "", "Application binary location.");
 DEFINE_int32(launch_num_worker, -1, "Specify the number of worker.");
+DEFINE_int32(launch_first_barrier, -1, "Specify the first barrier stage.");
 
 namespace {
 void SendLaunchMessage(struct evbuffer* buffer) {
@@ -102,6 +103,7 @@ int main(int argc, char** argv) {
   launch_application.binary_location = FLAGS_launch_binary;
   launch_application.application_parameter = ss.str();
   launch_application.fix_num_worker = FLAGS_launch_num_worker;
+  launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
   SendLaunchMessage(
       message::SerializeMessageWithControlHeader(launch_application));
   return 0;

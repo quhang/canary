@@ -229,6 +229,10 @@ void ControllerScheduler::FillInApplicationLaunchInfo(
   application_record->binary_location = launch_message.binary_location;
   application_record->application_parameter =
       launch_message.application_parameter;
+  application_record->first_barrier_stage =
+      launch_message.first_barrier_stage >= 0
+          ? StageId(launch_message.first_barrier_stage)
+          : StageId::INVALID;
   application_record->loaded_application = CanaryApplication::LoadApplication(
       launch_message.binary_location, launch_message.application_parameter,
       &application_record->loading_handle);
@@ -308,6 +312,8 @@ void ControllerScheduler::RequestLoadApplicationOnAllWorkers(
   load_application_command.binary_location = application_record.binary_location;
   load_application_command.application_parameter =
       application_record.application_parameter;
+  load_application_command.first_barrier_stage =
+      application_record.first_barrier_stage;
   for (auto& pair : worker_map_) {
     send_command_interface_->SendCommandToWorker(
         pair.first,

@@ -111,7 +111,6 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS, ProcessMigrateOutPartitions);
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
-    PROCESS_MESSAGE(WORKER_CONTROL_PARTITIONS, ProcessControlPartitions);
     default:
       LOG(FATAL) << "Unexpected message category!";
   }
@@ -139,6 +138,7 @@ void WorkerSchedulerBase::ProcessLoadApplication(
   application_record.binary_location = worker_command.binary_location;
   application_record.application_parameter =
       worker_command.application_parameter;
+  application_record.first_barrier_stage = worker_command.first_barrier_stage;
   application_record.local_partitions = 0;
   LoadApplicationBinary(&application_record);
 }
@@ -183,7 +183,14 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     // Initializes the thread context.
     thread_context->Initialize();
     thread_map_[full_partition_id] = thread_context;
-    thread_context->DeliverMessage(StageId::INIT, nullptr);
+    {
+      struct evbuffer* command = evbuffer_new();
+      {
+        CanaryOutputArchive archive(command);
+        archive(application_record_map_.at(application_id).first_barrier_stage);
+      }
+      thread_context->DeliverMessage(StageId::INIT, command);
+    }
     // Refreshes the routing such that pending messages for this partition can
     // be delived.
     send_data_interface_->RefreshRouting();
@@ -224,11 +231,6 @@ void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     CHECK(iter != thread_map_.end()) << "Status report unavailable!";
     iter->second->DeliverMessage(StageId::REQUEST_REPORT, nullptr);
   }
-}
-
-void WorkerSchedulerBase::ProcessControlPartitions(
-    const message::WorkerControlPartitions& worker_command) {
-  LOG(FATAL) << "WORKER_CONTROL_PARTITIONS";
 }
 
 void WorkerSchedulerBase::ActivateThreadContext(

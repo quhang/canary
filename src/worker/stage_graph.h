@@ -136,9 +136,19 @@ class StageGraph {
             no_more_statement_to_spawn_);
     archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
             spawned_loops_);
+    archive(next_barrier_stage_id_, barrier_ready_stage_queue_);
   }
+  /*
+   * Controls barrier bahavior.
+   */
+  bool InsertBarrier(StageId stage_id);
+  void ReleaseBarrier();
 
  private:
+  //! Whether a stage needs to be blocked.
+  bool IsBlockedStage(StageId stage_id);
+  //! Whether the barrier has been reached.
+  bool HaveReachedBarrierStage();
   //! Updates cycle stats.
   void UpdateCycleStats(StageId stage_id, StatementId statement_id,
                         double cycles);
@@ -189,6 +199,10 @@ class StageGraph {
   StageId last_finished_stage_id_ = StageId::INVALID;
   std::map<StageId, std::pair<StatementId, double>> timestamp_storage_;
   std::map<StageId, std::pair<StatementId, double>> cycle_storage_;
+
+  //! Barrier states.
+  StageId next_barrier_stage_id_ = StageId::INVALID;
+  std::set<StageId> barrier_ready_stage_queue_;
 };
 
 }  // namespace canary

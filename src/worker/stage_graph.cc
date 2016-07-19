@@ -54,6 +54,8 @@ void StageGraph::Initialize(VariableGroupId self_variable_group_id,
 
 void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
                                double cycles) {
+  CHECK(!IsBlockedStage(complete_stage_id))
+      << "Internal error when implementing a barrier!";
   VLOG(1) << "Complete stage " << get_value(complete_stage_id);
   auto iter = uncomplete_stage_map_.find(complete_stage_id);
   CHECK(iter != uncomplete_stage_map_.end());
@@ -89,7 +91,11 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
   for (auto after_stage : stage_record.after_set) {
     if (--uncomplete_stage_map_.at(after_stage).before_set_size == 0) {
       VLOG(1) << "Triggers stage " << get_value(after_stage);
-      ready_stage_queue_.insert(after_stage);
+      if (IsBlockedStage(after_stage)) {
+        barrier_ready_stage_queue_.insert(after_stage);
+      } else {
+        ready_stage_queue_.insert(after_stage);
+      }
     }
   }
   // Removes the stage.
@@ -107,7 +113,9 @@ std::pair<StageId, StatementId> StageGraph::GetNextReadyStage() {
         result_stage_id,
         uncomplete_stage_map_.at(result_stage_id).statement_id);
   } else {
-    if (no_more_statement_to_spawn_ && uncomplete_stage_map_.empty()) {
+    if (HaveReachedBarrierStage()) {
+      return std::make_pair(StageId::REACH_BARRIER, StatementId::INVALID);
+    } else if (no_more_statement_to_spawn_ && uncomplete_stage_map_.empty()) {
       return std::make_pair(StageId::COMPLETE, StatementId::INVALID);
     } else {
       return std::make_pair(StageId::INVALID, StatementId::INVALID);
@@ -121,6 +129,79 @@ void StageGraph::FeedControlFlowDecision(StageId stage_id,
         received_control_flow_decisions_.end());
   received_control_flow_decisions_[stage_id] = control_decision;
   SpawnLocalStages();
+}
+
+bool StageGraph::InsertBarrier(StageId stage_id) {
+  CHECK(stage_id >= StageId::FIRST);
+  CHECK(next_barrier_stage_id_ == StageId::INVALID)
+      << "Barriers cannot be nested!";
+  next_barrier_stage_id_ = stage_id;
+  CHECK(last_finished_stage_id_ <= stage_id)
+      << "Invalid barrier: the execution already passed the barrier stage!";
+  CHECK(barrier_ready_stage_queue_.empty());
+  auto iter = ready_stage_queue_.begin();
+  while (iter != ready_stage_queue_.end()) {
+    if (IsBlockedStage(*iter)) {
+      barrier_ready_stage_queue_.insert(*iter);
+      iter = ready_stage_queue_.erase(iter);
+    } else {
+      ++iter;
+    }
+  }
+  return true;
+}
+
+void StageGraph::ReleaseBarrier() {
+  CHECK(next_barrier_stage_id_ != StageId::INVALID) << "No barrier to release.";
+  next_barrier_stage_id_ = StageId::INVALID;
+  ready_stage_queue_.insert(barrier_ready_stage_queue_.begin(),
+                            barrier_ready_stage_queue_.end());
+  barrier_ready_stage_queue_.clear();
+}
+
+bool StageGraph::IsBlockedStage(StageId stage_id) {
+  if (next_barrier_stage_id_ == StageId::INVALID) {
+    return false;
+  }
+  if (stage_id == get_next(next_barrier_stage_id_)) {
+    auto statement_id = uncomplete_stage_map_.at(stage_id).statement_id;
+    if (statement_info_map_->at(statement_id).statement_type ==
+        CanaryApplication::StatementType::GATHER) {
+      // The next gathering stage is not blocked.
+      return false;
+    } else {
+      return true;
+    }
+  }
+  return stage_id > next_barrier_stage_id_;
+}
+
+bool StageGraph::HaveReachedBarrierStage() {
+  if (next_barrier_stage_id_ == StageId::INVALID) {
+    return false;
+  }
+  // If the barrier stage or its following stage has not been spawned, the
+  // barrier is not reached.
+  if (next_stage_to_spawn_ <= get_next(next_barrier_stage_id_)) {
+    return false;
+  }
+  if (uncomplete_stage_map_.empty()) {
+    return true;
+  }
+  StageId unfinished_stage_id = uncomplete_stage_map_.begin()->first;
+  if (unfinished_stage_id == get_next(next_barrier_stage_id_)) {
+    auto statement_id =
+        uncomplete_stage_map_.at(unfinished_stage_id).statement_id;
+    if (statement_info_map_->at(statement_id).statement_type ==
+        CanaryApplication::StatementType::GATHER) {
+      // The next gathering stage has to be finished so that the barrier is
+      // reached.
+      return false;
+    } else {
+      return true;
+    }
+  }
+  return unfinished_stage_id > next_barrier_stage_id_;
 }
 
 void StageGraph::UpdateCycleStats(StageId stage_id, StatementId statement_id,
@@ -272,7 +353,11 @@ void StageGraph::SpawnStageFromStatement(
   }
   if (stage_record.before_set_size == 0) {
     VLOG(1) << "Self triggers " << get_value(stage_id);
-    ready_stage_queue_.insert(stage_id);
+    if (IsBlockedStage(stage_id)) {
+      barrier_ready_stage_queue_.insert(stage_id);
+    } else {
+      ready_stage_queue_.insert(stage_id);
+    }
   }
 }
 
