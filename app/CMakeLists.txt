@@ -1,5 +1,6 @@
-add_subdirectory(parsec)
+add_subdirectory(kmean_loop)
+add_subdirectory(lassen)
 add_subdirectory(logistic_loop)
 add_subdirectory(logistic_while)
-add_subdirectory(kmean_loop)
+add_subdirectory(parsec)
 add_subdirectory(stencil)

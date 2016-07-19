@@ -6,8 +6,6 @@
 #include "lassen-util.h"
 #include <algorithm>
 
-#include "shared/internal.h"
-
 namespace Lassen {
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -31,7 +29,7 @@ class Point {
  public:
   Point() : x(0.0), y(0.0), z(0.0) {}
 
-  Point(Real x, Real y, Real z = 0.0) : x(x), y(y), z(z) {}
+  Point(Real ix, Real iy, Real iz = 0.0) : x(ix), y(iy), z(iz) {}
 
   Point(const Point &a, const Point &b, Real ratio) {
     x = (1.0 - ratio) * a.x + ratio * b.x;
@@ -68,7 +66,7 @@ class Vector {
   Vector() : x(0), y(0), z(0) {}
   Vector(const Point &a, const Point &b)
       : x(b.x - a.x), y(b.y - a.y), z(b.z - a.z) {}
-  Vector(Real x, Real y, Real z = 0.0) : x(x), y(y), z(z) {}
+  Vector(Real ix, Real iy, Real iz = 0.0) : x(ix), y(iy), z(iz) {}
   Real length() { return std::sqrt(length2()); }
   Real length2() { return x * x + y * y + z * z; }
   void normalize() {

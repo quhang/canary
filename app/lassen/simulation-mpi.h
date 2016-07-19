@@ -5,8 +5,6 @@
 #include "simulation-parallel.h"
 #include "lassen.h"
 
-#include "shared/internal.h"
-
 namespace Lassen {
 
 class SimulationMPI : public SimulationParallel {
@@ -44,7 +42,7 @@ class SimulationMPI : public SimulationParallel {
   void functionComputeNextTimeStep() { computeNextTimeStep(); }
   void functionComputeTimeIntegral() { computeTimeIntegral(); }
 
-  void functionSendSyncExtreme(double input[4]) {
+  void functionSendSyncExtreme(double input[4]) const {
     input[0] = minVelocity;
     input[1] = -maxVelocity;
     input[2] = minEdgeSize;
@@ -58,30 +56,31 @@ class SimulationMPI : public SimulationParallel {
   }
 
   void functionSendInitializeNodeCommunication(
-      std::vector<GlobalID>& sendBuffer);
+      std::vector<GlobalID>& sendBuffer) const;
   void functionRecvInitializeNodeCommunication(
       const std::vector<std::vector<GlobalID> >& recvBuffer);
 
-  void functionSendFirstInitializeFacetCommunication(BoundingBox& boundingBox);
+  void functionSendFirstInitializeFacetCommunication(BoundingBox& boundingBox)
+      const;
   void functionRecvFirstInitializeFacetCommunication(
       const std::vector<BoundingBox> allBoundingBox);
 
   void functionSendSecondInitializeFacetCommunication(
-      std::vector<Point>& sendBuffer);
+      std::vector<Point>& sendBuffer) const;
   void functionRecvSecondInitializeFacetCommunication(
       const std::vector<std::vector<Point> >& recvBuffer);
 
-  void functionSendThirdInitializeFacetCommunication();
+  void functionSendThirdInitializeFacetCommunication() const;
   void functionRecvThirdInitializeFacetCommunication(
       const std::vector<int>& recvIsFacetNeighbor);
 
   void functionSendCommunicateFront(
-      std::vector<std::vector<Real> >& sendBuffer);
+      std::vector<std::vector<Real> >& sendBuffer) const;
   void functionRecvCommunicateFront(
       const std::vector<std::vector<Real> >& recvBuffer);
 
   void functionSendSynchronizeNodeData(
-      std::vector<std::vector<NodeData> >& sendBuffer);
+      std::vector<std::vector<NodeData> >& sendBuffer) const;
   void functionRecvSynchronizeNodeData(
       const std::vector<std::vector<NodeData> >& recvBuffer);
 
@@ -100,8 +99,22 @@ class SimulationMPI : public SimulationParallel {
   }
 
  public:
-  void save(::canary::OutputArchive& archive) const;  // NOLINT
-  void load(::canary::InputArchive& archive);  // NOLINT
+  template <typename Archive>
+  void serialize(Archive& archive) {
+    archive(metadata);
+    archive(*domain);
+    archive(sources);
+    archive(stepState);
+    archive(boundaryNodes, communicatingNodes);
+    archive(allBoundingBox, overlapDomains, isFacetNeighbor, facetToDomainPair);
+    archive(narrowBandNodes, nodeState, nodeTimeReached, nodeLevel,
+            nodeImagePoint, nodeImageVelocity, zoneVelocity);
+    archive(minVelocity, maxVelocity, minEdgeSize, narrowBandWidth, dt, time,
+            cycle, sourcesComplete, numNodesUnreached);
+    archive(computeError);
+    archive(nodeToDomainOffset, nodeToDomain, facetToDomainOffset, facetToDomain,
+            facetNeighbors);
+  }
 };
 };
 

@@ -6,7 +6,7 @@ namespace Lassen {
 SimulationMPI::SimulationMPI() : SimulationParallel() {}
 
 void SimulationMPI::functionSendInitializeNodeCommunication(
-    std::vector<GlobalID> &sendBuffer) {
+    std::vector<GlobalID> &sendBuffer) const {
   sendBuffer.resize(communicatingNodes.size());
   nodeCommunicationCreateMsg(communicatingNodes, sendBuffer);
 }
@@ -26,18 +26,18 @@ void SimulationMPI::functionRecvInitializeNodeCommunication(
 }
 
 void SimulationMPI::functionSendFirstInitializeFacetCommunication(
-    BoundingBox &boundingBox) {
+    BoundingBox &boundingBox) const {
   computeBoundingBox(mesh->nodePoint, mesh->nLocalNodes, boundingBox);
 }
 
 void SimulationMPI::functionRecvFirstInitializeFacetCommunication(
-    const std::vector<BoundingBox> allBoundingBox) {
-  findBoundingBoxIntersections(domain->domainID, allBoundingBox,
+    const std::vector<BoundingBox> inAllBoundingBox) {
+  findBoundingBoxIntersections(domain->domainID, inAllBoundingBox,
                                this->getNarrowBandWidth(), overlapDomains);
 }
 
 void SimulationMPI::functionSendSecondInitializeFacetCommunication(
-    std::vector<Point> &sendBuffer) {
+    std::vector<Point> &sendBuffer) const {
   for (size_t i = 0; i < boundaryNodes.size(); ++i) {
     int nodeIndex = boundaryNodes[i];
     sendBuffer[i] = mesh->nodePoint[nodeIndex];
@@ -68,7 +68,7 @@ void SimulationMPI::functionRecvSecondInitializeFacetCommunication(
   }
 }
 
-void SimulationMPI::functionSendThirdInitializeFacetCommunication() {}
+void SimulationMPI::functionSendThirdInitializeFacetCommunication() const {}
 
 void SimulationMPI::functionRecvThirdInitializeFacetCommunication(
     const std::vector<int> &recvIsFacetNeighbor) {
@@ -95,10 +95,10 @@ void SimulationMPI::functionRecvThirdInitializeFacetCommunication(
 ////////////////////////////////////////////////////////////////////////////////
 
 void SimulationMPI::functionSendCommunicateFront(
-    std::vector<std::vector<Real> > &sendBuffer) {
+    std::vector<std::vector<Real> > &sendBuffer) const {
   // send/recv the facets of the front.
   sendBuffer.resize(facetNeighbors.size());
-  PlanarFront &planarFront = stepState.planarFront;
+  const PlanarFront &planarFront = stepState.planarFront;
 
   // determine which facets need to be sent, and to which domain.
   // FIXME: is it better to communicate the facet center, or to recompute from
@@ -133,7 +133,7 @@ void SimulationMPI::functionRecvCommunicateFront(
 }
 
 void SimulationMPI::functionSendSynchronizeNodeData(
-    std::vector<std::vector<NodeData> > &sendBuffer) {
+    std::vector<std::vector<NodeData> > &sendBuffer) const {
   sendBuffer.resize(domain->neighborDomains.size());
   gatherNodeData(sendBuffer);
 }
@@ -190,37 +190,6 @@ void SimulationMPI::unpackFacet(const std::vector<Real> &buffer,
     planarFront.addFacet(-1, nVertex, &p[0], center, vel);
   }
   assert(index == buffer.size());
-}
-
-void SimulationMPI::save(::canary::OutputArchive& archive) const {  // NOLINT
-  archive(metadata);
-  archive(*domain);
-  archive(sources);
-  archive(stepState);
-  archive(boundaryNodes, communicatingNodes);
-  archive(allBoundingBox, overlapDomains, isFacetNeighbor, facetToDomainPair);
-  archive(narrowBandNodes, nodeState, nodeTimeReached, nodeLevel,
-          nodeImagePoint, nodeImageVelocity, zoneVelocity);
-  archive(minVelocity, maxVelocity, minEdgeSize, narrowBandWidth, dt, time,
-          cycle, sourcesComplete, numNodesUnreached);
-  archive(computeError);
-  archive(nodeToDomainOffset, nodeToDomain, facetToDomainOffset, facetToDomain,
-          facetNeighbors);
-}
-void SimulationMPI::load(::canary::InputArchive& archive) {  // NOLINT
-  archive(metadata);
-  archive(*domain);
-  archive(sources);
-  archive(stepState);
-  archive(boundaryNodes, communicatingNodes);
-  archive(allBoundingBox, overlapDomains, isFacetNeighbor, facetToDomainPair);
-  archive(narrowBandNodes, nodeState, nodeTimeReached, nodeLevel,
-          nodeImagePoint, nodeImageVelocity, zoneVelocity);
-  archive(minVelocity, maxVelocity, minEdgeSize, narrowBandWidth, dt, time,
-          cycle, sourcesComplete, numNodesUnreached);
-  archive(computeError);
-  archive(nodeToDomainOffset, nodeToDomain, facetToDomainOffset, facetToDomain,
-          facetNeighbors);
 }
 
 };  // namespace

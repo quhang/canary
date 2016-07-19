@@ -29,10 +29,10 @@ class PointSource : public Source {
  public:
   PointSource() {}
 
-  PointSource(const Point &center, Real radius, Real delay)
-      : center(center),
-        radius(radius),
-        delay(delay),
+  PointSource(const Point &icenter, Real iradius, Real idelay)
+      : center(icenter),
+        radius(iradius),
+        delay(idelay),
         minVelocity(0.0),
         done(false) {}
 
