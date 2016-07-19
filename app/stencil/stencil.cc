@@ -202,8 +202,8 @@ class StencilApplication : public CanaryApplication {
       EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
       double sum = 0;
       sum = task_context->Reduce(sum, std::plus<double>());
-      printf("Sum: %f Reference: %d\n", sum,
-             FLAG_app_cell_x * FLAG_app_cell_y * FLAG_app_cell_z *
+      printf("Sum: %f Reference: %f\n", sum,
+             1. * FLAG_app_cell_x * FLAG_app_cell_y * FLAG_app_cell_z *
                  (FLAG_app_cell_x + FLAG_app_cell_y + FLAG_app_cell_z - 3) / 2);
       return 0;
     });
