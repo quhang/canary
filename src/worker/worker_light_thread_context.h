@@ -57,10 +57,46 @@ namespace message {
 struct RunningStats;
 }  // namespace message
 
+namespace internal_message {
+
 /**
  * These messages are for internal command communication.
  */
-namespace internal_message {}  // namespace internal_message
+struct InitCommand {
+  StageId first_barrier_stage;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(first_barrier_stage);
+  }
+};
+struct ControlDecisionCommand {
+  StageId stage_id;
+  bool decision;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(stage_id, decision);
+  }
+};
+
+template <typename CommandType>
+struct evbuffer* to_buffer(const CommandType& command) {
+  struct evbuffer* result = evbuffer_new();
+  CanaryOutputArchive archive(result);
+  archive(command);
+  return result;
+}
+
+template <typename CommandType>
+CommandType to_command(struct evbuffer* buffer) {
+  CommandType result;
+  {
+    CanaryInputArchive archive(buffer);
+    archive(result);
+  }
+  evbuffer_free(buffer);
+  return std::move(result);
+}
+}  // namespace internal_message
 
 /**
  * The execution context of a lightweight thread, which is responsible for
@@ -189,14 +225,19 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void Run() override;
 
  private:
-  //! Builds running status.
+  //! Builds running stats.
   void BuildStats(message::RunningStats* running_stats);
+  //! Fills in running stats into a command.
+  template <typename T>
+  void FillInStats(T* report);
   //! Processes an initialization command.
   void ProcessInitCommand(struct evbuffer* command);
   //! Processes a control flow decision.
   void ProcessControlFlowDecision(struct evbuffer* command);
   //! Processes a command that requests running stats.
   void ProcessRequestReport();
+  //! Processes a command that releases a buffer.
+  void ProcessReleaseBarrier();
 
   //! Runs the second step of a gather task.
   void RunGatherStage(StageId stage_id, StatementId statement_id,
@@ -223,6 +264,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   StageGraph stage_graph_;
   std::map<StageId, StatementId> pending_gather_stages_;
   std::map<VariableId, PartitionData*> local_partition_data_;
+  bool is_in_barrier_ = false;
 };
 
 }  // namespace canary

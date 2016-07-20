@@ -111,6 +111,7 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS, ProcessMigrateOutPartitions);
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
+    PROCESS_MESSAGE(WORKER_RELEASE_BARRIER, ProcessReleaseBarrier);
     default:
       LOG(FATAL) << "Unexpected message category!";
   }
@@ -184,12 +185,12 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     thread_context->Initialize();
     thread_map_[full_partition_id] = thread_context;
     {
-      struct evbuffer* command = evbuffer_new();
-      {
-        CanaryOutputArchive archive(command);
-        archive(application_record_map_.at(application_id).first_barrier_stage);
-      }
-      thread_context->DeliverMessage(StageId::INIT, command);
+      auto first_barrier_stage =
+          application_record_map_.at(application_id).first_barrier_stage;
+      thread_context->DeliverMessage(
+          StageId::INIT,
+          internal_message::to_buffer(
+              internal_message::InitCommand{first_barrier_stage}));
     }
     // Refreshes the routing such that pending messages for this partition can
     // be delived.
@@ -230,6 +231,17 @@ void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end()) << "Status report unavailable!";
     iter->second->DeliverMessage(StageId::REQUEST_REPORT, nullptr);
+  }
+}
+
+void WorkerSchedulerBase::ProcessReleaseBarrier(
+    const message::WorkerReleaseBarrier& worker_command) {
+  for (const auto& pair : worker_command.control_partitions) {
+    FullPartitionId full_partition_id{worker_command.application_id, pair.first,
+                                      pair.second};
+    auto iter = thread_map_.find(full_partition_id);
+    CHECK(iter != thread_map_.end()) << "Cannot find a partition!";
+    iter->second->DeliverMessage(StageId::RELEASE_BARRIER, nullptr);
   }
 }
 

@@ -62,6 +62,17 @@ struct LaunchApplication {
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);
 
+//! Launches an application.
+struct ResumeApplication {
+  int application_id = -1;
+
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, RESUME_APPLICATION, ResumeApplication);
+
 }  // namespace message
 }  // namespace canary
 

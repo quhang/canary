@@ -199,10 +199,11 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_INSTALL_BARRIER, WorkerInstallBarrier);
 
 //! Asks a worker to release the barrier of corresponding partitions.
 struct WorkerReleaseBarrier {
+  ApplicationId application_id;
   std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(control_partitions);
+    archive(application_id, control_partitions);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_RELEASE_BARRIER, WorkerReleaseBarrier);

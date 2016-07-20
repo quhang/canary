@@ -50,9 +50,14 @@
 #include "shared/initialize.h"
 #include "shared/network.h"
 
-DEFINE_string(launch_binary, "", "Application binary location.");
+DEFINE_string(launch_application, "",
+              "Launch an application given its binary location.");
+// Auxiliary info for launching an application.
 DEFINE_int32(launch_num_worker, -1, "Specify the number of worker.");
 DEFINE_int32(launch_first_barrier, -1, "Specify the first barrier stage.");
+
+DEFINE_int32(resume_application, -1,
+             "Resume an applicaiton given its application id.");
 
 namespace {
 void SendLaunchMessage(struct evbuffer* buffer) {
@@ -87,24 +92,33 @@ void SendLaunchMessage(struct evbuffer* buffer) {
 int main(int argc, char** argv) {
   using namespace canary;  // NOLINT
   InitializeCanaryWorker(&argc, &argv);
-  std::stringstream ss;
-  {
-    cereal::XMLOutputArchive archive(ss);
-    for (int i = 1; i < argc; ++i) {
-      std::string token(argv[i]);
-      auto iter = std::find(token.begin(), token.end(), '=');
-      CHECK(iter != token.end())
-          << "Application argument needs to be specified as key=value";
-      archive(cereal::make_nvp(std::string(token.begin(), iter),
-                               std::string(std::next(iter), token.end())));
+  if (!FLAGS_launch_application.empty()) {
+    std::stringstream ss;
+    {
+      cereal::XMLOutputArchive archive(ss);
+      for (int i = 1; i < argc; ++i) {
+        std::string token(argv[i]);
+        auto iter = std::find(token.begin(), token.end(), '=');
+        CHECK(iter != token.end())
+            << "Application argument needs to be specified as key=value";
+        archive(cereal::make_nvp(std::string(token.begin(), iter),
+                                 std::string(std::next(iter), token.end())));
+      }
     }
+    message::LaunchApplication launch_application;
+    launch_application.binary_location = FLAGS_launch_application;
+    launch_application.application_parameter = ss.str();
+    launch_application.fix_num_worker = FLAGS_launch_num_worker;
+    launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
+    SendLaunchMessage(
+        message::SerializeMessageWithControlHeader(launch_application));
+    printf("Application launched.\n");
+  } else if (FLAGS_resume_application != -1) {
+    message::ResumeApplication resume_application;
+    resume_application.application_id = FLAGS_resume_application;
+    SendLaunchMessage(
+        message::SerializeMessageWithControlHeader(resume_application));
+    printf("Application resumed.\n");
   }
-  message::LaunchApplication launch_application;
-  launch_application.binary_location = FLAGS_launch_binary;
-  launch_application.application_parameter = ss.str();
-  launch_application.fix_num_worker = FLAGS_launch_num_worker;
-  launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
-  SendLaunchMessage(
-      message::SerializeMessageWithControlHeader(launch_application));
   return 0;
 }

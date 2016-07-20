@@ -204,7 +204,7 @@ void WorkerExecutionContext::Run() {
         break;
       case StageId::RELEASE_BARRIER:
         CHECK(command == nullptr);
-        stage_graph_.ReleaseBarrier();
+        ProcessReleaseBarrier();
         break;
       default:
         LOG(FATAL) << "Unknown command stage id!";
@@ -225,16 +225,18 @@ void WorkerExecutionContext::Run() {
     std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
     if (stage_id == StageId::COMPLETE) {
       message::ControllerRespondPartitionDone report;
-      report.from_worker_id = get_worker_id();
-      report.application_id = get_application_id();
-      report.variable_group_id = get_variable_group_id();
-      report.partition_id = get_partition_id();
-      BuildStats(&report.running_stats);
+      FillInStats(&report);
       get_send_command_interface()->SendCommandToController(
           message::SerializeMessageWithControlHeader(report));
       break;
     } else if (stage_id == StageId::REACH_BARRIER) {
-      // TODO(quhang): responds to the controller.
+      if (!is_in_barrier_) {
+        is_in_barrier_ = true;
+        message::ControllerRespondReachBarrier report;
+        FillInStats(&report);
+        get_send_command_interface()->SendCommandToController(
+            message::SerializeMessageWithControlHeader(report));
+      }
       break;
     } else if (stage_id == StageId::INVALID) {
       break;
@@ -253,17 +255,23 @@ void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
   stage_graph_.retrieve_cycle_stats(&running_stats->cycle_stats);
 }
 
+//! Fills in running stats into a command.
+template <typename T>
+void WorkerExecutionContext::FillInStats(T* report) {
+  report->from_worker_id = get_worker_id();
+  report->application_id = get_application_id();
+  report->variable_group_id = get_variable_group_id();
+  report->partition_id = get_partition_id();
+  BuildStats(&report->running_stats);
+}
+
 void WorkerExecutionContext::ProcessInitCommand(struct evbuffer* command) {
   // Caution: initialization generates the initial task graph.
   stage_graph_.Initialize(get_variable_group_id(), get_partition_id());
-  StageId first_barrier_stage;
-  {
-    CanaryInputArchive archive(command);
-    archive(first_barrier_stage);
-    evbuffer_free(command);
-  }
-  if (first_barrier_stage != StageId::INVALID) {
-    stage_graph_.InsertBarrier(first_barrier_stage);
+  using internal_message::InitCommand;
+  auto struct_message = internal_message::to_command<InitCommand>(command);
+  if (struct_message.first_barrier_stage != StageId::INVALID) {
+    stage_graph_.InsertBarrier(struct_message.first_barrier_stage);
   }
   AllocatePartitionData();
 }
@@ -278,13 +286,14 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
 
 void WorkerExecutionContext::ProcessRequestReport() {
   message::ControllerRespondStatusOfPartition report;
-  report.from_worker_id = get_worker_id();
-  report.application_id = get_application_id();
-  report.variable_group_id = get_variable_group_id();
-  report.partition_id = get_partition_id();
-  BuildStats(&report.running_stats);
+  FillInStats(&report);
   get_send_command_interface()->SendCommandToController(
       message::SerializeMessageWithControlHeader(report));
+}
+
+void WorkerExecutionContext::ProcessReleaseBarrier() {
+  stage_graph_.ReleaseBarrier();
+  is_in_barrier_ = false;
 }
 
 void WorkerExecutionContext::RunGatherStage(
@@ -418,18 +427,16 @@ void WorkerExecutionContext::PrepareTaskContext(
 
 struct evbuffer* WorkerExecutionContext::SerializeControlFlowDecision(
     StageId stage_id, bool decision) {
-  struct evbuffer* result = evbuffer_new();
-  CanaryOutputArchive archive(result);
-  archive(stage_id);
-  archive(decision);
-  return result;
+  internal_message::ControlDecisionCommand command{stage_id, decision};
+  return internal_message::to_buffer(command);
 }
 
 void WorkerExecutionContext::DeserializeControlFlowDecision(
     struct evbuffer* buffer, StageId* stage_id, bool* decision) {
-  CanaryInputArchive archive(buffer);
-  archive(*stage_id);
-  archive(*decision);
+  using internal_message::ControlDecisionCommand;
+  auto command = internal_message::to_command<ControlDecisionCommand>(buffer);
+  *stage_id = command.stage_id;
+  *decision = command.decision;
   evbuffer_free(buffer);
 }
 

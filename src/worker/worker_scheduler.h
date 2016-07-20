@@ -125,6 +125,9 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Asks a partition to report status.
   void ProcessReportStatusOfPartitions(
       const message::WorkerReportStatusOfPartitions& worker_command);
+  //! Asks a partition to release a barrier.
+  void ProcessReleaseBarrier(
+      const message::WorkerReleaseBarrier& worker_command);
 
  protected:
   /*

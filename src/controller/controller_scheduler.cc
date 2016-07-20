@@ -94,6 +94,7 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                         ProcessStatusOfPartition);
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER,
                         ProcessStatusOfWorker);
+        PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
         default:
           LOG(FATAL) << "Unexpected message type!";
       }  // switch category.
@@ -101,6 +102,7 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
     case MessageCategoryGroup::LAUNCH_COMMAND:
       switch (header->category) {
         PROCESS_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
+        PROCESS_MESSAGE(RESUME_APPLICATION, ProcessResumeApplication);
         default:
           LOG(FATAL) << "Unexpected message type!";
       }  // switch category.
@@ -148,6 +150,8 @@ void ControllerScheduler::ProcessLaunchApplication(
           launch_message->binary_location.c_str(),
           TransformString(launch_message->application_parameter).c_str());
   FlushLoggingFile();
+  LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
+            << " (" << launch_message->binary_location.c_str() << ") ";
   AssignPartitionToWorker(&application_record);
   // Sends the partition map to workers.
   send_command_interface_->AddApplication(
@@ -159,6 +163,51 @@ void ControllerScheduler::ProcessLaunchApplication(
                               application_record.per_app_partition_map);
   RequestLoadPartitions(assigned_application_id);
   delete launch_message;
+}
+
+void ControllerScheduler::ProcessResumeApplication(
+    message::ResumeApplication* resume_message) {
+  if (resume_message->application_id >= 0) {
+    auto application_id =
+        static_cast<ApplicationId>(resume_message->application_id);
+    if (application_map_.find(application_id) == application_map_.end()) {
+      LOG(WARNING) << "Invalid application id to resume!";
+      delete resume_message;
+      return;
+    }
+    auto& application_record = application_map_.at(application_id);
+    if (application_record.application_state != ApplicationState::AT_BARRIER) {
+      LOG(WARNING) << "Application #" << get_value(application_id)
+                   << " cannot be resumed!";
+      delete resume_message;
+      return;
+    }
+    application_record.application_state = ApplicationState::RUNNING;
+    for (auto& pair : worker_map_) {
+      const auto& owned_partitions = pair.second.owned_partitions;
+      if (owned_partitions.find(application_id) == owned_partitions.end()) {
+        continue;
+      }
+      if (owned_partitions.at(application_id).empty()) {
+        continue;
+      }
+      message::WorkerReleaseBarrier release_barrier_command;
+      release_barrier_command.application_id = application_id;
+      for (auto& full_partition_id : owned_partitions.at(application_id)) {
+        release_barrier_command.control_partitions.emplace_back(
+            full_partition_id.variable_group_id,
+            full_partition_id.partition_id);
+      }
+      LOG(INFO) << "Application #" << get_value(application_id)
+                << " is resumed.";
+      send_command_interface_->SendCommandToWorker(
+          pair.first,
+          message::SerializeMessageWithControlHeader(release_barrier_command));
+    }
+  } else {
+    LOG(WARNING) << "Invalid application id to resume!";
+  }
+  delete resume_message;
 }
 
 void ControllerScheduler::ProcessMigrationInPrepared(
@@ -207,6 +256,26 @@ void ControllerScheduler::ProcessStatusOfWorker(
   delete respond_message;
 }
 
+void ControllerScheduler::ProcessReachBarrier(
+    message::ControllerRespondReachBarrier* respond_message) {
+  UpdateRunningStats(
+      respond_message->from_worker_id, respond_message->application_id,
+      respond_message->variable_group_id, respond_message->partition_id,
+      respond_message->running_stats);
+  auto& application_record =
+      application_map_.at(respond_message->application_id);
+  if (++application_record.blocked_partition ==
+      application_record.total_partition) {
+    application_record.blocked_partition = 0;
+    CHECK(application_record.application_state ==
+          ApplicationState::BEFORE_BARRIER);
+    application_record.application_state = ApplicationState::AT_BARRIER;
+    LOG(INFO) << "Application #" << get_value(respond_message->application_id)
+              << " reached barrier stage.";
+  }
+  delete respond_message;
+}
+
 /*
  * Application launching related.
  */
@@ -229,10 +298,14 @@ void ControllerScheduler::FillInApplicationLaunchInfo(
   application_record->binary_location = launch_message.binary_location;
   application_record->application_parameter =
       launch_message.application_parameter;
-  application_record->first_barrier_stage =
-      launch_message.first_barrier_stage >= 0
-          ? StageId(launch_message.first_barrier_stage)
-          : StageId::INVALID;
+  if (launch_message.first_barrier_stage >= 0) {
+    application_record->first_barrier_stage =
+        StageId(launch_message.first_barrier_stage);
+    application_record->application_state = ApplicationState::BEFORE_BARRIER;
+  } else {
+    application_record->first_barrier_stage = StageId::INVALID;
+    application_record->application_state = ApplicationState::RUNNING;
+  }
   application_record->loaded_application = CanaryApplication::LoadApplication(
       launch_message.binary_location, launch_message.application_parameter,
       &application_record->loading_handle);
@@ -387,7 +460,8 @@ void ControllerScheduler::UpdateRunningStats(
 
 void ControllerScheduler::CleanUpApplication(
     ApplicationId application_id, ApplicationRecord* application_record) {
-  LOG(INFO) << "Application " << get_value(application_id) << " is complete.";
+  LOG(INFO) << "Completed application# " << get_value(application_id);
+  application_record->application_state = ApplicationState::COMPLETE;
   FlushLoggingFile();
 
   // Unloads partitions.

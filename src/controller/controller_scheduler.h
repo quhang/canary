@@ -99,6 +99,14 @@ class ControllerScheduler : public ControllerSchedulerBase {
     std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
     std::set<ApplicationId> loaded_applications;
   };
+  //! Represents the execution state of an application.
+  enum class ApplicationState {
+    INVALID = -1,
+    RUNNING = 0,
+    BEFORE_BARRIER,
+    AT_BARRIER,
+    COMPLETE
+  };
   //! Represents an active application.
   struct ApplicationRecord {
     std::string binary_location;
@@ -111,6 +119,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
     PerApplicationPartitionMap per_app_partition_map;
     int total_partition = 0;
     int complete_partition = 0;
+    int blocked_partition = 0;
+    ApplicationState application_state = ApplicationState::INVALID;
   };
 
  public:
@@ -131,6 +141,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
    * Processes messages from the launcher or workers.
    */
   void ProcessLaunchApplication(message::LaunchApplication* launch_message);
+  void ProcessResumeApplication(message::ResumeApplication* resume_message);
   void ProcessMigrationInPrepared(
       message::ControllerRespondMigrationInPrepared* respond_message);
   void ProcessMigrationInDone(
@@ -141,6 +152,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
       message::ControllerRespondStatusOfPartition* respond_message);
   void ProcessStatusOfWorker(
       message::ControllerRespondStatusOfWorker* respond_message);
+  void ProcessReachBarrier(
+      message::ControllerRespondReachBarrier* respond_message);
 
   /*
    * Application launching related.

@@ -80,6 +80,7 @@ enum class MessageCategory : int16_t {
   SHUT_DOWN_WORKER,
   // Launch commands,
   LAUNCH_APPLICATION = 200,
+  RESUME_APPLICATION,
   // Worker commands (from the controller).
   TEST_WORKER_COMMAND = 300,
   WORKER_LOAD_APPLICATION,
