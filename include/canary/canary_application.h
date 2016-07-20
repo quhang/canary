@@ -199,7 +199,7 @@ class CanaryApplication {
   typedef std::map<StatementId, StatementInfo> StatementInfoMap;
 
  public:
-  //! Dynamically loads an application.
+  //! Dynamically loads an application, returns nullptr if it cannot be loaded.
   static CanaryApplication* LoadApplication(
       const std::string& binary_location,
       const std::string& application_parameter, void** handle_ptr);

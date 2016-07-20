@@ -88,13 +88,13 @@ class TestControllerScheduler : public ControllerSchedulerBase {
            ++worker_index) {
         message::WorkerLoadPartitions load_partitions;
         load_partitions.application_id = application_id;
-        load_partitions.load_partitions.clear();
+        load_partitions.partition_list.clear();
         for (int partition_index =
                  worker_index * FLAGS_num_partition_per_worker;
              partition_index <
                  (worker_index + 1) * FLAGS_num_partition_per_worker;
              ++partition_index) {
-          load_partitions.load_partitions.emplace_back(
+          load_partitions.partition_list.emplace_back(
               distribute_variable, static_cast<PartitionId>(partition_index));
         }
         send_command_interface_->SendCommandToWorker(
@@ -104,8 +104,8 @@ class TestControllerScheduler : public ControllerSchedulerBase {
       {
         message::WorkerLoadPartitions load_partitions;
         load_partitions.application_id = application_id;
-        load_partitions.load_partitions.clear();
-        load_partitions.load_partitions.emplace_back(reduce_variable,
+        load_partitions.partition_list.clear();
+        load_partitions.partition_list.emplace_back(reduce_variable,
                                                      PartitionId::FIRST);
         send_command_interface_->SendCommandToWorker(
             WorkerId::FIRST,

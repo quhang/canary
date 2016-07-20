@@ -84,16 +84,22 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
   switch (header->category_group) {
     case MessageCategoryGroup::CONTROLLER_COMMAND:
       switch (header->category) {
+        // A worker is ready for receiving a migrated partition.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
                         ProcessMigrationInPrepared);
+        // A worker already received a migrated partition.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_DONE,
                         ProcessMigrationInDone);
+        // A worker completes a partition.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_PARTITION_DONE,
                         ProcessPartitionDone);
+        // A worker responds the status of a partiton.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_PARTITION,
                         ProcessStatusOfPartition);
+        // A worker responds its status.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER,
                         ProcessStatusOfWorker);
+        // A worker responds that a barrier has been reached.
         PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
         default:
           LOG(FATAL) << "Unexpected message type!";
@@ -118,8 +124,8 @@ void ControllerScheduler::InternalNotifyWorkerIsDown(WorkerId worker_id) {
   auto iter = worker_map_.find(worker_id);
   CHECK(iter != worker_map_.end());
   if (!iter->second.owned_partitions.empty()) {
-    LOG(WARNING) << "Worker is down while there are active partitions ("
-                 << get_value(worker_id) << ")!";
+    LOG(ERROR) << "Worker is down while there are active partitions ("
+               << get_value(worker_id) << ")!";
   }
   worker_map_.erase(iter);
 }
@@ -135,23 +141,28 @@ void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
  */
 void ControllerScheduler::ProcessLaunchApplication(
     message::LaunchApplication* launch_message) {
-  CHECK_NE(launch_message->fix_num_worker, 0);
+  std::unique_ptr<message::LaunchApplication> delete_when_exit(launch_message);
+  if (launch_message->fix_num_worker == 0) {
+    LOG(ERROR) << "Invalid application launching command!";
+    return;
+  }
   if (!HaveEnoughWorkerForLaunching(launch_message->fix_num_worker)) {
-    LOG(WARNING) << "Not enough workers for launching an application!";
-    delete launch_message;
+    LOG(ERROR) << "Failed to launch application: not enough workers!";
     return;
   }
   // Assigns application id.
   const ApplicationId assigned_application_id = (next_application_id_++);
   auto& application_record = application_map_[assigned_application_id];
-  FillInApplicationLaunchInfo(*launch_message, &application_record);
+  if (!FillInApplicationLaunchInfo(*launch_message, &application_record)) {
+    LOG(ERROR) << "Failed to launch application!";
+    application_map_.erase(assigned_application_id);
+    return;
+  }
   InitializeLoggingFile();
   fprintf(log_file_, "L %d %s %s\n", get_value(assigned_application_id),
           launch_message->binary_location.c_str(),
           TransformString(launch_message->application_parameter).c_str());
   FlushLoggingFile();
-  LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
-            << " (" << launch_message->binary_location.c_str() << ") ";
   AssignPartitionToWorker(&application_record);
   // Sends the partition map to workers.
   send_command_interface_->AddApplication(
@@ -162,66 +173,54 @@ void ControllerScheduler::ProcessLaunchApplication(
   UpdateWorkerOwnedPartitions(assigned_application_id,
                               application_record.per_app_partition_map);
   RequestLoadPartitions(assigned_application_id);
-  delete launch_message;
+  LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
+            << " (" << launch_message->binary_location.c_str() << ").";
 }
 
 void ControllerScheduler::ProcessResumeApplication(
     message::ResumeApplication* resume_message) {
-  if (resume_message->application_id >= 0) {
-    auto application_id =
-        static_cast<ApplicationId>(resume_message->application_id);
-    if (application_map_.find(application_id) == application_map_.end()) {
-      LOG(WARNING) << "Invalid application id to resume!";
-      delete resume_message;
-      return;
-    }
-    auto& application_record = application_map_.at(application_id);
-    if (application_record.application_state != ApplicationState::AT_BARRIER) {
-      LOG(WARNING) << "Application #" << get_value(application_id)
-                   << " cannot be resumed!";
-      delete resume_message;
-      return;
-    }
-    application_record.application_state = ApplicationState::RUNNING;
-    for (auto& pair : worker_map_) {
-      const auto& owned_partitions = pair.second.owned_partitions;
-      if (owned_partitions.find(application_id) == owned_partitions.end()) {
-        continue;
-      }
-      if (owned_partitions.at(application_id).empty()) {
-        continue;
-      }
-      message::WorkerReleaseBarrier release_barrier_command;
-      release_barrier_command.application_id = application_id;
-      for (auto& full_partition_id : owned_partitions.at(application_id)) {
-        release_barrier_command.control_partitions.emplace_back(
-            full_partition_id.variable_group_id,
-            full_partition_id.partition_id);
-      }
-      LOG(INFO) << "Application #" << get_value(application_id)
-                << " is resumed.";
-      send_command_interface_->SendCommandToWorker(
-          pair.first,
-          message::SerializeMessageWithControlHeader(release_barrier_command));
-    }
-  } else {
-    LOG(WARNING) << "Invalid application id to resume!";
+  std::unique_ptr<message::ResumeApplication> delete_when_exit(resume_message);
+  if (resume_message->application_id < 0) {
+    LOG(ERROR) << "Invalid application resuming command!";
+    return;
   }
-  delete resume_message;
+  const auto application_id =
+      static_cast<ApplicationId>(resume_message->application_id);
+  if (application_map_.find(application_id) == application_map_.end()) {
+    LOG(ERROR)
+        << "Invalid application resuming command: invalid application id!!";
+    return;
+  }
+  auto& application_record = application_map_.at(application_id);
+  if (application_record.application_state != ApplicationState::AT_BARRIER) {
+    LOG(ERROR) << "Failed to resume application #" << get_value(application_id)
+               << ".";
+    return;
+  }
+  application_record.application_state = ApplicationState::RUNNING;
+  message::WorkerReleaseBarrier release_barrier_command;
+  SendCommandToPartitionInApplication(application_id, &release_barrier_command);
+  LOG(INFO) << "Resumed application #" << get_value(application_id) << ".";
 }
 
 void ControllerScheduler::ProcessMigrationInPrepared(
     message::ControllerRespondMigrationInPrepared* respond_message) {
-  delete respond_message;
+  // TODO(quhang): implement.
+  std::unique_ptr<message::ControllerRespondMigrationInPrepared>
+      delete_when_exit(respond_message);
 }
 
 void ControllerScheduler::ProcessMigrationInDone(
     message::ControllerRespondMigrationInDone* respond_message) {
-  delete respond_message;
+  // TODO(quhang): implement.
+  std::unique_ptr<message::ControllerRespondMigrationInDone> delete_when_exit(
+      respond_message);
 }
 
 void ControllerScheduler::ProcessPartitionDone(
     message::ControllerRespondPartitionDone* respond_message) {
+  std::unique_ptr<message::ControllerRespondPartitionDone> delete_when_exit(
+      respond_message);
   const auto& running_stats = respond_message->running_stats;
   UpdateRunningStats(respond_message->from_worker_id,
                      respond_message->application_id,
@@ -235,29 +234,33 @@ void ControllerScheduler::ProcessPartitionDone(
       application_record.total_partition) {
     CleanUpApplication(respond_message->application_id, &application_record);
   }
-  delete respond_message;
 }
 
 void ControllerScheduler::ProcessStatusOfPartition(
     message::ControllerRespondStatusOfPartition* respond_message) {
+  std::unique_ptr<message::ControllerRespondStatusOfPartition> delete_when_exit(
+      respond_message);
   UpdateRunningStats(
       respond_message->from_worker_id, respond_message->application_id,
       respond_message->variable_group_id, respond_message->partition_id,
       respond_message->running_stats);
-  delete respond_message;
 }
 
 void ControllerScheduler::ProcessStatusOfWorker(
     message::ControllerRespondStatusOfWorker* respond_message) {
+  std::unique_ptr<message::ControllerRespondStatusOfWorker> delete_when_exit(
+      respond_message);
   auto from_worker_id = respond_message->from_worker_id;
+  // Updates worker map.
   if (worker_map_.find(from_worker_id) != worker_map_.end()) {
     worker_map_[from_worker_id].num_cores = respond_message->num_cores;
   }
-  delete respond_message;
 }
 
 void ControllerScheduler::ProcessReachBarrier(
     message::ControllerRespondReachBarrier* respond_message) {
+  std::unique_ptr<message::ControllerRespondReachBarrier> delete_when_exit(
+      respond_message);
   UpdateRunningStats(
       respond_message->from_worker_id, respond_message->application_id,
       respond_message->variable_group_id, respond_message->partition_id,
@@ -266,6 +269,7 @@ void ControllerScheduler::ProcessReachBarrier(
       application_map_.at(respond_message->application_id);
   if (++application_record.blocked_partition ==
       application_record.total_partition) {
+    // Update application state if every partition reaches the barrier.
     application_record.blocked_partition = 0;
     CHECK(application_record.application_state ==
           ApplicationState::BEFORE_BARRIER);
@@ -273,7 +277,6 @@ void ControllerScheduler::ProcessReachBarrier(
     LOG(INFO) << "Application #" << get_value(respond_message->application_id)
               << " reached barrier stage.";
   }
-  delete respond_message;
 }
 
 /*
@@ -292,7 +295,7 @@ bool ControllerScheduler::HaveEnoughWorkerForLaunching(int fix_num_worker) {
   return true;
 }
 
-void ControllerScheduler::FillInApplicationLaunchInfo(
+bool ControllerScheduler::FillInApplicationLaunchInfo(
     const message::LaunchApplication& launch_message,
     ApplicationRecord* application_record) {
   application_record->binary_location = launch_message.binary_location;
@@ -309,13 +312,19 @@ void ControllerScheduler::FillInApplicationLaunchInfo(
   application_record->loaded_application = CanaryApplication::LoadApplication(
       launch_message.binary_location, launch_message.application_parameter,
       &application_record->loading_handle);
+  if (!application_record->loaded_application) {
+    // Application loading failed.
+    return false;
+  }
   application_record->variable_group_info_map =
       application_record->loaded_application->get_variable_group_info_map();
   application_record->total_partition = 0;
   application_record->complete_partition = 0;
-  for (auto& pair : *application_record->variable_group_info_map) {
+  application_record->blocked_partition = 0;
+  for (const auto& pair : *application_record->variable_group_info_map) {
     application_record->total_partition += pair.second.parallelism;
   }
+  return true;
 }
 
 void ControllerScheduler::AssignPartitionToWorker(
@@ -327,6 +336,8 @@ void ControllerScheduler::AssignPartitionToWorker(
   for (const auto& pair : variable_group_info_map) {
     per_app_partition_map.SetPartitioning(pair.first, pair.second.parallelism);
     // Birdshot randomized placement.
+    // Assigns partitions to workers randomly, and the number of assigned
+    // partitions is based on the number of worker cores.
     std::vector<WorkerId> worker_id_list;
     GetWorkerAssignment(pair.second.parallelism, &worker_id_list);
     std::random_shuffle(worker_id_list.begin(), worker_id_list.end());
@@ -416,24 +427,8 @@ void ControllerScheduler::UpdateWorkerOwnedPartitions(
 }
 
 void ControllerScheduler::RequestLoadPartitions(ApplicationId application_id) {
-  for (auto& pair : worker_map_) {
-    const auto& owned_partitions = pair.second.owned_partitions;
-    if (owned_partitions.find(application_id) == owned_partitions.end()) {
-      continue;
-    }
-    if (owned_partitions.at(application_id).empty()) {
-      continue;
-    }
-    message::WorkerLoadPartitions load_partitions_command;
-    load_partitions_command.application_id = application_id;
-    for (auto& full_partition_id : owned_partitions.at(application_id)) {
-      load_partitions_command.load_partitions.emplace_back(
-          full_partition_id.variable_group_id, full_partition_id.partition_id);
-    }
-    send_command_interface_->SendCommandToWorker(
-        pair.first,
-        message::SerializeMessageWithControlHeader(load_partitions_command));
-  }
+  message::WorkerLoadPartitions load_partitions_command;
+  SendCommandToPartitionInApplication(application_id, &load_partitions_command);
 }
 
 void ControllerScheduler::UpdateRunningStats(
@@ -460,39 +455,24 @@ void ControllerScheduler::UpdateRunningStats(
 
 void ControllerScheduler::CleanUpApplication(
     ApplicationId application_id, ApplicationRecord* application_record) {
-  LOG(INFO) << "Completed application# " << get_value(application_id);
+  LOG(INFO) << "Completed application# " << get_value(application_id) << ".";
   application_record->application_state = ApplicationState::COMPLETE;
   FlushLoggingFile();
 
-  // Unloads partitions.
+  message::WorkerUnloadPartitions unload_partitions_command;
+  SendCommandToPartitionInApplication(application_id,
+                                      &unload_partitions_command);
   for (auto& pair : worker_map_) {
-    auto& owned_partitions = pair.second.owned_partitions;
-    if (owned_partitions.find(application_id) == owned_partitions.end()) {
-      continue;
-    }
-    if (owned_partitions.at(application_id).empty()) {
-      owned_partitions.erase(application_id);
-      continue;
-    }
-    message::WorkerUnloadPartitions unload_partitions_command;
-    unload_partitions_command.application_id = application_id;
-    for (auto& full_partition_id : owned_partitions.at(application_id)) {
-      unload_partitions_command.unload_partitions.emplace_back(
-          full_partition_id.variable_group_id, full_partition_id.partition_id);
-    }
-    send_command_interface_->SendCommandToWorker(
-        pair.first,
-        message::SerializeMessageWithControlHeader(unload_partitions_command));
-    owned_partitions.erase(application_id);
+    pair.second.owned_partitions.erase(application_id);
   }
   // Unloads application.
+  message::WorkerUnloadApplication unload_application_command;
+  unload_application_command.application_id = application_id;
   for (auto& pair : worker_map_) {
     auto& loaded_applications = pair.second.loaded_applications;
     if (loaded_applications.find(application_id) == loaded_applications.end()) {
       continue;
     }
-    message::WorkerUnloadApplication unload_application_command;
-    unload_application_command.application_id = application_id;
     send_command_interface_->SendCommandToWorker(
         pair.first,
         message::SerializeMessageWithControlHeader(unload_application_command));
@@ -505,6 +485,30 @@ void ControllerScheduler::CleanUpApplication(
   send_command_interface_->DropApplication(application_id);
   // Erases the application record.
   application_map_.erase(application_id);
+}
+
+template <typename T>
+void ControllerScheduler::SendCommandToPartitionInApplication(
+    ApplicationId application_id, T* template_command) {
+  CHECK_NOTNULL(template_command);
+  template_command->application_id = application_id;
+  for (const auto& pair : worker_map_) {
+    const auto& owned_partitions = pair.second.owned_partitions;
+    if (owned_partitions.find(application_id) == owned_partitions.end()) {
+      continue;
+    }
+    if (owned_partitions.at(application_id).empty()) {
+      continue;
+    }
+    template_command->partition_list.clear();
+    for (const auto& full_partition_id : owned_partitions.at(application_id)) {
+      template_command->partition_list.emplace_back(
+          full_partition_id.variable_group_id, full_partition_id.partition_id);
+    }
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(*template_command));
+  }
 }
 
 void ControllerScheduler::InitializeLoggingFile() {

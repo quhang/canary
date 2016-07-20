@@ -158,15 +158,14 @@ void WorkerSchedulerBase::ProcessUnloadApplication(
 void WorkerSchedulerBase::ProcessLoadPartitions(
     const message::WorkerLoadPartitions& worker_command) {
   const auto application_id = worker_command.application_id;
-  for (const auto& pair : worker_command.load_partitions) {
-    const auto full_partition_id =
-        FullPartitionId{application_id, pair.first, pair.second};
+  for (const auto& pair : worker_command.partition_list) {
     VLOG(1) << "Load partition: " << get_value(application_id) << "/"
             << get_value(pair.first) << "/" << get_value(pair.second);
+    FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
     ++application_record_map_.at(application_id).local_partitions;
     WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
-    // Sets metadata of the thread context..
+    // Sets metadata of the thread context.
     thread_context->set_worker_id(self_worker_id_);
     thread_context->set_application_id(application_id);
     thread_context->set_variable_group_id(pair.first);
@@ -184,26 +183,24 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     // Initializes the thread context.
     thread_context->Initialize();
     thread_map_[full_partition_id] = thread_context;
-    {
-      auto first_barrier_stage =
-          application_record_map_.at(application_id).first_barrier_stage;
-      thread_context->DeliverMessage(
-          StageId::INIT,
-          internal_message::to_buffer(
-              internal_message::InitCommand{first_barrier_stage}));
-    }
-    // Refreshes the routing such that pending messages for this partition can
-    // be delived.
-    send_data_interface_->RefreshRouting();
   }
+  const auto first_barrier_stage =
+      application_record_map_.at(application_id).first_barrier_stage;
+  DeliverCommandToEachThread(
+      worker_command, StageId::INIT, [first_barrier_stage]() {
+        return internal_message::to_buffer(
+            internal_message::InitCommand{first_barrier_stage});
+      });
+  // Refreshes the routing such that pending messages for this partition can
+  // be deliverd.
+  send_data_interface_->RefreshRouting();
 }
 
 void WorkerSchedulerBase::ProcessUnloadPartitions(
     const message::WorkerUnloadPartitions& worker_command) {
   const auto application_id = worker_command.application_id;
-  for (const auto& pair : worker_command.unload_partitions) {
-    const auto full_partition_id =
-        FullPartitionId{application_id, pair.first, pair.second};
+  for (const auto& pair : worker_command.partition_list) {
+    FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end());
     --application_record_map_.at(application_id).local_partitions;
@@ -225,23 +222,27 @@ void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
 
 void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     const message::WorkerReportStatusOfPartitions& worker_command) {
-  for (const auto& pair : worker_command.report_partitions) {
-    FullPartitionId full_partition_id{worker_command.application_id, pair.first,
-                                      pair.second};
-    auto iter = thread_map_.find(full_partition_id);
-    CHECK(iter != thread_map_.end()) << "Status report unavailable!";
-    iter->second->DeliverMessage(StageId::REQUEST_REPORT, nullptr);
-  }
+  DeliverCommandToEachThread(worker_command, StageId::REQUEST_REPORT,
+                             []() { return nullptr; });
 }
 
 void WorkerSchedulerBase::ProcessReleaseBarrier(
     const message::WorkerReleaseBarrier& worker_command) {
-  for (const auto& pair : worker_command.control_partitions) {
-    FullPartitionId full_partition_id{worker_command.application_id, pair.first,
-                                      pair.second};
+  DeliverCommandToEachThread(worker_command, StageId::RELEASE_BARRIER,
+                             []() { return nullptr; });
+}
+
+template <typename T>
+void WorkerSchedulerBase::DeliverCommandToEachThread(
+    const T& command_from_controller, StageId command_stage_id,
+    std::function<struct evbuffer*()> generator) {
+  for (const auto& pair : command_from_controller.partition_list) {
+    FullPartitionId full_partition_id{command_from_controller.application_id,
+                                      pair.first, pair.second};
     auto iter = thread_map_.find(full_partition_id);
-    CHECK(iter != thread_map_.end()) << "Cannot find a partition!";
-    iter->second->DeliverMessage(StageId::RELEASE_BARRIER, nullptr);
+    CHECK(iter != thread_map_.end())
+        << "Failed to deliver a command to a partition";
+    iter->second->DeliverMessage(command_stage_id, generator());
   }
 }
 
@@ -300,6 +301,7 @@ void WorkerScheduler::LoadApplicationBinary(
       application_record->binary_location,
       application_record->application_parameter,
       &application_record->loading_handle);
+  CHECK_NOTNULL(application_record->loaded_application);
 }
 
 void WorkerScheduler::UnloadApplicationBinary(

@@ -161,7 +161,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
   //! Whether there are enough workers for launching an application.
   bool HaveEnoughWorkerForLaunching(int fix_num_worker);
   //! Fills in initial info in the application record.
-  void FillInApplicationLaunchInfo(
+  bool FillInApplicationLaunchInfo(
       const message::LaunchApplication& launch_message,
       ApplicationRecord* application_record);
   //! Assigns partitions to workers.
@@ -185,6 +185,10 @@ class ControllerScheduler : public ControllerSchedulerBase {
   /*
    * Misc functions.
    */
+  //! Sends a command to every partition in the application.
+  template <typename T>
+  void SendCommandToPartitionInApplication(ApplicationId application_id,
+                                           T* template_command);
   //! Cleans up an application after it is complete.
   void CleanUpApplication(ApplicationId application_id,
                           ApplicationRecord* application_record);

@@ -128,6 +128,10 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Asks a partition to release a barrier.
   void ProcessReleaseBarrier(
       const message::WorkerReleaseBarrier& worker_command);
+  template <typename T>
+  void DeliverCommandToEachThread(const T& command_from_controller,
+                                  StageId command_stage_id,
+                                  std::function<struct evbuffer*()> generator);
 
  protected:
   /*

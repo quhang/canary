@@ -93,20 +93,20 @@ CanaryApplication* CanaryApplication::LoadApplication(
   *handle_ptr = dlopen(binary_location.c_str(), RTLD_NOW);
   const char* err = reinterpret_cast<const char*>(dlerror());
   if (err) {
-    LOG(FATAL) << "Loading application error: " << err;
+    LOG(ERROR) << "Cannot load application: " << err;
+    return nullptr;
   }
-  dlerror();  // Clears error code.
-
   // Loading the symbol.
   typedef void* (*FactoryMethod)();
   FactoryMethod entry_point = reinterpret_cast<FactoryMethod>(
       dlsym(*handle_ptr, "ApplicationEnterPoint"));
   err = reinterpret_cast<const char*>(dlerror());
   if (err) {
-    LOG(FATAL) << "Loading application error: " << err;
+    dlclose(*handle_ptr);
+    LOG(ERROR) << "Cannot load application: " << err;
+    return nullptr;
   }
   auto loaded_application = reinterpret_cast<CanaryApplication*>(entry_point());
-
   // Instantiates the application object.
   loaded_application->LoadParameter(application_parameter);
   loaded_application->Program();

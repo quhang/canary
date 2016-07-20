@@ -76,6 +76,8 @@ REGISTER_MESSAGE(CONTROLLER_COMMAND, TEST_CONTROLLER_COMMAND,
  * Controller to worker commands.
  */
 
+typedef std::list<std::pair<VariableGroupId, PartitionId>> PartitionList;
+
 //! Loads an application, and saves its booting information at the worker
 // scheduler.
 struct WorkerLoadApplication {
@@ -106,11 +108,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_APPLICATION,
 //! Loads one or many partitions, and prepares them for receiving data.
 struct WorkerLoadPartitions {
   ApplicationId application_id;
-  std::list<std::pair<VariableGroupId, PartitionId>> load_partitions;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id);
-    archive(load_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_PARTITIONS, WorkerLoadPartitions);
@@ -118,10 +119,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_PARTITIONS, WorkerLoadPartitions);
 //! Unloads one or many partitions, and cleans up their data.
 struct WorkerUnloadPartitions {
   ApplicationId application_id;
-  std::list<std::pair<VariableGroupId, PartitionId>> unload_partitions;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, unload_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_PARTITIONS,
@@ -131,10 +132,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UNLOAD_PARTITIONS,
 // data. Responds when the preparation is ready and when the migrating is done.
 struct WorkerMigrateInPartitions {
   ApplicationId application_id;
-  std::list<std::pair<VariableGroupId, PartitionId>> migrate_in_partitions;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, migrate_in_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_MIGRATE_IN_PARTITIONS,
@@ -164,10 +165,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_MIGRATE_OUT_PARTITIONS,
 //! Asks a worker to report running status of partitions.
 struct WorkerReportStatusOfPartitions {
   ApplicationId application_id;
-  std::list<std::pair<VariableGroupId, PartitionId>> report_partitions;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, report_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
@@ -178,21 +179,23 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
  */
 //! Asks a worker to pause the execution of corresponding partitions.
 struct WorkerPauseExecution {
-  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  ApplicationId application_id;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(control_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_PAUSE_EXECUTION, WorkerPauseExecution);
 
 //! Asks a worker to installs a barrier on corresponding partitions.
 struct WorkerInstallBarrier {
-  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  ApplicationId application_id;
+  PartitionList partition_list;
   StageId barrier_stage;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(control_partitions, barrier_stage);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_INSTALL_BARRIER, WorkerInstallBarrier);
@@ -200,10 +203,10 @@ REGISTER_MESSAGE(WORKER_COMMAND, WORKER_INSTALL_BARRIER, WorkerInstallBarrier);
 //! Asks a worker to release the barrier of corresponding partitions.
 struct WorkerReleaseBarrier {
   ApplicationId application_id;
-  std::list<std::pair<VariableGroupId, PartitionId>> control_partitions;
+  PartitionList partition_list;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, control_partitions);
+    archive(application_id, partition_list);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_RELEASE_BARRIER, WorkerReleaseBarrier);
