@@ -131,6 +131,38 @@ void StageGraph::FeedControlFlowDecision(StageId stage_id,
   SpawnLocalStages();
 }
 
+void StageGraph::retrieve_cycle_stats(
+    std::map<StageId, std::pair<StatementId, double>>* cycle_storage_result) {
+  cycle_storage_result->swap(cycle_storage_);
+  StageId safe_boundary_stage;
+  // The stats of a few stage might not be merged correctly, and they should not
+  // be sent.
+  if (uncomplete_stage_map_.empty()) {
+    if (no_more_statement_to_spawn_) {
+      // All stats are safe to send.
+      return;
+    } else {
+      safe_boundary_stage = get_next(last_finished_stage_id_);
+    }
+  } else {
+    safe_boundary_stage = uncomplete_stage_map_.begin()->first;
+  }
+  bool removed = false;
+  // the first element s.t. iter->first >= safe_boundary_stage.
+  auto iter = cycle_storage_result->lower_bound(safe_boundary_stage);
+  while (iter != cycle_storage_result->end()) {
+    removed = true;
+    cycle_storage_.insert(*iter);
+    iter = cycle_storage_result->erase(iter);
+  }
+  auto back_iter = cycle_storage_result->rbegin();
+  if (back_iter != cycle_storage_result->rend() && !removed) {
+    // The last stat is unsafe to commit.
+    cycle_storage_.insert(*back_iter);
+    cycle_storage_result->erase(back_iter->first);
+  }
+}
+
 bool StageGraph::InsertBarrier(StageId stage_id) {
   CHECK(stage_id >= StageId::FIRST);
   CHECK(next_barrier_stage_id_ == StageId::INVALID)
@@ -218,10 +250,8 @@ void StageGraph::UpdateCycleStats(StageId stage_id, StatementId statement_id,
     iter->second.second += cycles;
   } else {
     cycle_storage_[stage_id] = std::make_pair(statement_id, cycles);
-    auto next_iter = cycle_storage_.find(stage_id);
-    if (next_iter != cycle_storage_.end()) {
-      ++next_iter;
-    }
+    // The first element s.t. next_iter->first > stage_id.
+    auto next_iter = cycle_storage_.upper_bound(stage_id);
     if (next_iter != cycle_storage_.end() &&
         get_distance(stage_id, next_iter->first) ==
             get_distance(statement_id, next_iter->second.first)) {

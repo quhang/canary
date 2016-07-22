@@ -95,7 +95,7 @@ class TypedPartitionData : public PartitionData {
     data_ = nullptr;
   }
 
-  void Serialize(CanaryOutputArchive& archive) const {  // NOLINT
+  void Serialize(CanaryOutputArchive& archive) const override {  // NOLINT
     if (data_) {
       archive(*get_typed_data());
     }

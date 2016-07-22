@@ -49,6 +49,7 @@ WorkerLightThreadContext::WorkerLightThreadContext() {
 
 WorkerLightThreadContext::~WorkerLightThreadContext() {
   pthread_mutex_destroy(&internal_lock_);
+  LOG(FATAL) << "We don't delete a thread context, we only clear its memory!";
 }
 
 bool WorkerLightThreadContext::Enter() {
@@ -176,8 +177,12 @@ void WorkerExecutionContext::Initialize() {
       get_canary_application()->get_statement_info_map());
 }
 
-void WorkerExecutionContext::Finalize() { DeallocatePartitionData(); }
+void WorkerExecutionContext::Finalize() {
+  DeallocatePartitionData();
+  clear_memory();
+}
 
+// TODO memory clear is not clear yet.
 void WorkerExecutionContext::Run() {
   // Processes commands.
   struct evbuffer* command;
@@ -193,6 +198,14 @@ void WorkerExecutionContext::Run() {
       case StageId::REQUEST_REPORT:
         CHECK(command == nullptr);
         ProcessRequestReport();
+        break;
+      case StageId::MIGRATE_IN:
+        // TODO
+        LOG(FATAL) << "Not implemented.";
+        break;
+      case StageId::MIGRATE_OUT:
+        // TODO
+        LOG(FATAL) << "Not implemented.";
         break;
       case StageId::PAUSE_EXECUTION:
         // TODO
@@ -398,11 +411,11 @@ void WorkerExecutionContext::PrepareTaskContext(
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
       task_context->read_partition_data_map_[pair.first] =
-          local_partition_data_.at(pair.first);
+          local_partition_data_.at(pair.first).get();
     } else {
       CHECK(pair.second == CanaryApplication::VariableAccess::WRITE);
       task_context->write_partition_data_map_[pair.first] =
-          local_partition_data_.at(pair.first);
+          local_partition_data_.at(pair.first).get();
     }
   }
   task_context->self_partition_id_ = get_value(get_partition_id());
@@ -447,8 +460,8 @@ void WorkerExecutionContext::AllocatePartitionData() {
       get_canary_application()->get_variable_info_map();
   for (auto variable_id :
        variable_group_info_map->at(get_variable_group_id()).variable_id_set) {
-    local_partition_data_[variable_id] =
-        variable_info_map->at(variable_id).data_prototype->Clone();
+    local_partition_data_[variable_id].reset(
+        variable_info_map->at(variable_id).data_prototype->Clone());
     local_partition_data_[variable_id]->Initialize();
   }
 }
@@ -457,7 +470,7 @@ void WorkerExecutionContext::DeallocatePartitionData() {
   for (auto& pair : local_partition_data_) {
     if (pair.second) {
       pair.second->Finalize();
-      delete pair.second;
+      pair.second.reset();
     }
   }
 }

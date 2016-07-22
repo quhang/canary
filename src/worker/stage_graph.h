@@ -121,23 +121,8 @@ class StageGraph {
   }
   //! The cycles for stages.
   void retrieve_cycle_stats(
-      std::map<StageId, std::pair<StatementId, double>>* cycle_storage) {
-    cycle_storage->swap(cycle_storage_);
-  }
+      std::map<StageId, std::pair<StatementId, double>>* cycle_storage_result);
 
-  //! Serialization/deserialization.
-  template <typename Archive>
-  void serialize(Archive& archive) {  // NOLINT
-    archive(self_variable_group_id_, self_partition_id_);
-    archive(uncomplete_stage_map_, ready_stage_queue_);
-    archive(variable_access_map_);
-    archive(received_control_flow_decisions_);
-    archive(next_statement_to_spawn_, next_stage_to_spawn_,
-            no_more_statement_to_spawn_);
-    archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
-            spawned_loops_);
-    archive(next_barrier_stage_id_, barrier_ready_stage_queue_);
-  }
   /*
    * Controls barrier bahavior.
    */
@@ -162,7 +147,25 @@ class StageGraph {
       StageId stage_id, StatementId statement_id,
       const CanaryApplication::StatementInfo& statement_info);
 
+ public:
+  //! Serialization/deserialization.
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(self_variable_group_id_, self_partition_id_);
+    archive(uncomplete_stage_map_, ready_stage_queue_);
+    archive(variable_access_map_);
+    archive(received_control_flow_decisions_);
+    archive(next_statement_to_spawn_, next_stage_to_spawn_,
+            no_more_statement_to_spawn_);
+    archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
+            spawned_loops_);
+    archive(last_finished_stage_id_, timestamp_storage_, cycle_storage_);
+    archive(next_barrier_stage_id_, barrier_ready_stage_queue_);
+  }
+
+ private:
   //! The statement info map, which describes the program.
+  // Caution: TRANSIENT.
   const CanaryApplication::StatementInfoMap* statement_info_map_ = nullptr;
   //! Maximum uncomplete stages.
   const size_t kMaxUncompleteStages = 10;

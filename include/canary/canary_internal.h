@@ -56,6 +56,7 @@
 #include <cereal/types/array.hpp>
 #include <cereal/types/list.hpp>
 #include <cereal/types/map.hpp>
+#include <cereal/types/memory.hpp>
 #include <cereal/types/set.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/tuple.hpp>
@@ -206,22 +207,31 @@ inline void CEREAL_LOAD_FUNCTION_NAME(CanaryInputArchive& ar,  // NOLINT
 inline void CEREAL_SAVE_FUNCTION_NAME(
     CanaryOutputArchive& ar,  // NOLINT
     const struct canary::RawEvbuffer& buffer) {
-  CHECK_NOTNULL(buffer.buffer);
-  const size_t length = evbuffer_get_length(buffer.buffer);
-  ar(length);
-  CHECK_EQ(evbuffer_add_buffer(ar.get_buffer(), buffer.buffer), 0);
-  evbuffer_free(buffer.buffer);
+  const bool has_buffer = (buffer.buffer != nullptr);
+  ar(has_buffer);
+  if (has_buffer) {
+    const size_t length = evbuffer_get_length(buffer.buffer);
+    ar(length);
+    CHECK_EQ(evbuffer_add_buffer(ar.get_buffer(), buffer.buffer), 0);
+    evbuffer_free(buffer.buffer);
+  }
 }
 
 //! Deserialization will allocate the buffer.
 inline void CEREAL_LOAD_FUNCTION_NAME(
     CanaryInputArchive& ar,                // NOLINT
     struct canary::RawEvbuffer& buffer) {  // NOLINT
-  size_t length;
-  ar(length);
-  buffer.buffer = evbuffer_new();
-  CHECK_EQ(static_cast<int>(length),
-           evbuffer_remove_buffer(ar.get_buffer(), buffer.buffer, length));
+  bool has_buffer;
+  ar(has_buffer);
+  if (!has_buffer) {
+    buffer.buffer = nullptr;
+  } else {
+    size_t length;
+    ar(length);
+    buffer.buffer = evbuffer_new();
+    CHECK_EQ(static_cast<int>(length),
+             evbuffer_remove_buffer(ar.get_buffer(), buffer.buffer, length));
+  }
 }
 }  // namespace cereal
 
@@ -333,6 +343,8 @@ enum class StageId : int32_t {
   REACH_BARRIER = -17,
   COMPLETE = -16,
   // Represents special commands.
+  MIGRATE_IN = -9,
+  MIGRATE_OUT = -8,
   PAUSE_EXECUTION = -7,
   INSTALL_BARRIER = -6,
   RELEASE_BARRIER = -5,

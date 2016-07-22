@@ -147,8 +147,6 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Loads a partition and returns its thread context.
   virtual WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) = 0;
-  //! Unloads a partition and wraps up its thread context.
-  virtual void UnloadPartition(WorkerLightThreadContext* thread_context) = 0;
   /*
    * Execution thread control. Called in asynchronous context.
    */
@@ -158,6 +156,13 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   WorkerLightThreadContext* GetActivatedThreadContext();
   //! Execution routine.
   static void* ExecutionRoutine(void* arg);
+  /*
+   * Helper function.
+   */
+  //! Constructs a thread context.
+  void ConstructThreadContext(const FullPartitionId& full_partition_id);
+  //! Destructs a thread context.
+  void DestructThreadContext(const FullPartitionId& full_partition_id);
 
  protected:
   /*
@@ -202,9 +207,6 @@ class WorkerScheduler : public WorkerSchedulerBase {
   //! Loads a partition and returns its thread context.
   WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) override;
-
-  //! Unloads a partition and wraps up its thread context.
-  void UnloadPartition(WorkerLightThreadContext* thread_context) override;
 };
 
 }  // namespace canary

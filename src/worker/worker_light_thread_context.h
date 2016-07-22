@@ -42,6 +42,7 @@
 
 #include <list>
 #include <map>
+#include <memory>
 
 #include "shared/canary_internal.h"
 
@@ -77,6 +78,13 @@ struct ControlDecisionCommand {
     archive(stage_id, decision);
   }
 };
+struct MigrateOutCommand {
+  WorkerId to_worker_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(to_worker_id);
+  }
+};
 
 template <typename CommandType>
 struct evbuffer* to_buffer(const CommandType& command) {
@@ -109,11 +117,44 @@ class WorkerLightThreadContext {
   struct StageBuffer {
     std::list<struct evbuffer*> buffer_list;
     int expected_buffer = -1;
+    // Caution: after saving, the buffer is destroyed.
+    template <typename Archive>
+    void save(Archive& archive) const {  // NOLINT
+      archive(buffer_list.size());
+      for (auto buffer : buffer_list) {
+        archive(RawEvbuffer{buffer});
+      }
+      archive(expected_buffer);
+    }
+    template <typename Archive>
+    void load(Archive& archive) {  // NOLINT
+      size_t buffer_size;
+      archive(buffer_size);
+      for (size_t i = 0; i < buffer_size; ++i) {
+        RawEvbuffer raw_buffer;
+        archive(raw_buffer);
+        buffer_list.push_back(raw_buffer.buffer);
+      }
+      archive(expected_buffer);
+    }
   };
   //! The buffer storing a command.
   struct CommandBuffer {
     StageId stage_id;
     struct evbuffer* command;
+    // Caution: after saving, the buffer is destroyed.
+    template <typename Archive>
+    void save(Archive& archive) const {  // NOLINT
+      archive(stage_id);
+      archive(RawEvbuffer{command});
+    }
+    template <typename Archive>
+    void load(Archive& archive) {  // NOLINT
+      archive(stage_id);
+      RawEvbuffer raw_buffer;
+      archive(raw_buffer);
+      command = raw_buffer.buffer;
+    }
   };
 
  public:
@@ -129,45 +170,19 @@ class WorkerLightThreadContext {
   virtual void Run() = 0;
 
  public:
-  //! Gets/sets the metadata of the thread.
+  //! Gets the metadata of the thread.
   ApplicationId get_application_id() const { return application_id_; }
-  void set_application_id(ApplicationId application_id) {
-    application_id_ = application_id;
-  }
   VariableGroupId get_variable_group_id() const { return variable_group_id_; }
-  void set_variable_group_id(VariableGroupId variable_group_id) {
-    variable_group_id_ = variable_group_id;
-  }
   PartitionId get_partition_id() const { return partition_id_; }
-  void set_partition_id(PartitionId partition_id) {
-    partition_id_ = partition_id;
-  }
-  PriorityLevel get_priority_level() const { return priority_level_; }
-  void set_priority_level(PriorityLevel priority_level) {
-    priority_level_ = priority_level;
-  }
   WorkerId get_worker_id() const { return worker_id_; }
-  void set_worker_id(WorkerId worker_id) { worker_id_ = worker_id; }
-  void set_activate_callback(std::function<void()> activate_callback) {
-    activate_callback_ = std::move(activate_callback);
-  }
   WorkerSendCommandInterface* get_send_command_interface() {
     return send_command_interface_;
-  }
-  void set_send_command_interface(WorkerSendCommandInterface* interface) {
-    send_command_interface_ = interface;
   }
   WorkerSendDataInterface* get_send_data_interface() {
     return send_data_interface_;
   }
-  void set_send_data_interface(WorkerSendDataInterface* interface) {
-    send_data_interface_ = interface;
-  }
   const CanaryApplication* get_canary_application() const {
     return canary_application_;
-  }
-  void set_canary_application(const CanaryApplication* canary_application) {
-    canary_application_ = canary_application;
   }
 
   //! Tries to enter the execution context of the thread. Returns true if there
@@ -190,20 +205,58 @@ class WorkerLightThreadContext {
   bool RetrieveData(StageId* stage_id,
                     std::list<struct evbuffer*>* buffer_list);
 
+ public:
+  virtual void load(CanaryInputArchive& archive) {  // NOLINT
+    archive(command_list_);
+    archive(stage_buffer_map_);
+    archive(ready_stages_);
+  }
+  virtual void save(CanaryOutputArchive& archive) const {  // NOLINT
+    // States are destroyed after serialization.
+    archive(command_list_);
+    archive(stage_buffer_map_);
+    archive(ready_stages_);
+  }
+  // Used after SAVE to clear all memory.
+  virtual void clear_memory() {
+    if (memory_cleared_) {
+      return;
+    }
+    memory_cleared_ = true;
+    command_list_.clear();
+    stage_buffer_map_.clear();
+    ready_stages_.clear();
+  }
+
  private:
-  //! Metadata.
+  friend class WorkerSchedulerBase;
+  // Caution: TRANSIENT.
   WorkerId worker_id_ = WorkerId::INVALID;
+  // Caution: TRANSIENT.
   ApplicationId application_id_ = ApplicationId::INVALID;
+  // Caution: TRANSIENT.
   VariableGroupId variable_group_id_ = VariableGroupId::INVALID;
+  // Caution: TRANSIENT.
   PartitionId partition_id_ = PartitionId::INVALID;
-  PriorityLevel priority_level_ = PriorityLevel::INVALID;
+  // Caution: TRANSIENT.
   std::function<void()> activate_callback_;
+  // Caution: TRANSIENT.
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
+  // Caution: TRANSIENT.
   WorkerSendDataInterface* send_data_interface_ = nullptr;
+  // Caution: TRANSIENT.
   const CanaryApplication* canary_application_ = nullptr;
   //! Synchronization lock.
+  // Caution: TRANSIENT.
   pthread_mutex_t internal_lock_;
+  // Caution: TRANSIENT.
   bool running_ = false;
+  // Caution: TRANSIENT.
+  bool memory_cleared_ = false;
+
+  /*
+   * States that need serialization.
+   */
   //! Received commands.
   std::list<CommandBuffer> command_list_;
   //! Received data.
@@ -260,10 +313,42 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   //! Deallocates data partitions.
   void DeallocatePartitionData();
 
+ public:
+  void load(CanaryInputArchive& archive) override {  // NOLINT
+    WorkerLightThreadContext::load(archive);
+    archive(stage_graph_);
+    archive(pending_gather_stages_);
+    archive(is_in_barrier_);
+    AllocatePartitionData();
+    for (auto& pair : local_partition_data_) {
+      VariableId variable_id;
+      archive(variable_id);
+      CHECK(pair.first == variable_id);
+      pair.second->Deserialize(archive);
+    }
+  }
+  void save(CanaryOutputArchive& archive) const override {  // NOLINT
+    WorkerLightThreadContext::save(archive);
+    archive(stage_graph_);
+    archive(pending_gather_stages_);
+    archive(is_in_barrier_);
+    for (auto& pair : local_partition_data_) {
+      archive(pair.first);
+      pair.second->Serialize(archive);
+      pair.second->Finalize();
+    }
+  }
+  void clear_memory() override {
+    WorkerLightThreadContext::clear_memory();
+    pending_gather_stages_.clear();
+    local_partition_data_.clear();
+    stage_graph_.~StageGraph();
+  }
+
  private:
   StageGraph stage_graph_;
   std::map<StageId, StatementId> pending_gather_stages_;
-  std::map<VariableId, PartitionData*> local_partition_data_;
+  std::map<VariableId, std::unique_ptr<PartitionData>> local_partition_data_;
   bool is_in_barrier_ = false;
 };
 

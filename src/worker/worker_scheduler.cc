@@ -162,27 +162,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     VLOG(1) << "Load partition: " << get_value(application_id) << "/"
             << get_value(pair.first) << "/" << get_value(pair.second);
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
-    CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
-    ++application_record_map_.at(application_id).local_partitions;
-    WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
-    // Sets metadata of the thread context.
-    thread_context->set_worker_id(self_worker_id_);
-    thread_context->set_application_id(application_id);
-    thread_context->set_variable_group_id(pair.first);
-    thread_context->set_partition_id(pair.second);
-    // Sets priority level.
-    thread_context->set_priority_level(PriorityLevel::FIRST);
-    // Sets related callback/interface.
-    thread_context->set_activate_callback(std::bind(
-        &WorkerSchedulerBase::ActivateThreadContext, this, thread_context));
-    thread_context->set_send_command_interface(send_command_interface_);
-    thread_context->set_send_data_interface(send_data_interface_);
-    // Sets the application.
-    thread_context->set_canary_application(
-        application_record_map_.at(application_id).loaded_application);
-    // Initializes the thread context.
-    thread_context->Initialize();
-    thread_map_[full_partition_id] = thread_context;
+    ConstructThreadContext(full_partition_id);
   }
   const auto first_barrier_stage =
       application_record_map_.at(application_id).first_barrier_stage;
@@ -203,21 +183,38 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end());
-    --application_record_map_.at(application_id).local_partitions;
-    UnloadPartition(iter->second);
     iter->second->Finalize();
-    // Caution: the thread context is not deleted, it remains there as a tomb.
-    thread_map_.erase(iter);
+    DestructThreadContext(full_partition_id);
   }
 }
 
 void WorkerSchedulerBase::ProcessMigrateInPartitions(
     const message::WorkerMigrateInPartitions& worker_command) {
-  LOG(FATAL) << "WORKER_MIGRATE_IN_PARTITIONS";
+  const auto application_id = worker_command.application_id;
+  for (const auto& pair : worker_command.partition_list) {
+    FullPartitionId full_partition_id{application_id, pair.first, pair.second};
+    ConstructThreadContext(full_partition_id);
+    auto iter = thread_map_.find(full_partition_id);
+    CHECK(iter != thread_map_.end());
+    iter->second->DeliverMessage(StageId::MIGRATE_IN, nullptr);
+  }
 }
 void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
     const message::WorkerMigrateOutPartitions& worker_command) {
-  LOG(FATAL) << "WORKER_MIGRATE_OUT_PARTITIONS";
+  const auto application_id = worker_command.application_id;
+  for (const auto& partition_migrate_record :
+       worker_command.migrate_out_partitions) {
+    FullPartitionId full_partition_id{
+        application_id, partition_migrate_record.variable_group_id,
+        partition_migrate_record.partition_id};
+    auto iter = thread_map_.find(full_partition_id);
+    CHECK(iter != thread_map_.end());
+    iter->second->DeliverMessage(
+        StageId::MIGRATE_OUT,
+        internal_message::to_buffer(internal_message::MigrateOutCommand{
+            partition_migrate_record.to_worker_id}));
+    DestructThreadContext(full_partition_id);
+  }
 }
 
 void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
@@ -281,6 +278,41 @@ void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
   return nullptr;
 }
 
+void WorkerSchedulerBase::ConstructThreadContext(
+    const FullPartitionId& full_partition_id) {
+  const auto application_id = full_partition_id.application_id;
+  WorkerLightThreadContext* thread_context = LoadPartition(full_partition_id);
+  thread_context->worker_id_ = self_worker_id_;
+  thread_context->application_id_ = application_id;
+  thread_context->variable_group_id_ = full_partition_id.variable_group_id;
+  thread_context->partition_id_ = full_partition_id.partition_id;
+  // Sets related callback/interface.
+  thread_context->activate_callback_ = std::bind(
+      &WorkerSchedulerBase::ActivateThreadContext, this, thread_context);
+  thread_context->send_command_interface_ = send_command_interface_;
+  thread_context->send_data_interface_ = send_data_interface_;
+  // Sets the application.
+  thread_context->canary_application_ =
+      application_record_map_.at(application_id).loaded_application;
+  // Initializes the thread context.
+  thread_context->Initialize();
+  // Registers the thread.
+  CHECK(thread_map_.find(full_partition_id) == thread_map_.end());
+  thread_map_[full_partition_id] = thread_context;
+  ++application_record_map_.at(application_id).local_partitions;
+}
+
+void WorkerSchedulerBase::DestructThreadContext(
+    const FullPartitionId& full_partition_id) {
+  // Deregisters the thread.
+  auto iter = thread_map_.find(full_partition_id);
+  CHECK(iter != thread_map_.end());
+  thread_map_.erase(iter);
+  --application_record_map_.at(full_partition_id.application_id)
+        .local_partitions;
+  // Caution: the thread context is not deleted, it remains there as a tomb.
+}
+
 void WorkerScheduler::StartExecution() {
   // Reads global variable: the number of worker threads.
   thread_handle_list_.resize(num_cores_);
@@ -313,12 +345,6 @@ void WorkerScheduler::UnloadApplicationBinary(
 
 WorkerLightThreadContext* WorkerScheduler::LoadPartition(FullPartitionId) {
   return new WorkerExecutionContext();
-}
-
-void WorkerScheduler::UnloadPartition(
-    WorkerLightThreadContext* thread_context) {
-  CHECK_NOTNULL(thread_context);
-  return;
 }
 
 }  // namespace canary
