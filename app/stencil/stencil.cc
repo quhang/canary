@@ -105,6 +105,7 @@ class StencilApplication : public CanaryApplication {
 
     Loop(FLAG_app_iterations);
 
+    TrackNeeded();
     ReadAccess(d_data);
     ReadAccess(d_metadata);
     Scatter([=](CanaryTaskContext* task_context) {
@@ -218,8 +219,8 @@ class StencilApplication : public CanaryApplication {
       LoadFlag("partition_x", FLAG_app_partition_x, archive);
       LoadFlag("partition_y", FLAG_app_partition_y, archive);
       LoadFlag("partition_z", FLAG_app_partition_z, archive);
-      LoadFlag("cell_x", FLAG_app_cell_z, archive);
-      LoadFlag("cell_y", FLAG_app_cell_z, archive);
+      LoadFlag("cell_x", FLAG_app_cell_x, archive);
+      LoadFlag("cell_y", FLAG_app_cell_y, archive);
       LoadFlag("cell_z", FLAG_app_cell_z, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("ghost", FLAG_app_ghost, archive);

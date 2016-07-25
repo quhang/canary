@@ -1079,8 +1079,8 @@ class ParsecApplication : public CanaryApplication {
       LoadFlag("partition_x", FLAG_app_partition_x, archive);
       LoadFlag("partition_y", FLAG_app_partition_y, archive);
       LoadFlag("partition_z", FLAG_app_partition_z, archive);
-      LoadFlag("fold_x", FLAG_app_fold_z, archive);
-      LoadFlag("fold_y", FLAG_app_fold_z, archive);
+      LoadFlag("fold_x", FLAG_app_fold_x, archive);
+      LoadFlag("fold_y", FLAG_app_fold_y, archive);
       LoadFlag("fold_z", FLAG_app_fold_z, archive);
       LoadFlag("fold_depth_y", FLAG_app_fold_depth_y, archive);
       LoadFlag("frames", FLAG_app_frames, archive);
