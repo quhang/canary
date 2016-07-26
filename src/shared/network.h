@@ -179,7 +179,8 @@ inline struct evbuffer* send_as_much(int socket_fd,
     if (status == -1) {
       break;
     }
-    CHECK_EQ(evbuffer_drain(send_buffer, status), 0);
+    // No need to drain again, evbuffer_write already drains.
+    // CHECK_EQ(evbuffer_drain(send_buffer, status), 0);
     // A message is sent.
     if (evbuffer_get_length(send_buffer) == 0) {
       evbuffer_free(send_buffer);
