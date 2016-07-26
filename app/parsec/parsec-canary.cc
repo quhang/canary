@@ -136,8 +136,8 @@ class PartitionData {
   std::vector<Cell*> last_cells_;
   struct Metadata {
     // Global index/local index.
-    std::list<std::pair<int, int>> local_to_ghost_indices;
-    std::list<std::pair<int, int>> ghost_to_ghost_indices;
+    std::list<std::pair<int64_t, int>> local_to_ghost_indices;
+    std::list<std::pair<int64_t, int>> ghost_to_ghost_indices;
     template <typename Archive>
     void serialize(Archive& archive) {  // NOLINT
       archive(local_to_ghost_indices);
@@ -288,7 +288,8 @@ void PartitionData::InitMetadata() {
       for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
         for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex(); ++ix) {
           if (!local_grid_.Contain(ix, iy, iz)) {
-            const int global_index = ghost_grid_.GetGlobalCellRank(ix, iy, iz);
+            const int64_t global_index
+                = ghost_grid_.GetGlobalCellRank(ix, iy, iz);
             const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
             metadata.ghost_to_ghost_indices.emplace_back(global_index, index);
           }
@@ -311,7 +312,7 @@ void PartitionData::InitMetadata() {
           for (int iy = ghost_grid_.get_sy(); iy < ghost_grid_.get_ey(); ++iy)
             for (int ix = ghost_grid_.get_sx(); ix < ghost_grid_.get_ex();
                  ++ix) {
-              const int global_index =
+              const int64_t global_index =
                   ghost_grid_.GetGlobalCellRank(ix, iy, iz);
               const int index = ghost_grid_.GetLocalCellRank(ix, iy, iz);
               if (neighbor_ghost_grid.Contain(ix, iy, iz)) {
@@ -849,7 +850,7 @@ void PartitionData::RecvExchangeGhostCells(
       size_t owner_cells = 0;
       iarchive(owner_cells);
       while (owner_cells-- > 0) {
-        int global_index;
+        int64_t global_index;
         iarchive(global_index);
         int local_index = ghost_grid_.GlobalCellRankToLocal(global_index);
         DeserializeFullCell(iarchive, local_index);
@@ -920,7 +921,7 @@ void PartitionData::RecvDensityGhost(
     size_t density_cells = 0;
     iarchive(density_cells);
     while (density_cells-- > 0) {
-      int global_index;
+      int64_t global_index;
       iarchive(global_index);
       int index = ghost_grid_.GlobalCellRankToLocal(global_index);
       DeserializeDensity(iarchive, index);

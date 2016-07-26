@@ -30,7 +30,7 @@ class StencilApplication : public CanaryApplication {
     auto d_grid = DeclareVariable<helper::Grid>();
     auto d_data = DeclareVariable<std::vector<double>>();
 
-    typedef std::list<std::pair<int, int>> GlobalRankAndLocalRank;
+    typedef std::list<std::pair<int64_t, int>> GlobalRankAndLocalRank;
     auto d_metadata = DeclareVariable<std::map<int, GlobalRankAndLocalRank>>();
 
     auto d_global = DeclareVariable<int>(1);
@@ -94,7 +94,7 @@ class StencilApplication : public CanaryApplication {
               for (int iy = grid.get_sy(); iy < grid.get_ey(); ++iy)
                 for (int ix = grid.get_sx(); ix < grid.get_ex(); ++ix) {
                   if (neighbor_ghost_grid.Contain(ix, iy, iz)) {
-                    const int global_index =
+                    const int64_t global_index =
                         ghost_grid.GetGlobalCellRank(ix, iy, iz);
                     const int index = ghost_grid.GetLocalCellRank(ix, iy, iz);
                     indices.emplace_back(global_index, index);
@@ -137,7 +137,7 @@ class StencilApplication : public CanaryApplication {
         size_t ghost_cell_size;
         archive(ghost_cell_size);
         for (size_t i = 0; i < ghost_cell_size; ++i) {
-          int global_index;
+          int64_t global_index;
           double value;
           archive(global_index, value);
           (*data)[ghost_grid.GlobalCellRankToLocal(global_index)] = value;

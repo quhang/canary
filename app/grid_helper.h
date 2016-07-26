@@ -252,12 +252,20 @@ class Grid {
             (global_z - subgrid_.first.z) * subgrid_size_.y) *
                subgrid_size_.x;
   }
+  // Caution global rank might overflow int.
   //! Gets the global cell rank from a global cell index.
-  inline int GetGlobalCellRank(int global_x, int global_y, int global_z) const {
-    return global_x + (global_y + global_z * grid_size_.y) * grid_size_.x;
+  inline int64_t GetGlobalCellRank(
+      int global_x, int global_y, int global_z) const {
+    int64_t result = global_z;
+    result *= grid_size_.y;
+    result += global_y;
+    result *= grid_size_.x;
+    result += global_x;
+    return result;
+    // return global_x + (global_y + global_z * grid_size_.y) * grid_size_.x;
   }
   //! Transform a global cell rank to a local cell rank.
-  inline int GlobalCellRankToLocal(int global_rank) const {
+  inline int GlobalCellRankToLocal(int64_t global_rank) const {
     const auto& global_index = rank_to_index(global_rank, grid_size_);
     return GetLocalCellRank(global_index.x, global_index.y, global_index.z);
   }
@@ -296,7 +304,7 @@ class Grid {
     return index.x + (index.y + index.z * split.y) * split.x;
   }
   //! Transforms a rank to an index.
-  inline IntPoint rank_to_index(int rank, const IntPoint& split) const {
+  inline IntPoint rank_to_index(int64_t rank, const IntPoint& split) const {
     const int x = rank % split.x;
     rank -= x;
     rank /= split.x;
