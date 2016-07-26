@@ -1067,6 +1067,7 @@ class ParsecApplication : public CanaryApplication {
       float sum = 0;
       sum = task_context->Reduce(sum, std::plus<float>());
       printf("Total energy: %f\n", sum);
+      fflush(stdout);
       return 0;
     });
   }

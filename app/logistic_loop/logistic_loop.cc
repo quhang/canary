@@ -129,6 +129,7 @@ class LogisticLoopApplication : public CanaryApplication {
         printf("%f ", data);
       }
       printf("\n");
+      fflush(stdout);
     });
   }
 

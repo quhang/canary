@@ -183,6 +183,7 @@ class KmeanLoopApplication : public CanaryApplication {
         printf("%f ", point[0]);
       }
       printf("\n");
+      fflush(stdout);
     });
   }
 

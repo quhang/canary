@@ -206,6 +206,7 @@ class StencilApplication : public CanaryApplication {
       printf("Sum: %f Reference: %f\n", sum,
              1. * FLAG_app_cell_x * FLAG_app_cell_y * FLAG_app_cell_z *
                  (FLAG_app_cell_x + FLAG_app_cell_y + FLAG_app_cell_z - 3) / 2);
+      fflush(stdout);
       return 0;
     });
   }

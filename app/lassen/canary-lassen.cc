@@ -414,6 +414,7 @@ class LassenApplication : public CanaryApplication {
       std::cout << "LInf error = " << result[2] << "\n";
       std::cout
           << "===========================================================";
+      std::cout << std::endl;
       return 0;
     });
   }
