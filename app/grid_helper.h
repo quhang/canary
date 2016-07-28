@@ -236,7 +236,7 @@ class Grid {
                           (int)((cord_x - domain_.first.x) / cell_size_.x)),
                  subgrid_.first.x);
     const int y =
-        std::max(std::min(subgrid_.second.x - 1,
+        std::max(std::min(subgrid_.second.y - 1,
                           (int)((cord_y - domain_.first.y) / cell_size_.y)),
                  subgrid_.first.y);
     const int z =
@@ -364,6 +364,8 @@ class Grid {
     subdomain_.second.x = std::min(subdomain_.second.x, domain_.second.x);
     subdomain_.second.y = std::min(subdomain_.second.y, domain_.second.y);
     subdomain_.second.z = std::min(subdomain_.second.z, domain_.second.z);
+    subgrid_size_ = subgrid_.second - subgrid_.first;
+    subdomain_size_ = subdomain_.second - subdomain_.first;
   }
   //! Initialization flag.
   bool initialized_ = false;
