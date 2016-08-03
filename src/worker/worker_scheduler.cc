@@ -142,6 +142,7 @@ void WorkerSchedulerBase::ProcessLoadApplication(
   application_record.first_barrier_stage = worker_command.first_barrier_stage;
   application_record.local_partitions = 0;
   LoadApplicationBinary(&application_record);
+  // TODO(quhang): sets the priority level.
 }
 
 void WorkerSchedulerBase::ProcessUnloadApplication(
@@ -246,7 +247,9 @@ void WorkerSchedulerBase::DeliverCommandToEachThread(
 void WorkerSchedulerBase::ActivateThreadContext(
     WorkerLightThreadContext* thread_context) {
   PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-  activated_thread_queue_.push_back(thread_context);
+  const auto application_id = thread_context->get_application_id();
+  const auto priority_level = application_priority_level_map_[application_id];
+  activated_thread_priority_queue_[priority_level].push_back(thread_context);
   PCHECK(pthread_mutex_unlock(&scheduling_lock_) == 0);
   PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
 }
@@ -254,13 +257,55 @@ void WorkerSchedulerBase::ActivateThreadContext(
 WorkerLightThreadContext* WorkerSchedulerBase::GetActivatedThreadContext() {
   WorkerLightThreadContext* result = nullptr;
   PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-  while (activated_thread_queue_.empty()) {
+  while (true) {
+    auto iter = activated_thread_priority_queue_.begin();
+    while (iter != activated_thread_priority_queue_.end()) {
+      auto& queue = iter->second;
+      if (queue.empty()) {
+        // Moves to the next queue.
+        iter = activated_thread_priority_queue_.erase(iter);
+      } else {
+        // Takes an activated thread context.
+        result = queue.front();
+        queue.pop_front();
+        break;
+      }
+    }
+    // If an activated thread context is taken.
+    if (result) {
+      break;
+    }
     PCHECK(pthread_cond_wait(&scheduling_cond_, &scheduling_lock_) == 0);
   }
-  result = activated_thread_queue_.front();
-  activated_thread_queue_.pop_front();
   pthread_mutex_unlock(&scheduling_lock_);
   return result;
+}
+
+void WorkerSchedulerBase::SetApplicationPriorityLevel(
+    ApplicationId application_id, PriorityLevel priority_level) {
+  PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+  // Rearranges the priority queue if a priority level is changed.
+  const bool rearrange_priority_queue =
+      (application_priority_level_map_.find(application_id) !=
+       application_priority_level_map_.end());
+  application_priority_level_map_[application_id] = priority_level;
+  if (rearrange_priority_queue) {
+    RearrangePriorityQueue();
+  }
+  pthread_mutex_unlock(&scheduling_lock_);
+}
+
+void WorkerSchedulerBase::RearrangePriorityQueue() {
+  decltype(activated_thread_priority_queue_) clone;
+  clone.swap(activated_thread_priority_queue_);
+  for (auto& pair : clone)
+    for (auto& thread_context : pair.second) {
+      const auto application_id = thread_context->get_application_id();
+      const auto priority_level =
+          application_priority_level_map_[application_id];
+      activated_thread_priority_queue_[priority_level].push_back(
+          thread_context);
+    }
 }
 
 void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {

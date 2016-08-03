@@ -154,6 +154,12 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   void ActivateThreadContext(WorkerLightThreadContext* thread_context);
   //! Retrieves an activated thread context.
   WorkerLightThreadContext* GetActivatedThreadContext();
+  //! Sets the priority level of an application.
+  void SetApplicationPriorityLevel(ApplicationId application_id,
+                                   PriorityLevel priority_level);
+  //! Rearranges the thread context priority queue after priority levels of
+  // applications are changed.
+  void RearrangePriorityQueue();
   //! Execution routine.
   static void* ExecutionRoutine(void* arg);
   /*
@@ -174,7 +180,10 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! All thread contexts.
   std::map<FullPartitionId, WorkerLightThreadContext*> thread_map_;
   //! Activated thread contexts.
-  std::list<WorkerLightThreadContext*> activated_thread_queue_;
+  std::map<PriorityLevel, std::list<WorkerLightThreadContext*>>
+      activated_thread_priority_queue_;
+  //! The priority level of applications, used for scheduling.
+  std::map<ApplicationId, PriorityLevel> application_priority_level_map_;
   //! Execution thread handlers.
   std::vector<pthread_t> thread_handle_list_;
   /*

@@ -9,6 +9,7 @@
 
 #include "shared/initialize.h"
 #include "controller/controller_communication_manager.h"
+#include "controller/launch_communication_manager.h"
 #include "controller/controller_scheduler.h"
 #include "worker/worker_communication_manager.h"
 #include "worker/worker_light_thread_context.h"
@@ -34,6 +35,12 @@ class TestControllerScheduler : public ControllerSchedulerBase {
  protected:
   //! Called when receiving commands from a worker.
   void InternalReceiveCommand(struct evbuffer* buffer) override {
+    CHECK_NOTNULL(buffer);
+    LOG(WARNING) << "Not implemented.";
+  }
+
+  void InternalReceiveLaunchCommand(LaunchCommandId,
+                                    struct evbuffer* buffer) override {
     CHECK_NOTNULL(buffer);
     LOG(FATAL) << "Not implemented.";
   }
@@ -292,10 +299,12 @@ class TestWorkerScheduler : public WorkerSchedulerBase {
 void LaunchController() {
   network::EventMainThread event_main_thread;
   ControllerCommunicationManager manager;
+  LaunchCommunicationManager launch_manager;
   TestControllerScheduler scheduler;
   manager.Initialize(&event_main_thread, &scheduler);  // command receiver.
+  launch_manager.Initialize(&event_main_thread, &scheduler);  // Not used.
   scheduler.Initialize(&event_main_thread,             // command sender.
-                       &manager);                      // data sender.
+                       &manager, &launch_manager);     // data sender.
   // The main thread runs both the manager and the scheduler.
   event_main_thread.Run();
 }

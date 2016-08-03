@@ -48,6 +48,7 @@
 #include "shared/canary_internal.h"
 
 #include "controller/controller_communication_interface.h"
+#include "controller/launch_communication_interface.h"
 #include "message/message_include.h"
 #include "shared/canary_application.h"
 #include "shared/network.h"
@@ -55,7 +56,8 @@
 
 namespace canary {
 
-class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
+class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
+                                public LaunchReceiveCommandInterface {
  public:
   //! Constructor.
   ControllerSchedulerBase() {}
@@ -63,11 +65,16 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
   virtual ~ControllerSchedulerBase() {}
   //! Initialize.
   void Initialize(network::EventMainThread* event_main_thread,
-                  ControllerSendCommandInterface* send_command_interface);
+                  ControllerSendCommandInterface* send_command_interface,
+                  LaunchSendCommandInterface* launch_send_command_interface);
 
   /*
    * Callbacks exposed to the synchronous context.
    */
+  //! Called when receiving a launching command. The message header is kept, and
+  // the buffer ownership is transferred.
+  void ReceiveLaunchCommand(LaunchCommandId launch_command_id,
+                            struct evbuffer* buffer) override;
   //! Called when receiving a command. The message header is kept, and the
   // buffer ownership is transferred.
   void ReceiveCommand(struct evbuffer* buffer) override;
@@ -78,6 +85,9 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
   void NotifyWorkerIsUp(WorkerId worker_id) override;
 
  protected:
+  //! Called when receiving launching commands from a launcher.
+  virtual void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
+                                            struct evbuffer* buffer) = 0;
   //! Called when receiving commands from a worker.
   virtual void InternalReceiveCommand(struct evbuffer* buffer) = 0;
   //! Called when a worker is down, even if it is shut down by the controller.
@@ -89,6 +99,7 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface {
  protected:
   network::EventMainThread* event_main_thread_ = nullptr;
   ControllerSendCommandInterface* send_command_interface_ = nullptr;
+  LaunchSendCommandInterface* launch_send_command_interface_ = nullptr;
 };
 
 class ControllerScheduler : public ControllerSchedulerBase {
@@ -128,6 +139,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
   virtual ~ControllerScheduler() {}
 
  protected:
+  void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
+                                    struct evbuffer* buffer) override;
   //! Called when receiving commands from a worker.
   void InternalReceiveCommand(struct evbuffer* buffer) override;
   //! Called when a worker is down, even if it is shut down by the controller.
@@ -140,8 +153,10 @@ class ControllerScheduler : public ControllerSchedulerBase {
   /*
    * Processes messages from the launcher or workers.
    */
-  void ProcessLaunchApplication(message::LaunchApplication* launch_message);
-  void ProcessResumeApplication(message::ResumeApplication* resume_message);
+  void ProcessLaunchApplication(LaunchCommandId launch_command_id,
+                                message::LaunchApplication* launch_message);
+  void ProcessResumeApplication(LaunchCommandId launch_command_id,
+                                message::ResumeApplication* resume_message);
   void ProcessMigrationInPrepared(
       message::ControllerRespondMigrationInPrepared* respond_message);
   void ProcessMigrationInDone(

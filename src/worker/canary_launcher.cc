@@ -50,17 +50,26 @@
 #include "shared/initialize.h"
 #include "shared/network.h"
 
+// --launch_application=./app/logistic_loop/liblogistic_loop.so iterations=1
 DEFINE_string(launch_application, "",
               "Launch an application given its binary location.");
 // Auxiliary info for launching an application.
 DEFINE_int32(launch_num_worker, -1, "Specify the number of worker.");
 DEFINE_int32(launch_first_barrier, -1, "Specify the first barrier stage.");
 
+// --resume_application=1
 DEFINE_int32(resume_application, -1,
-             "Resume an applicaiton given its application id.");
+             "Resume an application given its application id.");
+
+// --control_application=1 --control_priority=1
+DEFINE_int32(control_application, -1,
+             "Control an application's priority given its application id.");
+// Auxiliary info for controlling an application.
+DEFINE_int32(control_priority, -1, "Specify the priority level.");
 
 namespace {
-void SendLaunchMessage(struct evbuffer* buffer) {
+//! Connects to the controller and returns the channel socket fd.
+int ConnectToController() {
   using namespace canary;  // NOLINT
   struct addrinfo hints;
   network::initialize_addrinfo(&hints, false);
@@ -78,14 +87,46 @@ void SendLaunchMessage(struct evbuffer* buffer) {
                              available_addresses->ai_addrlen);
   freeaddrinfo(available_addresses);
   PCHECK(status == 0);
-  auto length = evbuffer_get_length(buffer);
-  ssize_t written_bytes =
-      write(result_fd, evbuffer_pullup(buffer, length), length);
-  PCHECK(written_bytes >= 0);
-  CHECK_EQ(static_cast<size_t>(written_bytes), length)
-      << "Networking buffer is too small.";
+  return result_fd;
+}
+
+//! Disconnects with the controller.
+void DisconnectWithController(int socket_fd) {
+  using namespace canary;  // NOLINT
+  network::close_socket(socket_fd);
+}
+
+//! Sends a launch message and waits for response.
+template <typename LaunchResponseMessageType, typename LaunchMessageType>
+LaunchResponseMessageType LaunchAndWaitResponse(
+    const LaunchMessageType& launch_message) {
+  using namespace canary;  // NOLINT
+  const int socket_fd = ConnectToController();
+  CHECK(socket_fd != -1);
+  struct evbuffer* buffer =
+      message::SerializeMessageWithControlHeader(launch_message);
+  do {
+    PCHECK(evbuffer_write(buffer, socket_fd) != -1);
+  } while (evbuffer_get_length(buffer) != 0);
   evbuffer_free(buffer);
-  network::close_socket(result_fd);
+  buffer = evbuffer_new();
+  while (evbuffer_read(buffer, socket_fd, -1) > 0) {
+    if (struct evbuffer* whole_message =
+            message::SegmentControlMessage(buffer)) {
+      DisconnectWithController(socket_fd);
+      auto header = CHECK_NOTNULL(message::ExamineControlHeader(whole_message));
+      CHECK(header->category_group ==
+            message::MessageCategoryGroup::LAUNCH_RESPONSE_COMMAND);
+      LaunchResponseMessageType response_message;
+      CHECK(header->category ==
+            message::get_message_category(response_message));
+      message::RemoveControlHeader(whole_message);
+      message::DeserializeMessage(whole_message, &response_message);
+      return std::move(response_message);
+    }
+  }
+  LOG(FATAL) << "Launch response is not received!";
+  return LaunchResponseMessageType();
 }
 }  // namespace
 
@@ -110,15 +151,41 @@ int main(int argc, char** argv) {
     launch_application.application_parameter = ss.str();
     launch_application.fix_num_worker = FLAGS_launch_num_worker;
     launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
-    SendLaunchMessage(
-        message::SerializeMessageWithControlHeader(launch_application));
-    printf("Application launched.\n");
+    auto response = LaunchAndWaitResponse<message::LaunchApplicationResponse>(
+        launch_application);
+    if (response.succeed) {
+      printf("Launching application (id=%d) succeeded!\n",
+             response.application_id);
+    } else {
+      printf("Launching application failed!\n%s\n",
+             response.error_message.c_str());
+    }
   } else if (FLAGS_resume_application != -1) {
     message::ResumeApplication resume_application;
     resume_application.application_id = FLAGS_resume_application;
-    SendLaunchMessage(
-        message::SerializeMessageWithControlHeader(resume_application));
-    printf("Application resumed.\n");
+    auto response = LaunchAndWaitResponse<message::ResumeApplicationResponse>(
+        resume_application);
+    if (response.succeed) {
+      printf("Resuming application (id=%d) succeeded!\n",
+             response.application_id);
+    } else {
+      printf("Resuming application failed!\n%s\n",
+             response.error_message.c_str());
+    }
+  } else if (FLAGS_control_application != -1) {
+    message::ControlApplicationPriority control_application;
+    control_application.application_id = FLAGS_control_application;
+    control_application.priority_level = FLAGS_control_priority;
+    auto response =
+        LaunchAndWaitResponse<message::ControlApplicationPriorityResponse>(
+            control_application);
+    if (response.succeed) {
+      printf("Controlling application's priority (id=%d) succeeded!\n",
+             response.application_id);
+    } else {
+      printf("Controlling application's priority failed!\n%s\n",
+             response.error_message.c_str());
+    }
   }
   return 0;
 }

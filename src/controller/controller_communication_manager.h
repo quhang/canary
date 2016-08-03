@@ -106,8 +106,7 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   void Initialize(
       network::EventMainThread* event_main_thread,
       ControllerReceiveCommandInterface* command_receiver,
-      const std::string& controller_service = FLAGS_controller_service,
-      const std::string& launch_service = FLAGS_launch_service);
+      const std::string& controller_service = FLAGS_controller_service);
 
   //! Shuts down the listener.
   void Finalize();
@@ -122,13 +121,6 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   static void DispatchAcceptEvent(struct evconnlistener* listener,
                                   int socket_fd, struct sockaddr* address,
                                   int socklen, void* arg);
-
-  //! Dispatches the accept event of the launching port.
-  // Sync call.
-  static void DispatchLaunchAcceptEvent(struct evconnlistener* listener,
-                                        int socket_fd, struct sockaddr* address,
-                                        int socklen, void* arg);
-
   //! Dispatches the accept error event of the listening controller port.
   // Sync call.
   static void DispatchAcceptErrorEvent(struct evconnlistener*, void*);
@@ -150,11 +142,6 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
   // Sync call.
   void CallbackAcceptEvent(struct evconnlistener* listener, int socket_fd,
                            struct sockaddr* address, int socklen);
-
-  //! Receives the accept event of the launching port.
-  // Sync call.
-  void CallbackLaunchAcceptEvent(struct evconnlistener* listener, int socket_fd,
-                                 struct sockaddr* address, int socklen);
 
   //! Receives data or error on a socket to a worker.
   // Sync call.
@@ -282,9 +269,6 @@ class ControllerCommunicationManager : public ControllerSendCommandInterface {
 
   int listening_socket_ = -1;
   struct evconnlistener* listening_event_ = nullptr;
-
-  int launch_listening_socket_ = -1;
-  struct evconnlistener* launch_listening_event_ = nullptr;
 };
 
 }  // namespace canary

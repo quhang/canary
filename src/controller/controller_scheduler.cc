@@ -47,9 +47,18 @@ namespace canary {
 
 void ControllerSchedulerBase::Initialize(
     network::EventMainThread* event_main_thread,
-    ControllerSendCommandInterface* send_command_interface) {
+    ControllerSendCommandInterface* send_command_interface,
+    LaunchSendCommandInterface* launch_send_command_interface) {
   event_main_thread_ = CHECK_NOTNULL(event_main_thread);
   send_command_interface_ = CHECK_NOTNULL(send_command_interface);
+  launch_send_command_interface_ = CHECK_NOTNULL(launch_send_command_interface);
+}
+
+void ControllerSchedulerBase::ReceiveLaunchCommand(
+    LaunchCommandId launch_command_id, struct evbuffer* buffer) {
+  event_main_thread_->AddInjectedEvent(
+      std::bind(&ControllerSchedulerBase::InternalReceiveLaunchCommand, this,
+                launch_command_id, buffer));
 }
 
 void ControllerSchedulerBase::ReceiveCommand(struct evbuffer* buffer) {
@@ -67,6 +76,33 @@ void ControllerSchedulerBase::NotifyWorkerIsUp(WorkerId worker_id) {
       &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
 }
 
+#define PROCESS_LAUNCH_MESSAGE(TYPE, METHOD)                          \
+  case MessageCategory::TYPE: {                                       \
+    auto message =                                                    \
+        new message::get_message_type<MessageCategory::TYPE>::Type(); \
+    message::RemoveControlHeader(buffer);                             \
+    message::DeserializeMessage(buffer, message);                     \
+    METHOD(launch_command_id, message);                               \
+    break;                                                            \
+  }
+void ControllerScheduler::InternalReceiveLaunchCommand(
+    LaunchCommandId launch_command_id, struct evbuffer* buffer) {
+  CHECK_NOTNULL(buffer);
+  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+  using message::MessageCategoryGroup;
+  using message::MessageCategory;
+  CHECK(header->category_group == MessageCategoryGroup::LAUNCH_COMMAND);
+  switch (header->category) {
+    PROCESS_LAUNCH_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
+    PROCESS_LAUNCH_MESSAGE(RESUME_APPLICATION, ProcessResumeApplication);
+    PROCESS_LAUNCH_MESSAGE(CONTROL_APPLICATION_PRIORITY,
+                           ProcessControlApplicationPriority);
+    default:
+      LOG(FATAL) << "Unexpected message type!";
+  }  // switch category.
+}
+#undef PROCESS_LAUNCH_MESSAGE
+
 #define PROCESS_MESSAGE(TYPE, METHOD)                                 \
   case MessageCategory::TYPE: {                                       \
     auto message =                                                    \
@@ -81,41 +117,26 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
   auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
-  switch (header->category_group) {
-    case MessageCategoryGroup::CONTROLLER_COMMAND:
-      switch (header->category) {
-        // A worker is ready for receiving a migrated partition.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
-                        ProcessMigrationInPrepared);
-        // A worker already received a migrated partition.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_DONE,
-                        ProcessMigrationInDone);
-        // A worker completes a partition.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_PARTITION_DONE,
-                        ProcessPartitionDone);
-        // A worker responds the status of a partiton.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_PARTITION,
-                        ProcessStatusOfPartition);
-        // A worker responds its status.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER,
-                        ProcessStatusOfWorker);
-        // A worker responds that a barrier has been reached.
-        PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
-        default:
-          LOG(FATAL) << "Unexpected message type!";
-      }  // switch category.
-      break;
-    case MessageCategoryGroup::LAUNCH_COMMAND:
-      switch (header->category) {
-        PROCESS_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
-        PROCESS_MESSAGE(RESUME_APPLICATION, ProcessResumeApplication);
-        default:
-          LOG(FATAL) << "Unexpected message type!";
-      }  // switch category.
-      break;
+  CHECK(header->category_group == MessageCategoryGroup::CONTROLLER_COMMAND);
+  switch (header->category) {
+    // A worker is ready for receiving a migrated partition.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
+                    ProcessMigrationInPrepared);
+    // A worker already received a migrated partition.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_MIGRATION_IN_DONE,
+                    ProcessMigrationInDone);
+    // A worker completes a partition.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_PARTITION_DONE, ProcessPartitionDone);
+    // A worker responds the status of a partiton.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_PARTITION,
+                    ProcessStatusOfPartition);
+    // A worker responds its status.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER, ProcessStatusOfWorker);
+    // A worker responds that a barrier has been reached.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
     default:
-      LOG(FATAL) << "Invalid message header!";
-  }  // switch category group.
+      LOG(FATAL) << "Unexpected message type!";
+  }  // switch category.
 }
 #undef PROCESS_MESSAGE
 
@@ -140,22 +161,37 @@ void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
  * Processes commands.
  */
 void ControllerScheduler::ProcessLaunchApplication(
+    LaunchCommandId launch_command_id,
     message::LaunchApplication* launch_message) {
   std::unique_ptr<message::LaunchApplication> delete_when_exit(launch_message);
+  message::LaunchApplicationResponse response;
+  response.succeed = true;
   if (launch_message->fix_num_worker == 0) {
-    LOG(ERROR) << "Invalid application launching command!";
-    return;
+    response.succeed = false;
+    response.error_message = "Invalid format!";
   }
-  if (!HaveEnoughWorkerForLaunching(launch_message->fix_num_worker)) {
-    LOG(ERROR) << "Failed to launch application: not enough workers!";
+  if (response.succeed &&
+      !HaveEnoughWorkerForLaunching(launch_message->fix_num_worker)) {
+    response.succeed = false;
+    response.error_message = "Not enough workers!";
+  }
+  if (!response.succeed) {
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
     return;
   }
   // Assigns application id.
   const ApplicationId assigned_application_id = (next_application_id_++);
+  response.application_id = get_value(assigned_application_id);
   auto& application_record = application_map_[assigned_application_id];
   if (!FillInApplicationLaunchInfo(*launch_message, &application_record)) {
-    LOG(ERROR) << "Failed to launch application!";
     application_map_.erase(assigned_application_id);
+    response.succeed = false;
+    response.error_message = "Application binary is not found!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
     return;
   }
   InitializeLoggingFile();
@@ -173,34 +209,80 @@ void ControllerScheduler::ProcessLaunchApplication(
   UpdateWorkerOwnedPartitions(assigned_application_id,
                               application_record.per_app_partition_map);
   RequestLoadPartitions(assigned_application_id);
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
   LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
             << " (" << launch_message->binary_location.c_str() << ").";
 }
 
 void ControllerScheduler::ProcessResumeApplication(
+    LaunchCommandId launch_command_id,
     message::ResumeApplication* resume_message) {
   std::unique_ptr<message::ResumeApplication> delete_when_exit(resume_message);
+  message::ResumeApplicationResponse response;
+  response.succeed = true;
   if (resume_message->application_id < 0) {
-    LOG(ERROR) << "Invalid application resuming command!";
+    response.succeed = false;
+    response.error_message = "Invalid application id!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
     return;
   }
   const auto application_id =
       static_cast<ApplicationId>(resume_message->application_id);
   if (application_map_.find(application_id) == application_map_.end()) {
-    LOG(ERROR)
-        << "Invalid application resuming command: invalid application id!!";
+    response.succeed = false;
+    response.error_message = "The specified application does not exist!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
     return;
   }
   auto& application_record = application_map_.at(application_id);
   if (application_record.application_state != ApplicationState::AT_BARRIER) {
-    LOG(ERROR) << "Failed to resume application #" << get_value(application_id)
-               << ".";
+    response.succeed = false;
+    response.error_message =
+        "The application has not reached a barrier for resuming";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
     return;
   }
   application_record.application_state = ApplicationState::RUNNING;
   message::WorkerReleaseBarrier release_barrier_command;
   SendCommandToPartitionInApplication(application_id, &release_barrier_command);
-  LOG(INFO) << "Resumed application #" << get_value(application_id) << ".";
+  response.succeed = true;
+  response.application_id = resume_message->application_id;
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
+}
+
+void ControllerScheduler::ProcessControlApplicationPriority(
+    LaunchCommandId launch_command_id,
+    message::ControlApplicationPriority* control_message) {
+  std::unique_ptr<message::ControlApplicationPriority> delete_when_exit(
+      control_message);
+  const auto application_id =
+      static_cast<ApplicationId>(control_message->application_id);
+  if (application_map_.find(application_id) == application_map_.end()) {
+    response.succeed = false;
+    response.error_message = "The specified application does not exist!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  for (auto& pair : worker_map_) {
+    auto& loaded_applications = pair.second.loaded_applications;
+    if (loaded_applications.find(application_id) == loaded_applications.end()) {
+      continue;
+    }
+    send_command_interface_->SendCommandToWorker(
+        pair.first,
+        message::SerializeMessageWithControlHeader(load_application_command));
+  }
+  // TODO
 }
 
 void ControllerScheduler::ProcessMigrationInPrepared(

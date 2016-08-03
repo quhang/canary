@@ -308,8 +308,14 @@ struct enum_hash<T, true> {
 /**
  * The id of a worker.
  */
-enum class WorkerId : int32_t { LAUNCHER = -2, INVALID = -1, FIRST = 0 };
+enum class WorkerId : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(WorkerId);
+
+/**
+ * The id of a launch command.
+ */
+enum class LaunchCommandId : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(LaunchCommandId);
 
 /**
  * The id of an application.

@@ -53,25 +53,76 @@ struct LaunchApplication {
   std::string application_parameter;
   int fix_num_worker = -1;
   int first_barrier_stage = -1;
+  int priority_level = -1;
 
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(binary_location, application_parameter);
-    archive(fix_num_worker, first_barrier_stage);
+    archive(fix_num_worker, first_barrier_stage, priority_level);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);
 
+//! Responds to an application launching command.
+struct LaunchApplicationResponse {
+  int application_id;
+  bool succeed = false;
+  std::string error_message;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, succeed, error_message);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, LAUNCH_APPLICATION_RESPONSE,
+                 LaunchApplicationResponse);
+
 //! Launches an application.
 struct ResumeApplication {
   int application_id = -1;
-
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(application_id);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, RESUME_APPLICATION, ResumeApplication);
+
+//! Responds to an application resuming command.
+struct ResumeApplicationResponse {
+  int application_id;
+  bool succeed = false;
+  std::string error_message;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, succeed, error_message);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, RESUME_APPLICATION_RESPONSE,
+                 ResumeApplicationResponse);
+
+//! Controls the priority of an application.
+struct ControlApplicationPriority {
+  int application_id = -1;
+  int priority_level = -1;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, priority_level);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, CONTROL_APPLICATION_PRIORITY,
+                 ControlApplicationPriority);
+
+//! Responds to an application priority tuning.
+struct ControlApplicationPriorityResponse {
+  int application_id = -1;
+  bool succeed = false;
+  std::string error_message;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, succeed, error_message);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, CONTROL_APPLICATION_PRIORITY_RESPONSE,
+                 ControlApplicationPriorityResponse);
 
 }  // namespace message
 }  // namespace canary

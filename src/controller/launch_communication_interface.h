@@ -32,33 +32,32 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/controller/canary_controller.cc
+ * @file src/controller/launch_communication_interface.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Canary controller.
+ * @brief Class LaunchCommunicationInterface.
  */
 
-#include <thread>
+#ifndef CANARY_SRC_CONTROLLER_LAUNCH_COMMUNICATION_INTERFACE_H_
+#define CANARY_SRC_CONTROLLER_LAUNCH_COMMUNICATION_INTERFACE_H_
 
-#include "shared/initialize.h"
+#include "shared/canary_internal.h"
 
-#include "controller/controller_communication_manager.h"
-#include "controller/controller_scheduler.h"
-#include "controller/launch_communication_manager.h"
+namespace canary {
 
-int main(int argc, char* argv[]) {
-  using namespace canary;  // NOLINT
+class LaunchSendCommandInterface {
+ public:
+  //! Responds to a launching command. The buffer ownership is transferred.
+  virtual void SendLaunchResponseCommand(LaunchCommandId launch_command_id,
+                                         struct evbuffer* buffer) = 0;
+};
 
-  InitializeCanaryController(&argc, &argv);
+class LaunchReceiveCommandInterface {
+ public:
+  //! Called when receiving a launching command. The message header is kept, and
+  // the buffer ownership is transferred.
+  virtual void ReceiveLaunchCommand(LaunchCommandId launch_command_id,
+                                    struct evbuffer* buffer) = 0;
+};
 
-  network::EventMainThread event_main_thread;
-  ControllerCommunicationManager manager;
-  LaunchCommunicationManager launch_manager;
-  ControllerScheduler scheduler;
-  manager.Initialize(&event_main_thread, &scheduler);
-  launch_manager.Initialize(&event_main_thread, &scheduler);
-  scheduler.Initialize(&event_main_thread, &manager, &launch_manager);
-
-  event_main_thread.Run();
-
-  return 0;
-}
+}  // namespace canary
+#endif  // CANARY_SRC_CONTROLLER_LAUNCH_COMMUNICATION_INTERFACE_H_
