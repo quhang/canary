@@ -172,10 +172,9 @@ struct RequestApplicationStatResponse {
   bool succeed = false;
   std::string error_message;
   double cycles = 0;
-  int ongoing_stage_id = -1;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, succeed, error_message, cycles, ongoing_stage_id);
+    archive(application_id, succeed, error_message, cycles);
   }
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_APPLICATION_STAT_RESPONSE,

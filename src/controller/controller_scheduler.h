@@ -120,19 +120,41 @@ class ControllerScheduler : public ControllerSchedulerBase {
   };
   //! Represents an active application.
   struct ApplicationRecord {
+    //! Binary location of the application.
     std::string binary_location;
+    //! The application parameter.
     std::string application_parameter;
+    //! The first barrier stage, at which all partitions should pause and wait
+    // for resuming.
     StageId first_barrier_stage = StageId::INVALID;
+    //! Priority level of the application, lower means higher priority.
     PriorityLevel priority_level;
+    //! Internal usage, the dynamic loading handle of the application.
     void* loading_handle = nullptr;
+    //! The loaded application.
     CanaryApplication* loaded_application = nullptr;
+    //! Describing the variables in the application.
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
         nullptr;
+    //! The application's partition map.
     PerApplicationPartitionMap per_app_partition_map;
+    //! The total number of partitions.
     int total_partition = 0;
+    //! The total number of complete partitions.
     int complete_partition = 0;
+    //! The total number of partitions blocked at a barrier.
     int blocked_partition = 0;
+    //! The execution state of an application.
     ApplicationState application_state = ApplicationState::INVALID;
+    //! The total of cycles spent for the application.
+    double total_used_cycles = 0;
+    //! The identifier of a triggered report.
+    int report_id = -1;
+    //! The number of partitions that have reported since the last time the
+    // report id was changed.
+    std::set<FullPartitionId> report_partition_set;
+    //! Lauchers that wait for reporting the running stats.
+    std::vector<LaunchCommandId> report_command_list;
   };
 
  public:

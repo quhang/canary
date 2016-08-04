@@ -69,6 +69,10 @@ DEFINE_int32(control_application, -1,
 // Auxiliary info for controlling an application.
 DEFINE_int32(control_priority, 100, "Specify the priority level.");
 
+// --report_application=1
+DEFINE_int32(report_application, -1,
+             "Report the running stats of an application.");
+
 namespace {
 //! Connects to the controller and returns the channel socket fd.
 int ConnectToController() {
@@ -187,6 +191,21 @@ int main(int argc, char** argv) {
              response.application_id);
     } else {
       printf("Controlling application's priority failed!\n%s\n",
+             response.error_message.c_str());
+    }
+  } else if (FLAGS_report_application != -1) {
+    message::RequestApplicationStat report_application;
+    report_application.application_id = FLAGS_report_application;
+    auto response =
+        LaunchAndWaitResponse<message::RequestApplicationStatResponse>(
+            report_application);
+    if (response.succeed) {
+      printf(
+          "Reporting application's running stat (id=%d): "
+          "used %.3f cycles succeeded!\n",
+          response.application_id, response.cycles);
+    } else {
+      printf("Reporting application's running stat failed!\n%s\n",
              response.error_message.c_str());
     }
   }

@@ -222,8 +222,9 @@ void ControllerScheduler::ProcessLaunchApplication(
 
 void ControllerScheduler::ProcessPauseApplication(
     LaunchCommandId launch_command_id,
-    message::PauseApplication* ipause_message) {
+    message::PauseApplication* pause_message) {
   // TODO(quhang): not implemented.
+  std::unique_ptr<message::PauseApplication> delete_when_exit(pause_message);
 }
 
 void ControllerScheduler::ProcessResumeApplication(
@@ -315,11 +316,43 @@ void ControllerScheduler::ProcessControlApplicationPriority(
 void ControllerScheduler::ProcessRequestApplicationStat(
     LaunchCommandId launch_command_id,
     message::RequestApplicationStat* request_message) {
-  // TODO(quhang): implement.
+  std::unique_ptr<message::RequestApplicationStat> delete_when_exit(
+      request_message);
+  if (request_message->application_id < 0) {
+    message::RequestApplicationStatResponse response;
+    response.succeed = false;
+    response.error_message = "Invalid application id!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  const auto application_id =
+      static_cast<ApplicationId>(request_message->application_id);
+  if (application_map_.find(application_id) == application_map_.end()) {
+    message::RequestApplicationStatResponse response;
+    response.succeed = false;
+    response.error_message = "Invalid application id!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  auto& application_record = application_map_.at(application_id);
+  // Builds a new report id.
+  ++application_record.report_id;
+  application_record.report_partition_set.clear();
+  application_record.report_command_list.push_back(launch_command_id);
+  message::WorkerReportStatusOfPartitions report_partitions_command;
+  SendCommandToPartitionInApplication(application_id,
+                                      &report_partitions_command);
 }
+
 void ControllerScheduler::ProcessRequestShutdownWorker(
     LaunchCommandId launch_command_id,
     message::RequestShutdownWorker* request_message) {
+  std::unique_ptr<message::RequestShutdownWorker> delete_when_exit(
+      request_message);
   // TODO(quhang): implement.
 }
 
@@ -576,11 +609,31 @@ void ControllerScheduler::UpdateRunningStats(
             get_value(pair.second.first),
             (pair.second.second - min_timestamp) * 1.e3);
   }
+  auto& application_record = application_map_.at(application_id);
   const auto& cycle_stats = running_stats.cycle_stats;
   for (const auto& pair : cycle_stats) {
+    application_record.total_used_cycles += pair.second.second;
     fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
             get_value(pair.second.first), pair.second.second * 1.e3);
   }
+
+  application_record.report_partition_set.insert(
+      FullPartitionId{application_id, variable_group_id, partition_id});
+  if (static_cast<int>(application_record.report_partition_set.size()) ==
+      application_record.total_partition) {
+    message::RequestApplicationStatResponse response;
+    response.application_id = get_value(application_id);
+    response.succeed = true;
+    response.cycles= application_record.total_used_cycles;
+    for (auto launch_command_id : application_record.report_command_list) {
+      launch_send_command_interface_->SendLaunchResponseCommand(
+          launch_command_id,
+          message::SerializeMessageWithControlHeader(response));
+    }
+    application_record.report_command_list.clear();
+    FlushLoggingFile();
+  }
+
 }
 
 void ControllerScheduler::CleanUpApplication(
