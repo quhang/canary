@@ -112,6 +112,8 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
     PROCESS_MESSAGE(WORKER_RELEASE_BARRIER, ProcessReleaseBarrier);
+    PROCESS_MESSAGE(WORKER_CHANGE_APPLICATION_PRIORITY,
+                    ProcessChangeApplicationPriority);
     default:
       LOG(FATAL) << "Unexpected message category!";
   }
@@ -142,7 +144,8 @@ void WorkerSchedulerBase::ProcessLoadApplication(
   application_record.first_barrier_stage = worker_command.first_barrier_stage;
   application_record.local_partitions = 0;
   LoadApplicationBinary(&application_record);
-  // TODO(quhang): sets the priority level.
+  SetApplicationPriorityLevel(launch_application_id,
+                              worker_command.priority_level);
 }
 
 void WorkerSchedulerBase::ProcessUnloadApplication(
@@ -228,6 +231,12 @@ void WorkerSchedulerBase::ProcessReleaseBarrier(
     const message::WorkerReleaseBarrier& worker_command) {
   DeliverCommandToEachThread(worker_command, StageId::RELEASE_BARRIER,
                              []() { return nullptr; });
+}
+
+void WorkerSchedulerBase::ProcessChangeApplicationPriority(
+    const message::WorkerChangeApplicationPriority& worker_command) {
+  SetApplicationPriorityLevel(worker_command.application_id,
+                              worker_command.priority_level);
 }
 
 template <typename T>

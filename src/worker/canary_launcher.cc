@@ -54,18 +54,20 @@
 DEFINE_string(launch_application, "",
               "Launch an application given its binary location.");
 // Auxiliary info for launching an application.
-DEFINE_int32(launch_num_worker, -1, "Specify the number of worker.");
+DEFINE_int32(launch_num_worker, -1,
+             "Specify the number of worker. -1 means any.");
 DEFINE_int32(launch_first_barrier, -1, "Specify the first barrier stage.");
+DEFINE_int32(launch_priority, 100, "Specify the priority level.");
 
 // --resume_application=1
 DEFINE_int32(resume_application, -1,
              "Resume an application given its application id.");
 
-// --control_application=1 --control_priority=1
+// --control_application=1 --control_priority=99
 DEFINE_int32(control_application, -1,
              "Control an application's priority given its application id.");
 // Auxiliary info for controlling an application.
-DEFINE_int32(control_priority, -1, "Specify the priority level.");
+DEFINE_int32(control_priority, 100, "Specify the priority level.");
 
 namespace {
 //! Connects to the controller and returns the channel socket fd.
@@ -102,7 +104,7 @@ LaunchResponseMessageType LaunchAndWaitResponse(
     const LaunchMessageType& launch_message) {
   using namespace canary;  // NOLINT
   const int socket_fd = ConnectToController();
-  CHECK(socket_fd != -1);
+  CHECK_NE(socket_fd, -1);
   struct evbuffer* buffer =
       message::SerializeMessageWithControlHeader(launch_message);
   do {
@@ -151,6 +153,7 @@ int main(int argc, char** argv) {
     launch_application.application_parameter = ss.str();
     launch_application.fix_num_worker = FLAGS_launch_num_worker;
     launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
+    launch_application.priority_level = FLAGS_launch_priority;
     auto response = LaunchAndWaitResponse<message::LaunchApplicationResponse>(
         launch_application);
     if (response.succeed) {

@@ -123,6 +123,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
     std::string binary_location;
     std::string application_parameter;
     StageId first_barrier_stage = StageId::INVALID;
+    PriorityLevel priority_level;
     void* loading_handle = nullptr;
     CanaryApplication* loaded_application = nullptr;
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
@@ -157,6 +158,9 @@ class ControllerScheduler : public ControllerSchedulerBase {
                                 message::LaunchApplication* launch_message);
   void ProcessResumeApplication(LaunchCommandId launch_command_id,
                                 message::ResumeApplication* resume_message);
+  void ProcessControlApplicationPriority(
+      LaunchCommandId launch_command_id,
+      message::ControlApplicationPriority* control_message);
   void ProcessMigrationInPrepared(
       message::ControllerRespondMigrationInPrepared* respond_message);
   void ProcessMigrationInDone(

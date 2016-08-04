@@ -263,16 +263,29 @@ void ControllerScheduler::ProcessControlApplicationPriority(
     message::ControlApplicationPriority* control_message) {
   std::unique_ptr<message::ControlApplicationPriority> delete_when_exit(
       control_message);
+  message::ControlApplicationPriorityResponse response;
+  response.succeed = true;
   const auto application_id =
       static_cast<ApplicationId>(control_message->application_id);
   if (application_map_.find(application_id) == application_map_.end()) {
     response.succeed = false;
     response.error_message = "The specified application does not exist!";
+  } else if (control_message->priority_level < 0) {
+    response.succeed = false;
+    response.error_message = "Invalid priority level!";
+  }
+  if (!response.succeed) {
     launch_send_command_interface_->SendLaunchResponseCommand(
         launch_command_id,
         message::SerializeMessageWithControlHeader(response));
     return;
   }
+  auto& application_record = application_map_.at(application_id);
+  application_record.priority_level =
+      PriorityLevel(control_message->priority_level);
+  message::WorkerChangeApplicationPriority change_priority_command;
+  change_priority_command.application_id = application_id;
+  change_priority_command.priority_level = application_record.priority_level;
   for (auto& pair : worker_map_) {
     auto& loaded_applications = pair.second.loaded_applications;
     if (loaded_applications.find(application_id) == loaded_applications.end()) {
@@ -280,9 +293,12 @@ void ControllerScheduler::ProcessControlApplicationPriority(
     }
     send_command_interface_->SendCommandToWorker(
         pair.first,
-        message::SerializeMessageWithControlHeader(load_application_command));
+        message::SerializeMessageWithControlHeader(change_priority_command));
   }
-  // TODO
+  response.succeed = true;
+  response.application_id = get_value(application_id);
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
 
 void ControllerScheduler::ProcessMigrationInPrepared(
@@ -391,6 +407,11 @@ bool ControllerScheduler::FillInApplicationLaunchInfo(
     application_record->first_barrier_stage = StageId::INVALID;
     application_record->application_state = ApplicationState::RUNNING;
   }
+  if (launch_message.priority_level < 0) {
+    return false;
+  }
+  application_record->priority_level =
+      PriorityLevel(launch_message.priority_level);
   application_record->loaded_application = CanaryApplication::LoadApplication(
       launch_message.binary_location, launch_message.application_parameter,
       &application_record->loading_handle);
@@ -480,6 +501,7 @@ void ControllerScheduler::RequestLoadApplicationOnAllWorkers(
       application_record.application_parameter;
   load_application_command.first_barrier_stage =
       application_record.first_barrier_stage;
+  load_application_command.priority_level = application_record.priority_level;
   for (auto& pair : worker_map_) {
     send_command_interface_->SendCommandToWorker(
         pair.first,

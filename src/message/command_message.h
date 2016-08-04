@@ -85,10 +85,11 @@ struct WorkerLoadApplication {
   std::string binary_location;
   std::string application_parameter;
   StageId first_barrier_stage;
+  PriorityLevel priority_level;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(application_id, binary_location, application_parameter,
-            first_barrier_stage);
+            first_barrier_stage, priority_level);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_LOAD_APPLICATION,
@@ -173,6 +174,17 @@ struct WorkerReportStatusOfPartitions {
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
+
+struct WorkerChangeApplicationPriority {
+  ApplicationId application_id;
+  PriorityLevel priority_level;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, priority_level);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_CHANGE_APPLICATION_PRIORITY,
+                 WorkerChangeApplicationPriority);
 
 /*
  * Progress control.
