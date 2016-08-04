@@ -152,15 +152,27 @@ class ControllerScheduler : public ControllerSchedulerBase {
 
  private:
   /*
-   * Processes messages from the launcher or workers.
+   * Processes messages received from the launcher through the RPC interface.
    */
   void ProcessLaunchApplication(LaunchCommandId launch_command_id,
                                 message::LaunchApplication* launch_message);
+  void ProcessPauseApplication(LaunchCommandId launch_command_id,
+                               message::PauseApplication* ipause_message);
   void ProcessResumeApplication(LaunchCommandId launch_command_id,
                                 message::ResumeApplication* resume_message);
   void ProcessControlApplicationPriority(
       LaunchCommandId launch_command_id,
       message::ControlApplicationPriority* control_message);
+  void ProcessRequestApplicationStat(
+      LaunchCommandId launch_command_id,
+      message::RequestApplicationStat* request_message);
+  void ProcessRequestShutdownWorker(
+      LaunchCommandId launch_command_id,
+      message::RequestShutdownWorker* request_message);
+
+  /*
+   * Processes messages received from workers.
+   */
   void ProcessMigrationInPrepared(
       message::ControllerRespondMigrationInPrepared* respond_message);
   void ProcessMigrationInDone(

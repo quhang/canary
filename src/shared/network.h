@@ -234,6 +234,18 @@ class EventMainThread {
   //! Dispatches a delayed injected event.
   static void DispatchDelayInjectedEvent(int, short, void* arg);  // NOLINT
 
+  //! Adds a timeout event after a certain delay.
+  template <typename T>
+  void AddTimeoutEvent(T&& handle, int delay_sec) {
+    struct timeval delay {
+      delay_sec, 0
+    };
+    const auto status =
+        event_base_once(event_base_, 0, EV_TIMEOUT, &DispatchInjectedEvent,
+                        new CallbackType(std::forward<T>(handle)), &delay);
+    CHECK_EQ(status, 0);
+  }
+
  private:
   struct event_base* event_base_ = nullptr;
   // Zero time interval, which is used to indicate a single queue in

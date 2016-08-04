@@ -94,9 +94,14 @@ void ControllerScheduler::InternalReceiveLaunchCommand(
   CHECK(header->category_group == MessageCategoryGroup::LAUNCH_COMMAND);
   switch (header->category) {
     PROCESS_LAUNCH_MESSAGE(LAUNCH_APPLICATION, ProcessLaunchApplication);
+    PROCESS_LAUNCH_MESSAGE(PAUSE_APPLICATION, ProcessPauseApplication);
     PROCESS_LAUNCH_MESSAGE(RESUME_APPLICATION, ProcessResumeApplication);
     PROCESS_LAUNCH_MESSAGE(CONTROL_APPLICATION_PRIORITY,
                            ProcessControlApplicationPriority);
+    PROCESS_LAUNCH_MESSAGE(REQUEST_APPLICATION_STAT,
+                           ProcessRequestApplicationStat);
+    PROCESS_LAUNCH_MESSAGE(REQUEST_SHUTDOWN_WORKER,
+                           ProcessRequestShutdownWorker);
     default:
       LOG(FATAL) << "Unexpected message type!";
   }  // switch category.
@@ -158,7 +163,7 @@ void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
 }
 
 /*
- * Processes commands.
+ * Processes launcher commands.
  */
 void ControllerScheduler::ProcessLaunchApplication(
     LaunchCommandId launch_command_id,
@@ -213,6 +218,12 @@ void ControllerScheduler::ProcessLaunchApplication(
       launch_command_id, message::SerializeMessageWithControlHeader(response));
   LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
             << " (" << launch_message->binary_location.c_str() << ").";
+}
+
+void ControllerScheduler::ProcessPauseApplication(
+    LaunchCommandId launch_command_id,
+    message::PauseApplication* ipause_message) {
+  // TODO(quhang): not implemented.
 }
 
 void ControllerScheduler::ProcessResumeApplication(
@@ -300,6 +311,21 @@ void ControllerScheduler::ProcessControlApplicationPriority(
   launch_send_command_interface_->SendLaunchResponseCommand(
       launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
+
+void ControllerScheduler::ProcessRequestApplicationStat(
+    LaunchCommandId launch_command_id,
+    message::RequestApplicationStat* request_message) {
+  // TODO(quhang): implement.
+}
+void ControllerScheduler::ProcessRequestShutdownWorker(
+    LaunchCommandId launch_command_id,
+    message::RequestShutdownWorker* request_message) {
+  // TODO(quhang): implement.
+}
+
+/*
+ * Processes messages received from workers.
+ */
 
 void ControllerScheduler::ProcessMigrationInPrepared(
     message::ControllerRespondMigrationInPrepared* respond_message) {

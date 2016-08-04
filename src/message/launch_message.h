@@ -34,7 +34,7 @@
 /**
  * @file src/message/launch_message.h
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class LaunchMessage.
+ * @brief Messages used between the launcher and the controller.
  */
 
 #ifndef CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
@@ -43,6 +43,14 @@
 #include <string>
 
 #include "message/message.h"
+
+/*
+ * All the messages in this file are exchanged between the launcher and the
+ * controller. The launcher, which might run in a cluster resource manager, can
+ * do high-level execution management, e.g. deciding whether an application
+ * should pause or yield resources to higher priority applications, or shutting
+ * down workers to give resources to other cloud frameworks.
+ */
 
 namespace canary {
 namespace message {
@@ -65,7 +73,7 @@ REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);
 
 //! Responds to an application launching command.
 struct LaunchApplicationResponse {
-  int application_id;
+  int application_id = -1;
   bool succeed = false;
   std::string error_message;
   template <typename Archive>
@@ -76,7 +84,30 @@ struct LaunchApplicationResponse {
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, LAUNCH_APPLICATION_RESPONSE,
                  LaunchApplicationResponse);
 
-//! Launches an application.
+//! Pauses an application.
+struct PauseApplication {
+  int application_id = -1;
+  // Whether to add a barrier.
+  bool add_barrier = false;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, add_barrier);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, PAUSE_APPLICATION, PauseApplication);
+struct PauseApplicationResponse {
+  int application_id = -1;
+  bool succeed = false;
+  std::string error_message;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, succeed, error_message);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, PAUSE_APPLICATION_RESPONSE,
+                 PauseApplicationResponse);
+
+//! Resumes an application.
 struct ResumeApplication {
   int application_id = -1;
   template <typename Archive>
@@ -88,7 +119,7 @@ REGISTER_MESSAGE(LAUNCH_COMMAND, RESUME_APPLICATION, ResumeApplication);
 
 //! Responds to an application resuming command.
 struct ResumeApplicationResponse {
-  int application_id;
+  int application_id = -1;
   bool succeed = false;
   std::string error_message;
   template <typename Archive>
@@ -123,6 +154,57 @@ struct ControlApplicationPriorityResponse {
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, CONTROL_APPLICATION_PRIORITY_RESPONSE,
                  ControlApplicationPriorityResponse);
+
+//! Requests running stats of an application.
+struct RequestApplicationStat {
+  int application_id = -1;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_APPLICATION_STAT,
+                 RequestApplicationStat);
+
+//! Responds with the running stats of an application.
+struct RequestApplicationStatResponse {
+  int application_id = -1;
+  bool succeed = false;
+  std::string error_message;
+  double cycles = 0;
+  int ongoing_stage_id = -1;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, succeed, error_message, cycles, ongoing_stage_id);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_APPLICATION_STAT_RESPONSE,
+                 RequestApplicationStatResponse);
+
+//! Shuts down a worker.
+struct RequestShutdownWorker {
+  int from_worker_id = -1;
+  int to_worker_id = -1;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id, to_worker_id);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_SHUTDOWN_WORKER,
+                 RequestShutdownWorker);
+
+//! Responds to a worker shutdown command.
+struct RequestShutdownWorkerResponse {
+  bool succeed = false;
+  std::string error_message;
+  int shutdown_worker_num = 0;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(succeed, error_message, shutdown_worker_num);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_SHUTDOWN_WORKER_RESPONSE,
+                 RequestShutdownWorkerResponse);
 
 }  // namespace message
 }  // namespace canary

@@ -52,6 +52,7 @@
 namespace canary {
 namespace message {
 
+//! Used for testing.
 struct TestWorkerCommand {
   std::string test_string;
   template <typename Archive>
@@ -61,6 +62,7 @@ struct TestWorkerCommand {
 };
 REGISTER_MESSAGE(WORKER_COMMAND, TEST_WORKER_COMMAND, TestWorkerCommand);
 
+//! Used for testing.
 struct TestControllerCommand {
   WorkerId from_worker_id;
   std::string test_string;
