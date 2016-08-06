@@ -111,9 +111,11 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS, ProcessMigrateOutPartitions);
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
-    PROCESS_MESSAGE(WORKER_RELEASE_BARRIER, ProcessReleaseBarrier);
     PROCESS_MESSAGE(WORKER_CHANGE_APPLICATION_PRIORITY,
                     ProcessChangeApplicationPriority);
+    PROCESS_MESSAGE(WORKER_PAUSE_EXECUTION, ProcessPauseExecution);
+    PROCESS_MESSAGE(WORKER_INSTALL_BARRIER, ProcessInstallBarrier);
+    PROCESS_MESSAGE(WORKER_RELEASE_BARRIER, ProcessReleaseBarrier);
     default:
       LOG(FATAL) << "Unexpected message category!";
   }
@@ -121,6 +123,7 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
 #undef PROCESS_MESSAGE
 
 void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
+  CHECK(!is_ready_);
   is_ready_ = true;
   self_worker_id_ = worker_id;
   message::ControllerRespondStatusOfWorker respond_status;
@@ -128,14 +131,19 @@ void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
   respond_status.num_cores = num_cores_;
   send_command_interface_->SendCommandToController(
       message::SerializeMessageWithControlHeader(respond_status));
+  // Starts execution.
   StartExecution();
 }
+
+/*
+ * Processes commands received from the controller.
+ */
 
 void WorkerSchedulerBase::ProcessLoadApplication(
     const message::WorkerLoadApplication& worker_command) {
   const auto launch_application_id = worker_command.application_id;
   CHECK(application_record_map_.find(launch_application_id) ==
-        application_record_map_.end());
+        application_record_map_.end()) << "Cannot load an application twice!";
   auto& application_record = application_record_map_[launch_application_id];
   application_record.application_id = launch_application_id;
   application_record.binary_location = worker_command.binary_location;
@@ -143,6 +151,7 @@ void WorkerSchedulerBase::ProcessLoadApplication(
       worker_command.application_parameter;
   application_record.first_barrier_stage = worker_command.first_barrier_stage;
   application_record.local_partitions = 0;
+  // Loads application binary.
   LoadApplicationBinary(&application_record);
   SetApplicationPriorityLevel(launch_application_id,
                               worker_command.priority_level);
@@ -152,9 +161,10 @@ void WorkerSchedulerBase::ProcessUnloadApplication(
     const message::WorkerUnloadApplication& worker_command) {
   const auto remove_application_id = worker_command.application_id;
   auto iter = application_record_map_.find(remove_application_id);
-  CHECK(iter != application_record_map_.end());
+  CHECK(iter != application_record_map_.end()) << "No application to unload!";
   CHECK_EQ(iter->second.local_partitions, 0)
-      << "Cannot unload an application when a partition is running.";
+      << "Cannot unload an application when a partition is running!";
+  // Unloads application binary.
   UnloadApplicationBinary(&iter->second);
   application_record_map_.erase(iter);
 }
@@ -166,6 +176,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     VLOG(1) << "Load partition: " << get_value(application_id) << "/"
             << get_value(pair.first) << "/" << get_value(pair.second);
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
+    // Constructs thread context.
     ConstructThreadContext(full_partition_id);
   }
   const auto first_barrier_stage =
@@ -176,7 +187,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
             internal_message::InitCommand{first_barrier_stage});
       });
   // Refreshes the routing such that pending messages for this partition can
-  // be deliverd.
+  // be delivered.
   send_data_interface_->RefreshRouting();
 }
 
@@ -188,12 +199,14 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end());
     iter->second->Finalize();
+    // Destructs thread context.
     DestructThreadContext(full_partition_id);
   }
 }
 
 void WorkerSchedulerBase::ProcessMigrateInPartitions(
     const message::WorkerMigrateInPartitions& worker_command) {
+  // TODO(quhang): not tested.
   const auto application_id = worker_command.application_id;
   for (const auto& pair : worker_command.partition_list) {
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
@@ -203,8 +216,10 @@ void WorkerSchedulerBase::ProcessMigrateInPartitions(
     iter->second->DeliverMessage(StageId::MIGRATE_IN, nullptr);
   }
 }
+
 void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
     const message::WorkerMigrateOutPartitions& worker_command) {
+  // TODO(quhang): not tested.
   const auto application_id = worker_command.application_id;
   for (const auto& partition_migrate_record :
        worker_command.migrate_out_partitions) {
@@ -225,6 +240,16 @@ void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     const message::WorkerReportStatusOfPartitions& worker_command) {
   DeliverCommandToEachThread(worker_command, StageId::REQUEST_REPORT,
                              []() { return nullptr; });
+}
+
+void WorkerSchedulerBase::ProcessPauseBarrier(
+    const message::WorkerPauseBarrier& worker_command) {
+  // TODO(quhang): not implemented.
+}
+
+void WorkerSchedulerBase::ProcessInstallBarrier(
+    const message::WorkerInstallBarrier& worker_command) {
+  // TODO(quhang): not implemented.
 }
 
 void WorkerSchedulerBase::ProcessReleaseBarrier(
@@ -253,6 +278,15 @@ void WorkerSchedulerBase::DeliverCommandToEachThread(
   }
 }
 
+/*
+ * Schedules the execution of partitions.
+ *
+ * The key concept is:
+ *   (1) Activation. After a thread context is activated, it must be executed at
+ *   least once.
+ *   (2) Execute-until-blocked. After a thread context is executed by a worker
+ *   thread, the execution must run until being blocked.
+ */
 void WorkerSchedulerBase::ActivateThreadContext(
     WorkerLightThreadContext* thread_context) {
   PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);

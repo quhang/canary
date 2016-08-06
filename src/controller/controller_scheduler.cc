@@ -699,6 +699,7 @@ void ControllerScheduler::InitializeLoggingFile() {
     log_file_ = fopen(
         (FLAGS_controller_log_dir + FLAGS_controller_log_name).c_str(), "a");
     fprintf(log_file_, "B\n");
+    PCHECK(fflush(log_file_) == 0);
   }
 }
 

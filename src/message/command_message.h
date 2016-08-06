@@ -177,6 +177,7 @@ struct WorkerReportStatusOfPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
 
+//! Changes the priority of an application.
 struct WorkerChangeApplicationPriority {
   ApplicationId application_id;
   PriorityLevel priority_level;

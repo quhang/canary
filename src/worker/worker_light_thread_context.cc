@@ -49,45 +49,10 @@ WorkerLightThreadContext::WorkerLightThreadContext() {
 
 WorkerLightThreadContext::~WorkerLightThreadContext() {
   pthread_mutex_destroy(&internal_lock_);
-  LOG(FATAL) << "We don't delete a thread context, we only clear its memory!";
 }
 
-bool WorkerLightThreadContext::Enter() {
-  PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-  const bool success =
-      (!running_) && (!ready_stages_.empty() || !command_list_.empty());
-  if (!running_ && success) {
-    running_ = true;
-  }
-  pthread_mutex_unlock(&internal_lock_);
-  return success;
-}
-
-bool WorkerLightThreadContext::Exit() {
-  PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-  CHECK(running_);
-  const bool success = (ready_stages_.empty() && command_list_.empty());
-  if (success) {
-    running_ = false;
-  }
-  pthread_mutex_unlock(&internal_lock_);
-  return success;
-}
-
-void WorkerLightThreadContext::ForceExit() {
-  PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-  const bool to_activate = (!ready_stages_.empty() || command_list_.empty());
-  running_ = false;
-  pthread_mutex_unlock(&internal_lock_);
-
-  if (to_activate && activate_callback_) {
-    activate_callback_();
-  }
-}
-
-void WorkerLightThreadContext::DeliverMessage(StageId stage_id,
-                                              struct evbuffer* buffer) {
-  bool to_activate = false;
+void WorkerLightThreadContext::DeliverMessage(
+    StageId stage_id, struct evbuffer* buffer) {
   if (stage_id >= StageId::FIRST) {
     // Normal data routed to a stage.
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
@@ -97,7 +62,7 @@ void WorkerLightThreadContext::DeliverMessage(StageId stage_id,
     if (stage_buffer.expected_buffer ==
         static_cast<int>(stage_buffer.buffer_list.size())) {
       ready_stages_.push_back(stage_id);
-      to_activate = !running_;
+      worker_scheduler_->NotifyLowPriorityEvent(this);
     }
     pthread_mutex_unlock(&internal_lock_);
   } else {
@@ -107,34 +72,28 @@ void WorkerLightThreadContext::DeliverMessage(StageId stage_id,
     auto& command_buffer = command_list_.back();
     command_buffer.stage_id = stage_id;
     command_buffer.command = buffer;
-    to_activate = !running_;
+    switch (stage_id) {
+      case StageId::CONTROL_FLOW:
+        worker_scheduler_->NotifyLowPriorityEvent(this);
+        break;
+      default:
+        worker_scheduler_->NotifyHighPriorityEvent(this);
+    }
     pthread_mutex_unlock(&internal_lock_);
-  }
-
-  if (to_activate && activate_callback_) {
-    activate_callback_();
   }
 }
 
 void WorkerLightThreadContext::RegisterReceivingData(StageId stage_id,
                                                      int num_message) {
   CHECK(stage_id >= StageId::FIRST);
-  bool to_activate = false;
-
   PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
   auto& stage_buffer = stage_buffer_map_[stage_id];
   stage_buffer.expected_buffer = num_message;
   if (num_message == static_cast<int>(stage_buffer.buffer_list.size())) {
     ready_stages_.push_back(stage_id);
-    if (!running_) {
-      to_activate = true;
-    }
+    worker_scheduler_->NotifyLowPriorityEvent(this);
   }
   pthread_mutex_unlock(&internal_lock_);
-
-  if (to_activate && activate_callback_) {
-    activate_callback_();
-  }
 }
 
 bool WorkerLightThreadContext::RetrieveCommand(StageId* stage_id,
@@ -182,9 +141,7 @@ void WorkerExecutionContext::Finalize() {
   clear_memory();
 }
 
-// TODO memory clear is not clear yet.
-void WorkerExecutionContext::Run() {
-  // Processes commands.
+void WorkerExecutionContext::RunCommand() {
   struct evbuffer* command;
   StageId command_stage_id;
   while (RetrieveCommand(&command_stage_id, &command)) {
@@ -200,19 +157,19 @@ void WorkerExecutionContext::Run() {
         ProcessRequestReport();
         break;
       case StageId::MIGRATE_IN:
-        // TODO
+        // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::MIGRATE_OUT:
-        // TODO
+        // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::PAUSE_EXECUTION:
-        // TODO
+        // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::INSTALL_BARRIER:
-        // TODO
+        // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::RELEASE_BARRIER:
@@ -223,40 +180,50 @@ void WorkerExecutionContext::Run() {
         LOG(FATAL) << "Unknown command stage id!";
     }
   }
+}
 
-  // Processes received data.
+// Returns whether there might be more stages to run.
+bool WorkerExecutionContext::RunOneStage() {
   std::list<struct evbuffer*> buffer_list;
   StageId stage_id;
-  while (RetrieveData(&stage_id, &buffer_list)) {
+  if (RetrieveData(&stage_id, &buffer_list)) {
     RunGatherStage(stage_id, pending_gather_stages_.at(stage_id), &buffer_list);
     pending_gather_stages_.erase(stage_id);
+    return true;
   }
-
-  // Runs ready stages.
   StatementId statement_id;
-  do {
-    std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
-    if (stage_id == StageId::COMPLETE) {
-      message::ControllerRespondPartitionDone report;
+  std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
+  if (stage_id == StageId::COMPLETE) {
+    message::ControllerRespondPartitionDone report;
+    FillInStats(&report);
+    get_send_command_interface()->SendCommandToController(
+        message::SerializeMessageWithControlHeader(report));
+    // No more stages to run.
+    return false;
+  } else if (stage_id == StageId::REACH_BARRIER) {
+    if (!is_in_barrier_) {
+      is_in_barrier_ = true;
+      message::ControllerRespondReachBarrier report;
       FillInStats(&report);
       get_send_command_interface()->SendCommandToController(
           message::SerializeMessageWithControlHeader(report));
-      break;
-    } else if (stage_id == StageId::REACH_BARRIER) {
-      if (!is_in_barrier_) {
-        is_in_barrier_ = true;
-        message::ControllerRespondReachBarrier report;
-        FillInStats(&report);
-        get_send_command_interface()->SendCommandToController(
-            message::SerializeMessageWithControlHeader(report));
-      }
-      break;
-    } else if (stage_id == StageId::INVALID) {
-      break;
-    } else {
-      RunStage(stage_id, statement_id);
     }
-  } while (true);
+    // No more stages to run.
+    return false;
+  } else if (stage_id == StageId::INVALID) {
+    // No more stages to run.
+    return false;
+  } else {
+    RunStage(stage_id, statement_id);
+    return true;
+  }
+}
+
+// TODO(quhang): memory clear is not clear yet.
+void WorkerExecutionContext::Run() {
+  do {
+    RunCommand();
+  } while (RunOneStage());
 }
 
 void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {

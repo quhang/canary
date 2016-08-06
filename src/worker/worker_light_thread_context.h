@@ -106,6 +106,8 @@ CommandType to_command(struct evbuffer* buffer) {
 }
 }  // namespace internal_message
 
+class WorkerScheduler;
+
 /**
  * The execution context of a lightweight thread, which is responsible for
  * execution of a partition. This base class stores basic metadata, and includes
@@ -138,7 +140,7 @@ class WorkerLightThreadContext {
       archive(expected_buffer);
     }
   };
-  //! The buffer storing a command.
+  //! The buffer storing an internal command.
   struct CommandBuffer {
     StageId stage_id;
     struct evbuffer* command;
@@ -185,6 +187,31 @@ class WorkerLightThreadContext {
     return canary_application_;
   }
 
+  void ExecuteAllHighPriorityTasks() {
+    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
+    const bool success = (!running_) && (!command_list_.empty());
+    if (!running_ && success) {
+      running_ = true;
+    }
+    pthread_mutex_unlock(&internal_lock_);
+    if (success) {
+      RunCommands();
+    }
+    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
+    if (command_list_.empty()) {
+      if (ready_stages_.empty()) {
+        // Reports have low priority tasks.
+      }
+      pthread_mutex_unlock(&internal_lock_);
+      return;
+    } else {
+      RunCommands();
+    }
+  }
+
+  void ExecuteAllTasks() {
+  }
+
   //! Tries to enter the execution context of the thread. Returns true if there
   // is data to process.
   bool Enter();
@@ -196,9 +223,25 @@ class WorkerLightThreadContext {
   //! Delivers a message.
   void DeliverMessage(StageId stage_id, struct evbuffer* buffer);
 
+  void ExecuteUntilNoCommands() {
+    while (HasDeliveredCommand()) {
+      RunCommands();
+    }
+    // Activates itself.
+  }
+
+  void ExecuteUntilNoCommandsOrStages() {
+  }
+
+  virtual void RunCommands() = 0;
+  virtual bool RunOneStage() = 0;
+
  protected:
   //! Registers how many messages are expected for a message.
   void RegisterReceivingData(StageId stage_id, int num_message);
+  //! Retrieves a high priority command.
+  bool RetrieveHighPriorityCommand(
+      StageId* stage_id, struct evbuffer** command);
   //! Retrieves a command.
   bool RetrieveCommand(StageId* stage_id, struct evbuffer** command);
   //! Retrieves the buffer of a stage.
@@ -229,6 +272,13 @@ class WorkerLightThreadContext {
   }
 
  private:
+  // Used for scheduling, protected by the lock of the worker scheduler.
+  int num_high_priority_event_ = 0;
+  int num_low_priority_event_ = 0;
+  bool is_killed_ = false;
+  bool is_running_ = false
+
+ private:
   friend class WorkerSchedulerBase;
   // Caution: TRANSIENT.
   WorkerId worker_id_ = WorkerId::INVALID;
@@ -253,6 +303,7 @@ class WorkerLightThreadContext {
   bool running_ = false;
   // Caution: TRANSIENT.
   bool memory_cleared_ = false;
+  WorkerScheduler* worker_scheduler_ = nullptr;
 
   /*
    * States that need serialization.

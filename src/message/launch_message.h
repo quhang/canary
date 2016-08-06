@@ -47,8 +47,8 @@
 /*
  * All the messages in this file are exchanged between the launcher and the
  * controller. The launcher, which might run in a cluster resource manager, can
- * do high-level execution management, e.g. deciding whether an application
- * should pause or yield resources to higher priority applications, or shutting
+ * do coarse-grained execution management, e.g. deciding whether an application
+ * should pause or give resources to higher priority applications, or shutting
  * down workers to give resources to other cloud frameworks.
  */
 
@@ -59,10 +59,11 @@ namespace message {
 struct LaunchApplication {
   std::string binary_location;
   std::string application_parameter;
+  //! Fix the number of workers.
   int fix_num_worker = -1;
+  //! The first barrier stage.
   int first_barrier_stage = -1;
   int priority_level = -1;
-
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(binary_location, application_parameter);
@@ -70,7 +71,6 @@ struct LaunchApplication {
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);
-
 //! Responds to an application launching command.
 struct LaunchApplicationResponse {
   int application_id = -1;
@@ -95,6 +95,7 @@ struct PauseApplication {
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, PAUSE_APPLICATION, PauseApplication);
+//! Responds to an application pausing command.
 struct PauseApplicationResponse {
   int application_id = -1;
   bool succeed = false;
@@ -116,7 +117,6 @@ struct ResumeApplication {
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, RESUME_APPLICATION, ResumeApplication);
-
 //! Responds to an application resuming command.
 struct ResumeApplicationResponse {
   int application_id = -1;
@@ -130,7 +130,7 @@ struct ResumeApplicationResponse {
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, RESUME_APPLICATION_RESPONSE,
                  ResumeApplicationResponse);
 
-//! Controls the priority of an application.
+//! Controls the running priority of an application.
 struct ControlApplicationPriority {
   int application_id = -1;
   int priority_level = -1;
@@ -141,8 +141,7 @@ struct ControlApplicationPriority {
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, CONTROL_APPLICATION_PRIORITY,
                  ControlApplicationPriority);
-
-//! Responds to an application priority tuning.
+//! Responds to an application priority control command.
 struct ControlApplicationPriorityResponse {
   int application_id = -1;
   bool succeed = false;
@@ -165,12 +164,12 @@ struct RequestApplicationStat {
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_APPLICATION_STAT,
                  RequestApplicationStat);
-
 //! Responds with the running stats of an application.
 struct RequestApplicationStatResponse {
   int application_id = -1;
   bool succeed = false;
   std::string error_message;
+  //! The total of cycles used in seconds.
   double cycles = 0;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
@@ -180,19 +179,17 @@ struct RequestApplicationStatResponse {
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_APPLICATION_STAT_RESPONSE,
                  RequestApplicationStatResponse);
 
-//! Shuts down a worker.
+//! Shuts down workers after migrating out running partitions on those workers.
 struct RequestShutdownWorker {
-  int from_worker_id = -1;
-  int to_worker_id = -1;
+  std::set<int> shutdown_worker_id_set;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(from_worker_id, to_worker_id);
+    archive(shutdown_worker_id_set);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_SHUTDOWN_WORKER,
                  RequestShutdownWorker);
-
-//! Responds to a worker shutdown command.
+//! Responds to worker shutdown command.
 struct RequestShutdownWorkerResponse {
   bool succeed = false;
   std::string error_message;
