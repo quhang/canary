@@ -305,6 +305,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
  public:
   void load(CanaryInputArchive& archive) override {  // NOLINT
     WorkerLightThreadContext::load(archive);
+    archive(partition_state_);
     archive(stage_graph_);
     archive(pending_gather_stages_);
     archive(is_in_barrier_);
@@ -318,6 +319,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   }
   void save(CanaryOutputArchive& archive) const override {  // NOLINT
     WorkerLightThreadContext::save(archive);
+    archive(partition_state_);
     archive(stage_graph_);
     archive(pending_gather_stages_);
     archive(is_in_barrier_);
@@ -333,6 +335,13 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   std::map<StageId, StatementId> pending_gather_stages_;
   std::map<VariableId, std::unique_ptr<PartitionData>> local_partition_data_;
   bool is_in_barrier_ = false;
+  enum PartitionState : int32_t {
+    UNINITIALIZED = 0,
+    RUNNING,
+    IN_BARRIER,
+    COMPLETE
+  };
+  PartitionState partition_state_ = PartitionState::UNINITIALIZED;
 };
 
 }  // namespace canary

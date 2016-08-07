@@ -146,9 +146,12 @@ void WorkerExecutionContext::RunCommands() {
   while (RetrieveCommand(&command_stage_id, &command)) {
     switch (command_stage_id) {
       case StageId::INIT:
+        CHECK(partition_state_ == PartitionState::UNINITIALIZED);
+        partition_state_ = PartitionState::RUNNING;
         ProcessInitCommand(command);
         break;
       case StageId::CONTROL_FLOW_DECISION:
+        CHECK(partition_state_ != PartitionState::UNINITIALIZED);
         ProcessControlFlowDecision(command);
         break;
       case StageId::MIGRATE_IN:
@@ -168,6 +171,8 @@ void WorkerExecutionContext::RunCommands() {
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::RELEASE_BARRIER:
+        CHECK(partition_state_ == PartitionState::IN_BARRIER);
+        partition_state_ = PartitionState::RUNNING;
         CHECK(command == nullptr);
         ProcessReleaseBarrier();
         break;
@@ -192,16 +197,17 @@ bool WorkerExecutionContext::RunOneStage() {
     FillInStats(&report);
     get_send_command_interface()->SendCommandToController(
         message::SerializeMessageWithControlHeader(report));
+    CHECK(partition_state_ != PartitionState::COMPLETE);
+    partition_state_ = PartitionState::COMPLETE;
     // No more stages to run.
     return false;
   } else if (stage_id == StageId::REACH_BARRIER) {
-    if (!is_in_barrier_) {
-      is_in_barrier_ = true;
-      message::ControllerRespondReachBarrier report;
-      FillInStats(&report);
-      get_send_command_interface()->SendCommandToController(
-          message::SerializeMessageWithControlHeader(report));
-    }
+    message::ControllerRespondReachBarrier report;
+    FillInStats(&report);
+    get_send_command_interface()->SendCommandToController(
+        message::SerializeMessageWithControlHeader(report));
+    CHECK(partition_state_ != PartitionState::IN_BARRIER);
+    partition_state_ = PartitionState::IN_BARRIER;
     // No more stages to run.
     return false;
   } else if (stage_id == StageId::INVALID) {
@@ -214,13 +220,22 @@ bool WorkerExecutionContext::RunOneStage() {
 }
 
 void WorkerExecutionContext::Run() {
+  if (partition_state_ == PartitionState::COMPLETE) {
+    return;
+  }
   RunCommands();
+  if (partition_state_ != PartitionState::RUNNING) {
+    return;
+  }
   while (RunOneStage()) {
     continue;
   }
 }
 
 void WorkerExecutionContext::Report() {
+  if (partition_state_ == PartitionState::COMPLETE) {
+    return;
+  }
   message::ControllerRespondStatusOfPartition report;
   FillInStats(&report);
   get_send_command_interface()->SendCommandToController(
@@ -255,7 +270,6 @@ void WorkerExecutionContext::ProcessInitCommand(struct evbuffer* command) {
     stage_graph_.InsertBarrier(struct_message.first_barrier_stage);
   }
   AllocatePartitionData();
-  evbuffer_free(command);
 }
 
 void WorkerExecutionContext::ProcessControlFlowDecision(
@@ -265,12 +279,10 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
       internal_message::to_command<ControlDecisionCommand>(command);
   stage_graph_.FeedControlFlowDecision(struct_message.stage_id,
                                        struct_message.decision);
-  evbuffer_free(command);
 }
 
 void WorkerExecutionContext::ProcessReleaseBarrier() {
   stage_graph_.ReleaseBarrier();
-  is_in_barrier_ = false;
 }
 
 void WorkerExecutionContext::RunGatherStage(

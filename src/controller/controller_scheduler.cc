@@ -637,7 +637,7 @@ void ControllerScheduler::UpdateRunningStats(
 
 void ControllerScheduler::CleanUpApplication(
     ApplicationId application_id, ApplicationRecord* application_record) {
-  LOG(INFO) << "Completed application# " << get_value(application_id) << ".";
+  LOG(INFO) << "Completed application #" << get_value(application_id) << ".";
   application_record->application_state = ApplicationState::COMPLETE;
   FlushLoggingFile();
 
