@@ -39,6 +39,8 @@
 
 #include "worker/worker_scheduler.h"
 
+#include <utility>
+
 namespace canary {
 
 WorkerSchedulerBase::WorkerSchedulerBase() {
@@ -126,6 +128,7 @@ void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
   CHECK(!is_ready_);
   is_ready_ = true;
   self_worker_id_ = worker_id;
+  // Responds with the worker status.
   message::ControllerRespondStatusOfWorker respond_status;
   respond_status.from_worker_id = self_worker_id_;
   respond_status.num_cores = num_cores_;
@@ -200,7 +203,7 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end());
-    // Detach thread context, and kills it.
+    // Detaches the thread context, and kills it.
     auto detached_context = DetachThreadContext(full_partition_id);
     KillThreadContext(detached_context);
   }
@@ -287,7 +290,7 @@ void WorkerSchedulerBase::DeliverCommandToEachThread(
 }
 
 /*
- * Schedules the execution of partitions.
+ * Schedules the execution of thread contexts.
  */
 void WorkerSchedulerBase::RequestReportOfThreadContext(
     WorkerLightThreadContext* thread_context) {
@@ -297,8 +300,8 @@ void WorkerSchedulerBase::RequestReportOfThreadContext(
   if (!thread_context->is_running_) {
     request_report_set_.insert(thread_context);
   }
-  pthread_mutex_unlock(&scheduling_lock_);
   PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
+  pthread_mutex_unlock(&scheduling_lock_);
 }
 
 void WorkerSchedulerBase::ActivateThreadContext(
@@ -309,8 +312,8 @@ void WorkerSchedulerBase::ActivateThreadContext(
   if (!thread_context->is_running_) {
     AddToPriorityQueue(thread_context);
   }
-  pthread_mutex_unlock(&scheduling_lock_);
   PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
+  pthread_mutex_unlock(&scheduling_lock_);
 }
 
 void WorkerSchedulerBase::KillThreadContext(
@@ -321,8 +324,8 @@ void WorkerSchedulerBase::KillThreadContext(
   if (!thread_context->is_running_) {
     AddToPriorityQueue(thread_context);
   }
-  pthread_mutex_unlock(&scheduling_lock_);
   PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
+  pthread_mutex_unlock(&scheduling_lock_);
 }
 
 void WorkerSchedulerBase::StartExecution() {

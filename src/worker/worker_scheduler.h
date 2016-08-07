@@ -42,7 +42,9 @@
 
 #include <list>
 #include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "shared/canary_internal.h"
@@ -160,7 +162,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
 
  public:
   /*
-   * Execution thread control. Called in asynchronous context.
+   * Execution control. Called in asynchronous context.
    */
   //! Requests running stats of a thread context.
   void RequestReportOfThreadContext(WorkerLightThreadContext* thread_context);

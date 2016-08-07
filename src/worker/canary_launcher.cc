@@ -202,10 +202,10 @@ int main(int argc, char** argv) {
     if (response.succeed) {
       printf(
           "Reporting application's running stat (id=%d): "
-          "used %.3f cycles succeeded!\n",
+          "used %.3f cycles!\n",
           response.application_id, response.cycles);
     } else {
-      printf("Reporting application's running stat failed!\n%s\n",
+      printf("Reporting application's running stats failed!\n%s\n",
              response.error_message.c_str());
     }
   }

@@ -40,6 +40,7 @@
 #ifndef CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 
+#include <set>
 #include <string>
 
 #include "message/message.h"

@@ -166,13 +166,13 @@ class WorkerLightThreadContext {
   WorkerLightThreadContext();
   //! Destructor.
   virtual ~WorkerLightThreadContext();
-  //! Initializes the light thread.
+  //! Initializes the thread context.
   virtual void Initialize() = 0;
-  //! Finalizes the light thread.
+  //! Finalizes the thread context.
   virtual void Finalize() = 0;
   //! Runs the thread.
   virtual void Run() = 0;
-  //! Report running stat.
+  //! Reports its running stat.
   virtual void Report() = 0;
 
  public:
@@ -190,7 +190,6 @@ class WorkerLightThreadContext {
   const CanaryApplication* get_canary_application() const {
     return canary_application_;
   }
-
   //! Delivers a message.
   void DeliverMessage(StageId stage_id, struct evbuffer* buffer);
 
@@ -223,23 +222,14 @@ class WorkerLightThreadContext {
   bool need_report_ = false;
   bool need_process_ = false;
   bool is_in_priority_queue_ = false;
-  // Caution: TRANSIENT.
   WorkerId worker_id_ = WorkerId::INVALID;
-  // Caution: TRANSIENT.
   ApplicationId application_id_ = ApplicationId::INVALID;
-  // Caution: TRANSIENT.
   VariableGroupId variable_group_id_ = VariableGroupId::INVALID;
-  // Caution: TRANSIENT.
   PartitionId partition_id_ = PartitionId::INVALID;
-  // Caution: TRANSIENT.
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
-  // Caution: TRANSIENT.
   WorkerSendDataInterface* send_data_interface_ = nullptr;
-  // Caution: TRANSIENT.
   const CanaryApplication* canary_application_ = nullptr;
-  // Caution: TRANSIENT.
   WorkerSchedulerBase* worker_scheduler_ = nullptr;
-
   //! Synchronization lock.
   pthread_mutex_t internal_lock_;
 
@@ -264,7 +254,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void Finalize() override;
   //! Runs the thread.
   void Run() override;
-  //! Report running stat.
+  //! Reports its running stat.
   void Report() override;
 
  private:
@@ -308,7 +298,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
     archive(partition_state_);
     archive(stage_graph_);
     archive(pending_gather_stages_);
-    archive(is_in_barrier_);
     AllocatePartitionData();
     for (auto& pair : local_partition_data_) {
       VariableId variable_id;
@@ -322,7 +311,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
     archive(partition_state_);
     archive(stage_graph_);
     archive(pending_gather_stages_);
-    archive(is_in_barrier_);
     for (auto& pair : local_partition_data_) {
       archive(pair.first);
       pair.second->Serialize(archive);
@@ -334,7 +322,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   StageGraph stage_graph_;
   std::map<StageId, StatementId> pending_gather_stages_;
   std::map<VariableId, std::unique_ptr<PartitionData>> local_partition_data_;
-  bool is_in_barrier_ = false;
   enum PartitionState : int32_t {
     UNINITIALIZED = 0,
     RUNNING,
