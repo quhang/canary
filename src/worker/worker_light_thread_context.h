@@ -106,7 +106,7 @@ CommandType to_command(struct evbuffer* buffer) {
 }
 }  // namespace internal_message
 
-class WorkerScheduler;
+class WorkerSchedulerBase;
 
 /**
  * The execution context of a lightweight thread, which is responsible for
@@ -114,6 +114,7 @@ class WorkerScheduler;
  * logic to handle command and data delivery.
  */
 class WorkerLightThreadContext {
+  friend class WorkerSchedulerBase;
  private:
   //! The buffer storing received data of a stage.
   struct StageBuffer {
@@ -170,6 +171,8 @@ class WorkerLightThreadContext {
   virtual void Finalize() = 0;
   //! Runs the thread.
   virtual void Run() = 0;
+  //! Report running stat.
+  virtual void Report() = 0;
 
  public:
   //! Gets the metadata of the thread.
@@ -187,61 +190,12 @@ class WorkerLightThreadContext {
     return canary_application_;
   }
 
-  void ExecuteAllHighPriorityTasks() {
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    const bool success = (!running_) && (!command_list_.empty());
-    if (!running_ && success) {
-      running_ = true;
-    }
-    pthread_mutex_unlock(&internal_lock_);
-    if (success) {
-      RunCommands();
-    }
-    PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
-    if (command_list_.empty()) {
-      if (ready_stages_.empty()) {
-        // Reports have low priority tasks.
-      }
-      pthread_mutex_unlock(&internal_lock_);
-      return;
-    } else {
-      RunCommands();
-    }
-  }
-
-  void ExecuteAllTasks() {
-  }
-
-  //! Tries to enter the execution context of the thread. Returns true if there
-  // is data to process.
-  bool Enter();
-  //! Tries to exit the execution context of the thread. Returns true if there
-  // is no data to process.
-  bool Exit();
-  //! Forces the execution context to exit.
-  void ForceExit();
   //! Delivers a message.
   void DeliverMessage(StageId stage_id, struct evbuffer* buffer);
-
-  void ExecuteUntilNoCommands() {
-    while (HasDeliveredCommand()) {
-      RunCommands();
-    }
-    // Activates itself.
-  }
-
-  void ExecuteUntilNoCommandsOrStages() {
-  }
-
-  virtual void RunCommands() = 0;
-  virtual bool RunOneStage() = 0;
 
  protected:
   //! Registers how many messages are expected for a message.
   void RegisterReceivingData(StageId stage_id, int num_message);
-  //! Retrieves a high priority command.
-  bool RetrieveHighPriorityCommand(
-      StageId* stage_id, struct evbuffer** command);
   //! Retrieves a command.
   bool RetrieveCommand(StageId* stage_id, struct evbuffer** command);
   //! Retrieves the buffer of a stage.
@@ -260,26 +214,14 @@ class WorkerLightThreadContext {
     archive(stage_buffer_map_);
     archive(ready_stages_);
   }
-  // Used after SAVE to clear all memory.
-  virtual void clear_memory() {
-    if (memory_cleared_) {
-      return;
-    }
-    memory_cleared_ = true;
-    command_list_.clear();
-    stage_buffer_map_.clear();
-    ready_stages_.clear();
-  }
 
  private:
   // Used for scheduling, protected by the lock of the worker scheduler.
-  int num_high_priority_event_ = 0;
-  int num_low_priority_event_ = 0;
   bool is_killed_ = false;
-  bool is_running_ = false
-
- private:
-  friend class WorkerSchedulerBase;
+  bool is_running_ = false;
+  bool need_report_ = false;
+  bool need_process_ = false;
+  bool is_in_priority_queue_ = false;
   // Caution: TRANSIENT.
   WorkerId worker_id_ = WorkerId::INVALID;
   // Caution: TRANSIENT.
@@ -289,21 +231,16 @@ class WorkerLightThreadContext {
   // Caution: TRANSIENT.
   PartitionId partition_id_ = PartitionId::INVALID;
   // Caution: TRANSIENT.
-  std::function<void()> activate_callback_;
-  // Caution: TRANSIENT.
   WorkerSendCommandInterface* send_command_interface_ = nullptr;
   // Caution: TRANSIENT.
   WorkerSendDataInterface* send_data_interface_ = nullptr;
   // Caution: TRANSIENT.
   const CanaryApplication* canary_application_ = nullptr;
+  // Caution: TRANSIENT.
+  WorkerSchedulerBase* worker_scheduler_ = nullptr;
+
   //! Synchronization lock.
-  // Caution: TRANSIENT.
   pthread_mutex_t internal_lock_;
-  // Caution: TRANSIENT.
-  bool running_ = false;
-  // Caution: TRANSIENT.
-  bool memory_cleared_ = false;
-  WorkerScheduler* worker_scheduler_ = nullptr;
 
   /*
    * States that need serialization.
@@ -327,6 +264,8 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void Finalize() override;
   //! Runs the thread.
   void Run() override;
+  //! Report running stat.
+  void Report() override;
 
  private:
   //! Builds running stats.
@@ -388,12 +327,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
       pair.second->Serialize(archive);
       pair.second->Finalize();
     }
-  }
-  void clear_memory() override {
-    WorkerLightThreadContext::clear_memory();
-    pending_gather_stages_.clear();
-    local_partition_data_.clear();
-    stage_graph_.~StageGraph();
   }
 
  private:

@@ -147,8 +147,6 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   /*
    * Methods implemented by subclass to change the behavior of the scheduler.
    */
-  //! Starts execution threads.
-  virtual void StartExecution() = 0;
   //! Loads the application binary.
   virtual void LoadApplicationBinary(ApplicationRecord* application_record) = 0;
   //! Unloads the application binary.
@@ -157,146 +155,46 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Loads a partition and returns its thread context.
   virtual WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) = 0;
-  /*
-   * Execution thread control. Called in asynchronous context.
-   *
-   * (1) After a thread context is activated, it must execute.
-   * (2) Whenever a worker thread finishes executing a thread context, it must
-   * guarantee that the thread context will be taken care of correctly.
-   *
-   */
+  //! Unloads a partition.
+  virtual void WorkerScheduler::UnloadPartition(
+      WorkerLightThreadContext* thread_context) = 0;
 
  public:
+  /*
+   * Execution thread control. Called in asynchronous context.
+   */
   //! Requests running stats of a thread context.
-  void RequestReportOfThreadContext(WorkerLightThread* thread_context) {
-    PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-    CHECK(!thread_context->is_killed);
-    request_report_set_.insert(thread_context);
-    pthread_mutex_unlock(&scheduling_lock_);
-    PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
-  }
+  void RequestReportOfThreadContext(WorkerLightThread* thread_context);
   //! Notifies the scheduler that a thread context receives a event.
-  void ActivateThreadContext(WorkerLightThreadContext* thread_context) {
-    PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-    CHECK(!thread_context->is_killed);
-    ++thread_context->num_events_;
-    if (!thread_context->is_running_) {
-      AddToPriorityQueue(thread_context);
-    }
-    pthread_mutex_unlock(&scheduling_lock_);
-    PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
-  }
+  void ActivateThreadContext(WorkerLightThreadContext* thread_context);
   //! Notifies the scheduler that a thread context should be killed, and no more
   // event will happen on the thread context.
-  void KillThreadContext(WorkerLightThreadContext* thread_context) {
-    PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-    CHECK(!thread_context->is_killed);
-    thread_context->is_killed_ = true;
-    if (!thread_context->is_running_) {
-      AddToPriorityQueue(thread_context);
-    }
-    pthread_mutex_unlock(&scheduling_lock_);
-    PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
-  }
-  //! Adds the thread context to the priority queue.
-  void AddToPriorityQueue(WorkerLightThreadContext* thread_context) {
-    const auto application_id = thread_context->get_application_id();
-    const auto priority_level =
-        application_priority_level_map_[application_id];
-    priority_queue_[priority_level].push_back(thread_context);
-  }
+  void KillThreadContext(WorkerLightThreadContext* thread_context);
+  //! Starts execution threads.
+  void StartExecution();
 
+ private:
+  //! Execution routine.
+  static void* ExecutionRoutine(void* arg);
+  //! Internal execution routine.
+  void InternalExecutionRoutine();
+  //! Describes what category of action to take.
+  enum ActionType { REPORT, RUN, NONE };
+  //! Gets the next action.
+  std::pair<ActionType, WorkerLightThreadContext*> GetNextAction();
   //! Sets the priority level of an application.
   void SetApplicationPriorityLevel(ApplicationId application_id,
                                    PriorityLevel priority_level);
-
-  enum ActionType {
-    NONE, KILL, REPORT, RUN
-  };
-
-  std::pair<ActionType, WorkerLightThreadContext*> GetNextAction() {
-    WorkerLightThreadContext* result = nullptr;
-    if (!request_report_set_.empty()) {
-      auto iter = request_report_set_.begin();
-      result = *iter;
-      request_report_set_.erase(iter);
-      return std::make_pair(ActionType::REPORT, result);
-    }
-    auto queue_iter = priority_queue_.begin();
-    while (queue_iter != priority_queue_.end() && queue.empty()) {
-      queue_iter = priority_queue_.erase(iter);
-    }
-    if (queue_iter != priority_queue_.end()) {
-      result = queue_iter->front();
-      queue_iter->pop_front();
-      return std::make_pair(ActionType::RUN, result);
-    } else {
-      return std::make_pair(ActionType::NONE, result);
-    }
-  }
-
-  void WorkerThreadExecutionRoutine() {
-    ActionType action_type;
-    WorkerLightThreadContext* held_context = nullptr;
-    int complete_events = 0;
-    while (true) {
-      PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-      if (held_context && held_context->is_killed_) {
-        action_type = ActionType::KILL;
-        pthread_mutex_unlock(&scheduling_lock_);
-      } else {
-        held_context->is_running_ = false;
-        pthread_mutex_unlock(&scheduling_lock_);
-      }
-    }
-  }
-
-  void WorkerThreadExecutionRoutine() {
-    ActionType action_type;
-    WorkerLightThreadContext* thread_context = nullptr;
-    do {
-      std::tie(action_type, thread_context) = GetNextAction(
-          thread_context, processed_high_priority_events,
-          processed_priority_events);
-      switch (action_type) {
-        case ActionType::KILL: {
-          // TODO(quhang).
-          delete thread_context;
-          thread_context == nullptr;
-          processed_high_priority_events = 0;
-          processed_priority_events = 0;
-          break;
-        }
-        case ActionType::HIGH_PRIORITY: {
-          std::tie(processed_high_priority_events,
-                   processed_priority_events) =
-              thread_context->ProcessHighPriorityEvents();
-          break;
-        }
-        case ActionType::LOW_PRIORITY: {
-          std::tie(processed_high_priority_events,
-                   processed_priority_events) =
-              thread_context->ProcessLowPriorityEvents();
-          break;
-        }
-      }
-    } while (true);
-  }
-
-  //! Retrieves an activated thread context.
-  WorkerLightThreadContext* GetActivatedThreadContext();
-  //! Rearranges the thread context priority queue after priority levels of
-  // applications are changed.
+  //! Rearranges the priority queue after priority levels of applications are
+  // changed.
   void RearrangePriorityQueue();
-  //! Execution routine.
-  static void* ExecutionRoutine(void* arg);
-  /*
-   * Helper function.
-   */
+  //! Adds the thread context to the priority queue.
+  void AddToPriorityQueue(WorkerLightThreadContext* thread_context);
   //! Constructs a thread context.
   void ConstructThreadContext(const FullPartitionId& full_partition_id);
-  //! Destructs a thread context.
-  void DestructThreadContext(const FullPartitionId& full_partition_id);
+  //! Detaches a thread context, which will no more receive commands.
+  WorkerLightThreadContext* DetachThreadContext(
+      const FullPartitionId& full_partition_id);
 
  protected:
   /*
@@ -305,7 +203,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Thread scheduling sychronization lock and condition variable.
   pthread_mutex_t scheduling_lock_;
   pthread_cond_t scheduling_cond_;
-  //! Low priority queue.
+  //! Priority queue: thread contexts that are ready to run.
   std::map<PriorityLevel, std::list<WorkerLightThreadContext*>> priority_queue_;
   std::set<WorkerLightThreadContext*> request_report_set_;
   //! The priority level of applications, used for scheduling.
@@ -327,14 +225,16 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   int num_cores_ = -1;
 };
 
+/**
+ * Seperates out the worker scheduler implementation out from the implementaiton
+ * of the thread context and the application.
+ */
 class WorkerScheduler : public WorkerSchedulerBase {
  public:
   WorkerScheduler() {}
   virtual ~WorkerScheduler() {}
 
  protected:
-  //! Starts execution threads.
-  void StartExecution() override;
   //! Loads the application binary.
   void LoadApplicationBinary(ApplicationRecord* application_record) override;
   //! Unloads the application binary.
@@ -342,6 +242,9 @@ class WorkerScheduler : public WorkerSchedulerBase {
   //! Loads a partition and returns its thread context.
   WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) override;
+  // Unloads a partition.
+  void WorkerScheduler::UnloadPartition(
+      WorkerLightThreadContext* thread_context) override;
 };
 
 }  // namespace canary

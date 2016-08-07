@@ -138,29 +138,31 @@ void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
 /*
  * Processes commands received from the controller.
  */
-
 void WorkerSchedulerBase::ProcessLoadApplication(
     const message::WorkerLoadApplication& worker_command) {
-  const auto launch_application_id = worker_command.application_id;
-  CHECK(application_record_map_.find(launch_application_id) ==
-        application_record_map_.end()) << "Cannot load an application twice!";
-  auto& application_record = application_record_map_[launch_application_id];
-  application_record.application_id = launch_application_id;
+  const auto load_application_id = worker_command.application_id;
+  CHECK(application_record_map_.find(load_application_id) ==
+        application_record_map_.end())
+      << "Cannot load an application twice!";
+  auto& application_record = application_record_map_[load_application_id];
+  application_record.application_id = load_application_id;
   application_record.binary_location = worker_command.binary_location;
   application_record.application_parameter =
       worker_command.application_parameter;
   application_record.first_barrier_stage = worker_command.first_barrier_stage;
+  application_record.priority_level = worker_command.priority_level;
   application_record.local_partitions = 0;
   // Loads application binary.
   LoadApplicationBinary(&application_record);
-  SetApplicationPriorityLevel(launch_application_id,
+  // Sets the application priority level.
+  SetApplicationPriorityLevel(load_application_id,
                               worker_command.priority_level);
 }
 
 void WorkerSchedulerBase::ProcessUnloadApplication(
     const message::WorkerUnloadApplication& worker_command) {
-  const auto remove_application_id = worker_command.application_id;
-  auto iter = application_record_map_.find(remove_application_id);
+  const auto unload_application_id = worker_command.application_id;
+  auto iter = application_record_map_.find(unloade_application_id);
   CHECK(iter != application_record_map_.end()) << "No application to unload!";
   CHECK_EQ(iter->second.local_partitions, 0)
       << "Cannot unload an application when a partition is running!";
@@ -179,6 +181,7 @@ void WorkerSchedulerBase::ProcessLoadPartitions(
     // Constructs thread context.
     ConstructThreadContext(full_partition_id);
   }
+  // Initializes and installs the first barrier.
   const auto first_barrier_stage =
       application_record_map_.at(application_id).first_barrier_stage;
   DeliverCommandToEachThread(
@@ -198,9 +201,9 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     auto iter = thread_map_.find(full_partition_id);
     CHECK(iter != thread_map_.end());
-    iter->second->Finalize();
-    // Destructs thread context.
-    DestructThreadContext(full_partition_id);
+    // Detach thread context, and kills it.
+    auto detached_context = DetachThreadContext(full_partition_id);
+    KillThreadContext(detached_context);
   }
 }
 
@@ -232,14 +235,21 @@ void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
         StageId::MIGRATE_OUT,
         internal_message::to_buffer(internal_message::MigrateOutCommand{
             partition_migrate_record.to_worker_id}));
-    DestructThreadContext(full_partition_id);
+    // Detach thread context.
+    DetachThreadContext(full_partition_id);
+    KillThreadContext
   }
 }
 
 void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
     const message::WorkerReportStatusOfPartitions& worker_command) {
-  DeliverCommandToEachThread(worker_command, StageId::REQUEST_REPORT,
-                             []() { return nullptr; });
+  for (const auto& pair : worker_command.partition_list) {
+    FullPartitionId full_partition_id{command_from_controller.application_id,
+                                      pair.first, pair.second};
+    auto iter = thread_map_.find(full_partition_id);
+    CHECK(iter != thread_map_.end()) << "No such thread to report status.";
+    RequestReportOfThreadContext(iter->second);
+  }
 }
 
 void WorkerSchedulerBase::ProcessPauseBarrier(
@@ -280,48 +290,121 @@ void WorkerSchedulerBase::DeliverCommandToEachThread(
 
 /*
  * Schedules the execution of partitions.
- *
- * The key concept is:
- *   (1) Activation. After a thread context is activated, it must be executed at
- *   least once.
- *   (2) Execute-until-blocked. After a thread context is executed by a worker
- *   thread, the execution must run until being blocked.
  */
-void WorkerSchedulerBase::ActivateThreadContext(
-    WorkerLightThreadContext* thread_context) {
+void WorkerSchedulerBase::RequestReportOfThreadContext(
+    WorkerLightThread* thread_context) {
   PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-  const auto application_id = thread_context->get_application_id();
-  const auto priority_level = application_priority_level_map_[application_id];
-  activated_thread_priority_queue_[priority_level].push_back(thread_context);
-  PCHECK(pthread_mutex_unlock(&scheduling_lock_) == 0);
+  CHECK(!thread_context->is_killed_);
+  thread_context->need_report_ = true;
+  if (!thread_context->is_running_) {
+    request_report_set_.insert(thread_context);
+  }
+  pthread_mutex_unlock(&scheduling_lock_);
   PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
 }
 
-WorkerLightThreadContext* WorkerSchedulerBase::GetActivatedThreadContext() {
-  WorkerLightThreadContext* result = nullptr;
+void WorkerSchedulerBase::ActivateThreadContext(
+    WorkerLightThreadContext* thread_context) {
   PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
-  while (true) {
-    auto iter = activated_thread_priority_queue_.begin();
-    while (iter != activated_thread_priority_queue_.end()) {
-      auto& queue = iter->second;
-      if (queue.empty()) {
-        // Moves to the next queue.
-        iter = activated_thread_priority_queue_.erase(iter);
-      } else {
-        // Takes an activated thread context.
-        result = queue.front();
-        queue.pop_front();
-        break;
-      }
-    }
-    // If an activated thread context is taken.
-    if (result) {
-      break;
-    }
-    PCHECK(pthread_cond_wait(&scheduling_cond_, &scheduling_lock_) == 0);
+  CHECK(!thread_context->is_killed);
+  thread_context->need_process_ = true;
+  if (!thread_context->is_running_) {
+    AddToPriorityQueue(thread_context);
   }
   pthread_mutex_unlock(&scheduling_lock_);
-  return result;
+  PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
+}
+
+void WorkerSchedulerBase::KillThreadContext(
+    WorkerLightThreadContext* thread_context) {
+  PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+  CHECK(!thread_context->is_killed);
+  thread_context->is_killed_ = true;
+  if (!thread_context->is_running_) {
+    AddToPriorityQueue(thread_context);
+  }
+  pthread_mutex_unlock(&scheduling_lock_);
+  PCHECK(pthread_cond_signal(&scheduling_cond_) == 0);
+}
+
+void WorkerSchedulerBase::StartExecution() {
+  // Reads global variable: the number of worker threads.
+  thread_handle_list_.resize(num_cores_);
+  sched_param param{0};
+  for (auto& handle : thread_handle_list_) {
+    PCHECK(pthread_create(&handle, nullptr,
+                          &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
+    // Set worker thread priority lower than SCHED_OTHER.
+    PCHECK(pthread_setschedparam(handle, SCHED_BATCH, &param) == 0);
+  }
+}
+
+void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
+  auto scheduler = reinterpret_cast<WorkerSchedulerBase*>(arg);
+  scheduler->InternalExecutionRoutine();
+  LOG(WARNING) << "Execution thread exits.";
+  return nullptr;
+}
+
+void WorkerSchedulerBase::InternalExecutionRoutine() {
+  ActionType action_type = ActionType::NONE;
+  WorkerLightThreadContext* held_context = nullptr;
+  PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+  while (true) {
+    held_context->is_running_ = false;
+    if (held_context->need_report_) {
+      request_report_set_.insert(held_context);
+    } else if (held_context->need_process_) {
+      AddToPriorityQueue(held_context);
+    } else if (held_context->is_killed_) {
+      pthread_mutex_unlock(&scheduling_lock_);
+      UnloadPartition(held_context);
+      PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+    }
+    std::tie(action_type, held_context) = GetNextAction();
+    while (action_type == ActionType::NONE) {
+      std::tie(action_type, held_context) = GetNextAction();
+      pthread_cond_wait(&scheduling_cond_, &scheduling_lock_);
+    }
+    switch (action_type) {
+      case ActionType::REPORT:
+        held_context_->is_running_ = true;
+        held_context_->need_report_ = false;
+        pthread_mutex_unlock(&scheduling_lock_);
+        held_context_->Report();
+        PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+        break;
+      case ActionType::RUN:
+        held_context_->is_running_ = true;
+        held_context_->need_process_ = false;
+        pthread_mutex_unlock(&scheduling_lock_);
+        held_context_->Run();
+        PCHECK(pthread_mutex_lock(&scheduling_lock_) == 0);
+        break;
+    }
+  }
+}
+
+//! Gets the next action.
+std::pair<WorkerBaseScheduler::ActionType, WorkerLightThreadContext*>
+WorkerBaseScheduler::GetNextAction() {
+  if (!request_report_set_.empty()) {
+    auto iter = request_report_set_.begin();
+    WorkerLightThreadContext* result = *iter;
+    request_report_set_.erase(iter);
+    return std::make_pair(ActionType::REPORT, result);
+  }
+  auto queue_iter = priority_queue_.begin();
+  while (queue_iter != priority_queue_.end() && queue.empty()) {
+    queue_iter = priority_queue_.erase(iter);
+  }
+  if (queue_iter != priority_queue_.end()) {
+    result = queue_iter->front();
+    queue_iter->pop_front();
+    return std::make_pair(ActionType::RUN, result);
+  } else {
+    return std::make_pair(ActionType::NONE, nullptr);
+  }
 }
 
 void WorkerSchedulerBase::SetApplicationPriorityLevel(
@@ -346,24 +429,19 @@ void WorkerSchedulerBase::RearrangePriorityQueue() {
       const auto application_id = thread_context->get_application_id();
       const auto priority_level =
           application_priority_level_map_[application_id];
-      activated_thread_priority_queue_[priority_level].push_back(
-          thread_context);
+      priority_queue_[priority_level].push_back(thread_context);
     }
 }
 
-void* WorkerSchedulerBase::ExecutionRoutine(void* arg) {
-  auto scheduler = reinterpret_cast<WorkerSchedulerBase*>(arg);
-  auto thread_context = scheduler->GetActivatedThreadContext();
-  while (thread_context != nullptr) {
-    if (thread_context->Enter()) {
-      do {
-        thread_context->Run();
-      } while (!thread_context->Exit());
-    }
-    thread_context = scheduler->GetActivatedThreadContext();
+void WorkerSchedulerBase::AddToPriorityQueue(
+    WorkerLightThreadContext* thread_context) {
+  if (thread_context->is_in_priority_queue_) {
+    return;
   }
-  LOG(WARNING) << "Execution thread exits.";
-  return nullptr;
+  thread_context->is_in_priority_queue_ = true;
+  const auto application_id = thread_context->get_application_id();
+  const auto priority_level = application_priority_level_map_[application_id];
+  priority_queue_[priority_level].push_back(thread_context);
 }
 
 void WorkerSchedulerBase::ConstructThreadContext(
@@ -374,14 +452,12 @@ void WorkerSchedulerBase::ConstructThreadContext(
   thread_context->application_id_ = application_id;
   thread_context->variable_group_id_ = full_partition_id.variable_group_id;
   thread_context->partition_id_ = full_partition_id.partition_id;
-  // Sets related callback/interface.
-  thread_context->activate_callback_ = std::bind(
-      &WorkerSchedulerBase::ActivateThreadContext, this, thread_context);
   thread_context->send_command_interface_ = send_command_interface_;
   thread_context->send_data_interface_ = send_data_interface_;
   // Sets the application.
   thread_context->canary_application_ =
       application_record_map_.at(application_id).loaded_application;
+  thread_context->worker_scheduler_ = this;
   // Initializes the thread context.
   thread_context->Initialize();
   // Registers the thread.
@@ -390,27 +466,16 @@ void WorkerSchedulerBase::ConstructThreadContext(
   ++application_record_map_.at(application_id).local_partitions;
 }
 
-void WorkerSchedulerBase::DestructThreadContext(
+WorkerLightThreadContext* WorkerSchedulerBase::DetachThreadContext(
     const FullPartitionId& full_partition_id) {
-  // Deregisters the thread.
+  WorkerLightThreadContext* result = nullptr;
   auto iter = thread_map_.find(full_partition_id);
   CHECK(iter != thread_map_.end());
+  result = iter->second;
   thread_map_.erase(iter);
   --application_record_map_.at(full_partition_id.application_id)
         .local_partitions;
-  // Caution: the thread context is not deleted, it remains there as a tomb.
-}
-
-void WorkerScheduler::StartExecution() {
-  // Reads global variable: the number of worker threads.
-  thread_handle_list_.resize(num_cores_);
-  sched_param param{0};
-  for (auto& handle : thread_handle_list_) {
-    PCHECK(pthread_create(&handle, nullptr,
-                          &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
-    // Set worker thread priority lower than SCHED_OTHER.
-    PCHECK(pthread_setschedparam(handle, SCHED_BATCH, &param) == 0);
-  }
+  return result;
 }
 
 void WorkerScheduler::LoadApplicationBinary(
@@ -433,6 +498,12 @@ void WorkerScheduler::UnloadApplicationBinary(
 
 WorkerLightThreadContext* WorkerScheduler::LoadPartition(FullPartitionId) {
   return new WorkerExecutionContext();
+}
+
+void WorkerScheduler::UnloadPartition(
+    WorkerLightThreadContext* thread_context) {
+  thread_context->Finalize();
+  delete thread_context;
 }
 
 }  // namespace canary

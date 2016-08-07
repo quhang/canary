@@ -624,7 +624,7 @@ void ControllerScheduler::UpdateRunningStats(
     message::RequestApplicationStatResponse response;
     response.application_id = get_value(application_id);
     response.succeed = true;
-    response.cycles= application_record.total_used_cycles;
+    response.cycles = application_record.total_used_cycles;
     for (auto launch_command_id : application_record.report_command_list) {
       launch_send_command_interface_->SendLaunchResponseCommand(
           launch_command_id,
@@ -633,7 +633,6 @@ void ControllerScheduler::UpdateRunningStats(
     application_record.report_command_list.clear();
     FlushLoggingFile();
   }
-
 }
 
 void ControllerScheduler::CleanUpApplication(

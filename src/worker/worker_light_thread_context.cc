@@ -62,9 +62,11 @@ void WorkerLightThreadContext::DeliverMessage(
     if (stage_buffer.expected_buffer ==
         static_cast<int>(stage_buffer.buffer_list.size())) {
       ready_stages_.push_back(stage_id);
-      worker_scheduler_->NotifyLowPriorityEvent(this);
+      pthread_mutex_unlock(&internal_lock_);
+      worker_scheduler_->ActivateThreadContext(this);
+    } else {
+      pthread_mutex_unlock(&internal_lock_);
     }
-    pthread_mutex_unlock(&internal_lock_);
   } else {
     // A command requiring attention.
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
@@ -72,14 +74,8 @@ void WorkerLightThreadContext::DeliverMessage(
     auto& command_buffer = command_list_.back();
     command_buffer.stage_id = stage_id;
     command_buffer.command = buffer;
-    switch (stage_id) {
-      case StageId::CONTROL_FLOW:
-        worker_scheduler_->NotifyLowPriorityEvent(this);
-        break;
-      default:
-        worker_scheduler_->NotifyHighPriorityEvent(this);
-    }
     pthread_mutex_unlock(&internal_lock_);
+    worker_scheduler_->ActivateThreadContext(this);
   }
 }
 
@@ -91,9 +87,11 @@ void WorkerLightThreadContext::RegisterReceivingData(StageId stage_id,
   stage_buffer.expected_buffer = num_message;
   if (num_message == static_cast<int>(stage_buffer.buffer_list.size())) {
     ready_stages_.push_back(stage_id);
-    worker_scheduler_->NotifyLowPriorityEvent(this);
+    pthread_mutex_unlock(&internal_lock_);
+    worker_scheduler_->ActivateThreadContext(this);
+  } else {
+    pthread_mutex_unlock(&internal_lock_);
   }
-  pthread_mutex_unlock(&internal_lock_);
 }
 
 bool WorkerLightThreadContext::RetrieveCommand(StageId* stage_id,
@@ -138,7 +136,6 @@ void WorkerExecutionContext::Initialize() {
 
 void WorkerExecutionContext::Finalize() {
   DeallocatePartitionData();
-  clear_memory();
 }
 
 void WorkerExecutionContext::RunCommand() {
@@ -219,11 +216,11 @@ bool WorkerExecutionContext::RunOneStage() {
   }
 }
 
-// TODO(quhang): memory clear is not clear yet.
 void WorkerExecutionContext::Run() {
-  do {
-    RunCommand();
-  } while (RunOneStage());
+  RunCommand();
+  while (RunOneStage()) {
+    continue;
+  }
 }
 
 void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
