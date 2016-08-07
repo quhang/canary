@@ -346,17 +346,16 @@ COUNTABLE_ENUM(PartitionId);
  */
 enum class StageId : int32_t {
   // Represents special states.
-  REACH_BARRIER = -17,
-  COMPLETE = -16,
+  REACH_BARRIER = -32,
+  COMPLETE,
   // Represents special commands.
-  MIGRATE_IN = -9,
-  MIGRATE_OUT = -8,
-  PAUSE_EXECUTION = -7,
-  INSTALL_BARRIER = -6,
-  RELEASE_BARRIER = -5,
-  REQUEST_REPORT = -4,
-  CONTROL_FLOW_DECISION = -3,
-  INIT = -2,
+  MIGRATE_IN = -16,
+  MIGRATE_OUT,
+  PAUSE_EXECUTION,
+  INSTALL_BARRIER,
+  RELEASE_BARRIER,
+  CONTROL_FLOW_DECISION,
+  INIT,
   // Normal stages.
   INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(StageId);

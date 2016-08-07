@@ -40,6 +40,7 @@
 #include "worker/worker_light_thread_context.h"
 
 #include "message/message_include.h"
+#include "worker/worker_scheduler.h"
 
 namespace canary {
 
@@ -51,8 +52,8 @@ WorkerLightThreadContext::~WorkerLightThreadContext() {
   pthread_mutex_destroy(&internal_lock_);
 }
 
-void WorkerLightThreadContext::DeliverMessage(
-    StageId stage_id, struct evbuffer* buffer) {
+void WorkerLightThreadContext::DeliverMessage(StageId stage_id,
+                                              struct evbuffer* buffer) {
   if (stage_id >= StageId::FIRST) {
     // Normal data routed to a stage.
     PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
@@ -63,6 +64,7 @@ void WorkerLightThreadContext::DeliverMessage(
         static_cast<int>(stage_buffer.buffer_list.size())) {
       ready_stages_.push_back(stage_id);
       pthread_mutex_unlock(&internal_lock_);
+      // Activates.
       worker_scheduler_->ActivateThreadContext(this);
     } else {
       pthread_mutex_unlock(&internal_lock_);
@@ -75,6 +77,7 @@ void WorkerLightThreadContext::DeliverMessage(
     command_buffer.stage_id = stage_id;
     command_buffer.command = buffer;
     pthread_mutex_unlock(&internal_lock_);
+    // Activates.
     worker_scheduler_->ActivateThreadContext(this);
   }
 }
@@ -88,6 +91,7 @@ void WorkerLightThreadContext::RegisterReceivingData(StageId stage_id,
   if (num_message == static_cast<int>(stage_buffer.buffer_list.size())) {
     ready_stages_.push_back(stage_id);
     pthread_mutex_unlock(&internal_lock_);
+    // Activates.
     worker_scheduler_->ActivateThreadContext(this);
   } else {
     pthread_mutex_unlock(&internal_lock_);
@@ -134,11 +138,9 @@ void WorkerExecutionContext::Initialize() {
       get_canary_application()->get_statement_info_map());
 }
 
-void WorkerExecutionContext::Finalize() {
-  DeallocatePartitionData();
-}
+void WorkerExecutionContext::Finalize() { DeallocatePartitionData(); }
 
-void WorkerExecutionContext::RunCommand() {
+void WorkerExecutionContext::RunCommands() {
   struct evbuffer* command;
   StageId command_stage_id;
   while (RetrieveCommand(&command_stage_id, &command)) {
@@ -148,10 +150,6 @@ void WorkerExecutionContext::RunCommand() {
         break;
       case StageId::CONTROL_FLOW_DECISION:
         ProcessControlFlowDecision(command);
-        break;
-      case StageId::REQUEST_REPORT:
-        CHECK(command == nullptr);
-        ProcessRequestReport();
         break;
       case StageId::MIGRATE_IN:
         // TODO(quhang): not implemented.
@@ -179,7 +177,6 @@ void WorkerExecutionContext::RunCommand() {
   }
 }
 
-// Returns whether there might be more stages to run.
 bool WorkerExecutionContext::RunOneStage() {
   std::list<struct evbuffer*> buffer_list;
   StageId stage_id;
@@ -217,10 +214,17 @@ bool WorkerExecutionContext::RunOneStage() {
 }
 
 void WorkerExecutionContext::Run() {
-  RunCommand();
+  RunCommands();
   while (RunOneStage()) {
     continue;
   }
+}
+
+void WorkerExecutionContext::Report() {
+  message::ControllerRespondStatusOfPartition report;
+  FillInStats(&report);
+  get_send_command_interface()->SendCommandToController(
+      message::SerializeMessageWithControlHeader(report));
 }
 
 void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
@@ -251,21 +255,17 @@ void WorkerExecutionContext::ProcessInitCommand(struct evbuffer* command) {
     stage_graph_.InsertBarrier(struct_message.first_barrier_stage);
   }
   AllocatePartitionData();
+  evbuffer_free(command);
 }
 
 void WorkerExecutionContext::ProcessControlFlowDecision(
     struct evbuffer* command) {
-  StageId stage_id;
-  bool decision;
-  DeserializeControlFlowDecision(command, &stage_id, &decision);
-  stage_graph_.FeedControlFlowDecision(stage_id, decision);
-}
-
-void WorkerExecutionContext::ProcessRequestReport() {
-  message::ControllerRespondStatusOfPartition report;
-  FillInStats(&report);
-  get_send_command_interface()->SendCommandToController(
-      message::SerializeMessageWithControlHeader(report));
+  using internal_message::ControlDecisionCommand;
+  auto struct_message =
+      internal_message::to_command<ControlDecisionCommand>(command);
+  stage_graph_.FeedControlFlowDecision(struct_message.stage_id,
+                                       struct_message.decision);
+  evbuffer_free(command);
 }
 
 void WorkerExecutionContext::ProcessReleaseBarrier() {
@@ -406,15 +406,6 @@ struct evbuffer* WorkerExecutionContext::SerializeControlFlowDecision(
     StageId stage_id, bool decision) {
   internal_message::ControlDecisionCommand command{stage_id, decision};
   return internal_message::to_buffer(command);
-}
-
-void WorkerExecutionContext::DeserializeControlFlowDecision(
-    struct evbuffer* buffer, StageId* stage_id, bool* decision) {
-  using internal_message::ControlDecisionCommand;
-  auto command = internal_message::to_command<ControlDecisionCommand>(buffer);
-  *stage_id = command.stage_id;
-  *decision = command.decision;
-  evbuffer_free(buffer);
 }
 
 void WorkerExecutionContext::AllocatePartitionData() {

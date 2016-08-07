@@ -183,6 +183,8 @@ class TestWorkerLightThreadContext : public WorkerLightThreadContext {
     }
   }
 
+  void Report() override {}
+
  private:
   void ProcessCommand(StageId command_stage_id, struct evbuffer* command) {
     CHECK(command_stage_id < StageId::INVALID);
@@ -265,16 +267,6 @@ class TestWorkerScheduler : public WorkerSchedulerBase {
  public:
   TestWorkerScheduler() {}
   virtual ~TestWorkerScheduler() {}
-
-  void StartExecution() {
-    // Reads global variable: the number of worker threads.
-    thread_handle_list_.resize(FLAGS_worker_threads);
-    for (auto& handle : thread_handle_list_) {
-      // TODO(quhang): set thread priority.
-      PCHECK(pthread_create(&handle, nullptr,
-                            &WorkerSchedulerBase::ExecutionRoutine, this) == 0);
-    }
-  }
 
   void LoadApplicationBinary(ApplicationRecord* application_record) {
     CHECK_NOTNULL(application_record);

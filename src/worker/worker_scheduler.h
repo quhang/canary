@@ -156,15 +156,14 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   virtual WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) = 0;
   //! Unloads a partition.
-  virtual void WorkerScheduler::UnloadPartition(
-      WorkerLightThreadContext* thread_context) = 0;
+  virtual void UnloadPartition(WorkerLightThreadContext* thread_context) = 0;
 
  public:
   /*
    * Execution thread control. Called in asynchronous context.
    */
   //! Requests running stats of a thread context.
-  void RequestReportOfThreadContext(WorkerLightThread* thread_context);
+  void RequestReportOfThreadContext(WorkerLightThreadContext* thread_context);
   //! Notifies the scheduler that a thread context receives a event.
   void ActivateThreadContext(WorkerLightThreadContext* thread_context);
   //! Notifies the scheduler that a thread context should be killed, and no more
@@ -243,8 +242,7 @@ class WorkerScheduler : public WorkerSchedulerBase {
   WorkerLightThreadContext* LoadPartition(
       FullPartitionId full_partition_id) override;
   // Unloads a partition.
-  void WorkerScheduler::UnloadPartition(
-      WorkerLightThreadContext* thread_context) override;
+  void UnloadPartition(WorkerLightThreadContext* thread_context) override;
 };
 
 }  // namespace canary

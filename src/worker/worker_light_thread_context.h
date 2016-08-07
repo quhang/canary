@@ -115,6 +115,7 @@ class WorkerSchedulerBase;
  */
 class WorkerLightThreadContext {
   friend class WorkerSchedulerBase;
+
  private:
   //! The buffer storing received data of a stage.
   struct StageBuffer {
@@ -257,7 +258,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
  public:
   WorkerExecutionContext() {}
   virtual ~WorkerExecutionContext() {}
-
   //! Initializes the light thread.
   void Initialize() override;
   //! Finalizes the light thread.
@@ -268,6 +268,10 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void Report() override;
 
  private:
+  //! Runs all commands.
+  void RunCommands();
+  //! Runs one stage, and returns whether there might be more stages to run.
+  bool RunOneStage();
   //! Builds running stats.
   void BuildStats(message::RunningStats* running_stats);
   //! Fills in running stats into a command.
@@ -277,8 +281,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void ProcessInitCommand(struct evbuffer* command);
   //! Processes a control flow decision.
   void ProcessControlFlowDecision(struct evbuffer* command);
-  //! Processes a command that requests running stats.
-  void ProcessRequestReport();
   //! Processes a command that releases a buffer.
   void ProcessReleaseBarrier();
 
@@ -295,9 +297,6 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   //! Serializes a control flow decision.
   struct evbuffer* SerializeControlFlowDecision(StageId stage_id,
                                                 bool decision);
-  //! Deserializes a control flow decision.
-  void DeserializeControlFlowDecision(struct evbuffer* buffer,
-                                      StageId* stage_id, bool* decision);
   //! Allocates data partitions.
   void AllocatePartitionData();
   //! Deallocates data partitions.
