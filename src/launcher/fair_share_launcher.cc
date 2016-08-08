@@ -104,31 +104,40 @@ int main(int argc, char** argv) {
       RequestApplicationCycles(FLAGS_first_application);
   const double second_application_start_cycles =
       RequestApplicationCycles(FLAGS_second_application);
-  TunePriorities(FLAGS_share_ratio > 1);
+  bool prioritize_first_app = (FLAGS_share_ratio > 1);
+  TunePriorities(prioritize_first_app);
 
   double first_application_used_cycles = 0;
   double second_application_used_cycles = 0;
   while (true) {
-    for (int i = 0; i < FLAGS_tune_interval; ++i) {
-      PCHECK((int)sleep(FLAGS_interval) == 0);
-      first_application_used_cycles =
-          RequestApplicationCycles(FLAGS_first_application) -
-          first_application_start_cycles;
-      end_time = time::Clock::now();
-      printf("A %f %f\n", time::duration_to_double(end_time - start_time),
-             first_application_used_cycles);
-      second_application_used_cycles =
-          RequestApplicationCycles(FLAGS_second_application) -
-          second_application_start_cycles;
-      end_time = time::Clock::now();
-      printf("B %f %f\n", time::duration_to_double(end_time - start_time),
-             second_application_used_cycles);
+    PCHECK((int)sleep(FLAGS_interval) == 0);
+    first_application_used_cycles =
+        RequestApplicationCycles(FLAGS_first_application) -
+        first_application_start_cycles;
+    end_time = time::Clock::now();
+    printf("A %f %f\n", time::duration_to_double(end_time - start_time),
+           first_application_used_cycles);
+    second_application_used_cycles =
+        RequestApplicationCycles(FLAGS_second_application) -
+        second_application_start_cycles;
+    end_time = time::Clock::now();
+    printf("B %f %f\n", time::duration_to_double(end_time - start_time),
+           second_application_used_cycles);
+    if (prioritize_first_app) {
+      if (first_application_used_cycles / second_application_used_cycles >
+          FLAGS_share_ratio + 0.1) {
+        prioritize_first_app = false;
+        printf("Prioritize B\n");
+        TunePriorities(prioritize_first_app);
+      }
+    } else {
+      if (first_application_used_cycles / second_application_used_cycles <
+          FLAGS_share_ratio - 0.1) {
+        prioritize_first_app = true;
+        printf("Prioritize A\n");
+        TunePriorities(prioritize_first_app);
+      }
     }
-    bool prioritize_a =
-        (first_application_used_cycles / second_application_used_cycles <
-         FLAGS_share_ratio);
-    printf("Prioritize %s\n", prioritize_a ? "A" : "B");
-    TunePriorities(prioritize_a);
   }
   return 0;
 }
