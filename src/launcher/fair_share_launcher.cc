@@ -52,8 +52,6 @@ DEFINE_double(share_ratio, 1,
 DEFINE_int32(low_priority, 101, "Low priority value.");
 DEFINE_int32(high_priority, 99, "High priority value.");
 DEFINE_int32(interval, 1, "Measurement interval in seconds.");
-DEFINE_int32(tune_interval, 1,
-             "Priority tuning interval in units of measurement interval.");
 
 namespace {
 //! Changes an application's priority.
@@ -138,6 +136,7 @@ int main(int argc, char** argv) {
         TunePriorities(prioritize_first_app);
       }
     }
+    fflush(stdout);
   }
   return 0;
 }
