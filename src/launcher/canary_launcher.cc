@@ -32,7 +32,7 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/worker/canary_launcher.cc
+ * @file src/launcher/canary_launcher.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
  * @brief Class CanaryLauncher.
  */
@@ -46,9 +46,8 @@
 
 #include "shared/canary_internal.h"
 
-#include "message/launch_message.h"
+#include "launcher/launcher_helper.h"
 #include "shared/initialize.h"
-#include "shared/network.h"
 
 // --launch_application=./app/logistic_loop/liblogistic_loop.so iterations=1
 DEFINE_string(launch_application, "",
@@ -73,72 +72,10 @@ DEFINE_int32(control_priority, 100, "Specify the priority level.");
 DEFINE_int32(report_application, -1,
              "Report the running stats of an application.");
 
-namespace {
-//! Connects to the controller and returns the channel socket fd.
-int ConnectToController() {
-  using namespace canary;  // NOLINT
-  struct addrinfo hints;
-  network::initialize_addrinfo(&hints, false);
-  struct addrinfo* available_addresses = nullptr;
-  const int errorcode =
-      getaddrinfo(FLAGS_controller_host.c_str(), FLAGS_launch_service.c_str(),
-                  &hints, &available_addresses);
-  CHECK_EQ(errorcode, 0) << gai_strerror(errorcode);
-  CHECK_NOTNULL(available_addresses);
-  const int result_fd =
-      socket(available_addresses->ai_family, available_addresses->ai_socktype,
-             available_addresses->ai_protocol);
-  PCHECK(result_fd >= 0);
-  const int status = connect(result_fd, available_addresses->ai_addr,
-                             available_addresses->ai_addrlen);
-  freeaddrinfo(available_addresses);
-  PCHECK(status == 0);
-  return result_fd;
-}
-
-//! Disconnects with the controller.
-void DisconnectWithController(int socket_fd) {
-  using namespace canary;  // NOLINT
-  network::close_socket(socket_fd);
-}
-
-//! Sends a launch message and waits for response.
-template <typename LaunchResponseMessageType, typename LaunchMessageType>
-LaunchResponseMessageType LaunchAndWaitResponse(
-    const LaunchMessageType& launch_message) {
-  using namespace canary;  // NOLINT
-  const int socket_fd = ConnectToController();
-  CHECK_NE(socket_fd, -1);
-  struct evbuffer* buffer =
-      message::SerializeMessageWithControlHeader(launch_message);
-  do {
-    PCHECK(evbuffer_write(buffer, socket_fd) != -1);
-  } while (evbuffer_get_length(buffer) != 0);
-  evbuffer_free(buffer);
-  buffer = evbuffer_new();
-  while (evbuffer_read(buffer, socket_fd, -1) > 0) {
-    if (struct evbuffer* whole_message =
-            message::SegmentControlMessage(buffer)) {
-      DisconnectWithController(socket_fd);
-      auto header = CHECK_NOTNULL(message::ExamineControlHeader(whole_message));
-      CHECK(header->category_group ==
-            message::MessageCategoryGroup::LAUNCH_RESPONSE_COMMAND);
-      LaunchResponseMessageType response_message;
-      CHECK(header->category ==
-            message::get_message_category(response_message));
-      message::RemoveControlHeader(whole_message);
-      message::DeserializeMessage(whole_message, &response_message);
-      return std::move(response_message);
-    }
-  }
-  LOG(FATAL) << "Launch response is not received!";
-  return LaunchResponseMessageType();
-}
-}  // namespace
-
 int main(int argc, char** argv) {
   using namespace canary;  // NOLINT
   InitializeCanaryWorker(&argc, &argv);
+  LauncherHelper launch_helper;
   if (!FLAGS_launch_application.empty()) {
     std::stringstream ss;
     {
@@ -158,10 +95,11 @@ int main(int argc, char** argv) {
     launch_application.fix_num_worker = FLAGS_launch_num_worker;
     launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
     launch_application.priority_level = FLAGS_launch_priority;
-    auto response = LaunchAndWaitResponse<message::LaunchApplicationResponse>(
-        launch_application);
+    auto response =
+        launch_helper.LaunchAndWaitResponse<message::LaunchApplicationResponse>(
+            launch_application);
     if (response.succeed) {
-      printf("Launching application (id=%d) succeeded!\n",
+      printf("Launching application (id=%d) succeeded.\n",
              response.application_id);
     } else {
       printf("Launching application failed!\n%s\n",
@@ -170,10 +108,11 @@ int main(int argc, char** argv) {
   } else if (FLAGS_resume_application != -1) {
     message::ResumeApplication resume_application;
     resume_application.application_id = FLAGS_resume_application;
-    auto response = LaunchAndWaitResponse<message::ResumeApplicationResponse>(
-        resume_application);
+    auto response =
+        launch_helper.LaunchAndWaitResponse<message::ResumeApplicationResponse>(
+            resume_application);
     if (response.succeed) {
-      printf("Resuming application (id=%d) succeeded!\n",
+      printf("Resuming application (id=%d) succeeded.\n",
              response.application_id);
     } else {
       printf("Resuming application failed!\n%s\n",
@@ -184,10 +123,11 @@ int main(int argc, char** argv) {
     control_application.application_id = FLAGS_control_application;
     control_application.priority_level = FLAGS_control_priority;
     auto response =
-        LaunchAndWaitResponse<message::ControlApplicationPriorityResponse>(
-            control_application);
+        launch_helper
+            .LaunchAndWaitResponse<message::ControlApplicationPriorityResponse>(
+                control_application);
     if (response.succeed) {
-      printf("Controlling application's priority (id=%d) succeeded!\n",
+      printf("Controlling application's priority (id=%d) succeeded.\n",
              response.application_id);
     } else {
       printf("Controlling application's priority failed!\n%s\n",
@@ -197,12 +137,13 @@ int main(int argc, char** argv) {
     message::RequestApplicationStat report_application;
     report_application.application_id = FLAGS_report_application;
     auto response =
-        LaunchAndWaitResponse<message::RequestApplicationStatResponse>(
-            report_application);
+        launch_helper
+            .LaunchAndWaitResponse<message::RequestApplicationStatResponse>(
+                report_application);
     if (response.succeed) {
       printf(
           "Reporting application's running stat (id=%d): "
-          "used %.3f cycles!\n",
+          "used %.3f cycles.\n",
           response.application_id, response.cycles);
     } else {
       printf("Reporting application's running stats failed!\n%s\n",
