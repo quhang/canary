@@ -49,9 +49,10 @@ DEFINE_int32(second_application, -1, "Second application id.");
 DEFINE_double(share_ratio, 1,
               "Resource usage ratio between the first applicaiton "
               "and the second.");
+DEFINE_double(threshold, 0.1, "Threshold when priority tuning is triggered.");
 DEFINE_int32(low_priority, 101, "Low priority value.");
 DEFINE_int32(high_priority, 99, "High priority value.");
-DEFINE_int32(interval, 1, "Measurement interval in seconds.");
+DEFINE_int32(interval, 5, "Measurement interval in seconds.");
 
 namespace {
 //! Changes an application's priority.
@@ -123,16 +124,20 @@ int main(int argc, char** argv) {
            second_application_used_cycles);
     if (prioritize_first_app) {
       if (first_application_used_cycles / second_application_used_cycles >
-          FLAGS_share_ratio + 0.1) {
+          FLAGS_share_ratio * (1. + FLAGS_threshold)) {
         prioritize_first_app = false;
-        printf("Prioritize B\n");
+        end_time = time::Clock::now();
+        printf("PrioritizeB %f\n",
+               time::duration_to_double(end_time - start_time));
         TunePriorities(prioritize_first_app);
       }
     } else {
       if (first_application_used_cycles / second_application_used_cycles <
-          FLAGS_share_ratio - 0.1) {
+          FLAGS_share_ratio * (1. - FLAGS_threshold)) {
         prioritize_first_app = true;
-        printf("Prioritize A\n");
+        end_time = time::Clock::now();
+        printf("PrioritizeA %f\n",
+               time::duration_to_double(end_time - start_time));
         TunePriorities(prioritize_first_app);
       }
     }
