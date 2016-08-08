@@ -39,6 +39,8 @@ cxx_executable(canary_worker worker "canary_core")
 cxx_executable(canary_controller controller "canary_core")
 # Launcher executable.
 cxx_executable(canary_launcher launcher "canary_core")
+# Fair share launcher executable.
+cxx_executable(fair_share_launcher launcher "canary_core")
 
 file(GLOB_RECURSE ALL_CANARY_SOURCES "*.cc" "*.h")
 
