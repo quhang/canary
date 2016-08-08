@@ -325,6 +325,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   enum PartitionState : int32_t {
     UNINITIALIZED = 0,
     RUNNING,
+    PAUSED,
     IN_BARRIER,
     COMPLETE
   };

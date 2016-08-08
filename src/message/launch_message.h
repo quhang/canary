@@ -88,11 +88,9 @@ REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, LAUNCH_APPLICATION_RESPONSE,
 //! Pauses an application.
 struct PauseApplication {
   int application_id = -1;
-  // Whether to add a barrier.
-  bool add_barrier = false;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, add_barrier);
+    archive(application_id);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, PAUSE_APPLICATION, PauseApplication);

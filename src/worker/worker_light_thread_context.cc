@@ -163,10 +163,14 @@ void WorkerExecutionContext::RunCommands() {
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::PAUSE_EXECUTION:
+        CHECK(partition_state_ = PartitionState::RUNNING);
+        partition_state_ = PartitionState::PAUSED;
         // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;
       case StageId::INSTALL_BARRIER:
+        CHECK(partition_state_ = PartitionState::PAUSED);
+        partition_state_ = PartitionState::RUNNING;
         // TODO(quhang): not implemented.
         LOG(FATAL) << "Not implemented.";
         break;

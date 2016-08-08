@@ -76,14 +76,13 @@ void ControllerSchedulerBase::NotifyWorkerIsUp(WorkerId worker_id) {
       &ControllerSchedulerBase::InternalNotifyWorkerIsUp, this, worker_id));
 }
 
-#define PROCESS_LAUNCH_MESSAGE(TYPE, METHOD)                          \
-  case MessageCategory::TYPE: {                                       \
-    auto message =                                                    \
-        new message::get_message_type<MessageCategory::TYPE>::Type(); \
-    message::RemoveControlHeader(buffer);                             \
-    message::DeserializeMessage(buffer, message);                     \
-    METHOD(launch_command_id, message);                               \
-    break;                                                            \
+#define PROCESS_LAUNCH_MESSAGE(TYPE, METHOD)                        \
+  case MessageCategory::TYPE: {                                     \
+    message::get_message_type<MessageCategory::TYPE>::Type message; \
+    message::RemoveControlHeader(buffer);                           \
+    message::DeserializeMessage(buffer, &message);                  \
+    METHOD(launch_command_id, message);                             \
+    break;                                                          \
   }
 void ControllerScheduler::InternalReceiveLaunchCommand(
     LaunchCommandId launch_command_id, struct evbuffer* buffer) {
@@ -108,14 +107,13 @@ void ControllerScheduler::InternalReceiveLaunchCommand(
 }
 #undef PROCESS_LAUNCH_MESSAGE
 
-#define PROCESS_MESSAGE(TYPE, METHOD)                                 \
-  case MessageCategory::TYPE: {                                       \
-    auto message =                                                    \
-        new message::get_message_type<MessageCategory::TYPE>::Type(); \
-    message::RemoveControlHeader(buffer);                             \
-    message::DeserializeMessage(buffer, message);                     \
-    METHOD(message);                                                  \
-    break;                                                            \
+#define PROCESS_MESSAGE(TYPE, METHOD)                               \
+  case MessageCategory::TYPE: {                                     \
+    message::get_message_type<MessageCategory::TYPE>::Type message; \
+    message::RemoveControlHeader(buffer);                           \
+    message::DeserializeMessage(buffer, &message);                  \
+    METHOD(message);                                                \
+    break;                                                          \
   }
 void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
   CHECK_NOTNULL(buffer);
@@ -165,22 +163,40 @@ void ControllerScheduler::InternalNotifyWorkerIsUp(WorkerId worker_id) {
 /*
  * Processes launcher commands.
  */
+
+bool ControllerScheduler::CheckLaunchApplicationMessage(
+    const message::LaunchApplication& launch_message,
+    message::LaunchApplicationResponse* response) {
+  if (launch_message.priority_level < 0) {
+    response->succeed = false;
+    response->error_message = "Invalid priority level!";
+    return response->succeed;
+  }
+  if (launch_message.fix_num_worker == 0) {
+    response->succeed = false;
+    response->error_message = "Invalid worker number!";
+    return response->succeed;
+  }
+  if (launch_message.fix_num_worker != -1 &&
+      static_cast<int>(worker_map_.size()) < launch_message.fix_num_worker) {
+    response->succeed = false;
+    response->error_message = "Need more workers for launching!";
+    return response->succeed;
+  }
+  if (launch_message.fix_num_worker == -1 && worker_map_.empty()) {
+    response->succeed = false;
+    response->error_message = "No worker is launched!";
+    return response->succeed;
+  }
+  response->succeed = true;
+  return response->succeed;
+}
+
 void ControllerScheduler::ProcessLaunchApplication(
     LaunchCommandId launch_command_id,
-    message::LaunchApplication* launch_message) {
-  std::unique_ptr<message::LaunchApplication> delete_when_exit(launch_message);
+    const message::LaunchApplication& launch_message) {
   message::LaunchApplicationResponse response;
-  response.succeed = true;
-  if (launch_message->fix_num_worker == 0) {
-    response.succeed = false;
-    response.error_message = "Invalid format!";
-  }
-  if (response.succeed &&
-      !HaveEnoughWorkerForLaunching(launch_message->fix_num_worker)) {
-    response.succeed = false;
-    response.error_message = "Not enough workers!";
-  }
-  if (!response.succeed) {
+  if (!CheckLaunchApplicationMessage(launch_message, &response)) {
     launch_send_command_interface_->SendLaunchResponseCommand(
         launch_command_id,
         message::SerializeMessageWithControlHeader(response));
@@ -190,7 +206,7 @@ void ControllerScheduler::ProcessLaunchApplication(
   const ApplicationId assigned_application_id = (next_application_id_++);
   response.application_id = get_value(assigned_application_id);
   auto& application_record = application_map_[assigned_application_id];
-  if (!FillInApplicationLaunchInfo(*launch_message, &application_record)) {
+  if (!InitializeApplicationRecord(launch_message, &application_record)) {
     application_map_.erase(assigned_application_id);
     response.succeed = false;
     response.error_message = "Application binary is not found!";
@@ -201,10 +217,11 @@ void ControllerScheduler::ProcessLaunchApplication(
   }
   InitializeLoggingFile();
   fprintf(log_file_, "L %d %s %s\n", get_value(assigned_application_id),
-          launch_message->binary_location.c_str(),
-          TransformString(launch_message->application_parameter).c_str());
+          launch_message.binary_location.c_str(),
+          TransformString(launch_message.application_parameter).c_str());
   FlushLoggingFile();
-  AssignPartitionToWorker(&application_record);
+  // Fills in the partition map.
+  DecidePartitionMap(&application_record);
   // Sends the partition map to workers.
   send_command_interface_->AddApplication(
       assigned_application_id,
@@ -217,84 +234,87 @@ void ControllerScheduler::ProcessLaunchApplication(
   launch_send_command_interface_->SendLaunchResponseCommand(
       launch_command_id, message::SerializeMessageWithControlHeader(response));
   LOG(INFO) << "Launched application #" << get_value(assigned_application_id)
-            << " (" << launch_message->binary_location.c_str() << ").";
+            << " (" << launch_message.binary_location.c_str() << ").";
 }
 
 void ControllerScheduler::ProcessPauseApplication(
     LaunchCommandId launch_command_id,
-    message::PauseApplication* pause_message) {
+    const message::PauseApplication& pause_message) {
   // TODO(quhang): not implemented.
-  std::unique_ptr<message::PauseApplication> delete_when_exit(pause_message);
+}
+
+bool ControllerScheduler::CheckResumeApplicationMessage(
+    const message::ResumeApplication& resume_message,
+    message::ResumeApplicationResponse* response) {
+  if (!CheckValidApplicationId(resume_message, response)) {
+    return response->succeed;
+  }
+  const auto application_id =
+      static_cast<ApplicationId>(resume_message.application_id);
+  auto& application_record = application_map_.at(application_id);
+  if (application_record.application_state != ApplicationState::AT_BARRIER) {
+    response->succeed = false;
+    response->error_message =
+        "The application cannot be resumed because it is not at a barrier!";
+    return response->succeed;
+  }
+  response->succeed = true;
+  return response->succeed;
 }
 
 void ControllerScheduler::ProcessResumeApplication(
     LaunchCommandId launch_command_id,
-    message::ResumeApplication* resume_message) {
-  std::unique_ptr<message::ResumeApplication> delete_when_exit(resume_message);
+    const message::ResumeApplication& resume_message) {
   message::ResumeApplicationResponse response;
-  response.succeed = true;
-  if (resume_message->application_id < 0) {
-    response.succeed = false;
-    response.error_message = "Invalid application id!";
+  if (!CheckResumeApplicationMessage(resume_message, &response)) {
     launch_send_command_interface_->SendLaunchResponseCommand(
         launch_command_id,
         message::SerializeMessageWithControlHeader(response));
     return;
   }
   const auto application_id =
-      static_cast<ApplicationId>(resume_message->application_id);
-  if (application_map_.find(application_id) == application_map_.end()) {
-    response.succeed = false;
-    response.error_message = "The specified application does not exist!";
-    launch_send_command_interface_->SendLaunchResponseCommand(
-        launch_command_id,
-        message::SerializeMessageWithControlHeader(response));
-    return;
-  }
+      static_cast<ApplicationId>(resume_message.application_id);
   auto& application_record = application_map_.at(application_id);
-  if (application_record.application_state != ApplicationState::AT_BARRIER) {
-    response.succeed = false;
-    response.error_message =
-        "The application has not reached a barrier for resuming";
-    launch_send_command_interface_->SendLaunchResponseCommand(
-        launch_command_id,
-        message::SerializeMessageWithControlHeader(response));
-    return;
-  }
+  CHECK(application_record.application_state == ApplicationState::AT_BARRIER);
   application_record.application_state = ApplicationState::RUNNING;
   message::WorkerReleaseBarrier release_barrier_command;
   SendCommandToPartitionInApplication(application_id, &release_barrier_command);
   response.succeed = true;
-  response.application_id = resume_message->application_id;
+  response.application_id = resume_message.application_id;
   launch_send_command_interface_->SendLaunchResponseCommand(
       launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
 
+bool ControllerScheduler::CheckControlApplicationPriorityMessage(
+    const message::ControlApplicationPriority& control_message,
+    message::ControlApplicationPriorityResponse* response) {
+  if (!CheckValidApplicationId(control_message, response)) {
+    return response->succeed;
+  }
+  if (control_message.priority_level < 0) {
+    response->succeed = false;
+    response->error_message = "Invalid priority level!";
+    return response->succeed;
+  }
+  response->succeed = true;
+  return response->succeed;
+}
+
 void ControllerScheduler::ProcessControlApplicationPriority(
     LaunchCommandId launch_command_id,
-    message::ControlApplicationPriority* control_message) {
-  std::unique_ptr<message::ControlApplicationPriority> delete_when_exit(
-      control_message);
+    const message::ControlApplicationPriority& control_message) {
   message::ControlApplicationPriorityResponse response;
-  response.succeed = true;
-  const auto application_id =
-      static_cast<ApplicationId>(control_message->application_id);
-  if (application_map_.find(application_id) == application_map_.end()) {
-    response.succeed = false;
-    response.error_message = "The specified application does not exist!";
-  } else if (control_message->priority_level < 0) {
-    response.succeed = false;
-    response.error_message = "Invalid priority level!";
-  }
-  if (!response.succeed) {
+  if (!CheckControlApplicationPriorityMessage(control_message, &response)) {
     launch_send_command_interface_->SendLaunchResponseCommand(
         launch_command_id,
         message::SerializeMessageWithControlHeader(response));
     return;
   }
+  const auto application_id =
+      static_cast<ApplicationId>(control_message.application_id);
   auto& application_record = application_map_.at(application_id);
   application_record.priority_level =
-      PriorityLevel(control_message->priority_level);
+      PriorityLevel(control_message.priority_level);
   message::WorkerChangeApplicationPriority change_priority_command;
   change_priority_command.application_id = application_id;
   change_priority_command.priority_level = application_record.priority_level;
@@ -313,31 +333,28 @@ void ControllerScheduler::ProcessControlApplicationPriority(
       launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
 
+bool ControllerScheduler::CheckRequestApplicationStatMessage(
+    const message::RequestApplicationStat& request_message,
+    message::RequestApplicationStatResponse* response) {
+  if (!CheckValidApplicationId(request_message, response)) {
+    return response->succeed;
+  }
+  response->succeed = true;
+  return response->succeed;
+}
+
 void ControllerScheduler::ProcessRequestApplicationStat(
     LaunchCommandId launch_command_id,
-    message::RequestApplicationStat* request_message) {
-  std::unique_ptr<message::RequestApplicationStat> delete_when_exit(
-      request_message);
-  if (request_message->application_id < 0) {
-    message::RequestApplicationStatResponse response;
-    response.succeed = false;
-    response.error_message = "Invalid application id!";
+    const message::RequestApplicationStat& request_message) {
+  message::RequestApplicationStatResponse response;
+  if (!CheckRequestApplicationStatMessage(request_message, &response)) {
     launch_send_command_interface_->SendLaunchResponseCommand(
         launch_command_id,
         message::SerializeMessageWithControlHeader(response));
     return;
   }
   const auto application_id =
-      static_cast<ApplicationId>(request_message->application_id);
-  if (application_map_.find(application_id) == application_map_.end()) {
-    message::RequestApplicationStatResponse response;
-    response.succeed = false;
-    response.error_message = "Invalid application id!";
-    launch_send_command_interface_->SendLaunchResponseCommand(
-        launch_command_id,
-        message::SerializeMessageWithControlHeader(response));
-    return;
-  }
+      static_cast<ApplicationId>(request_message.application_id);
   auto& application_record = application_map_.at(application_id);
   // Builds a new report id.
   ++application_record.report_id;
@@ -346,13 +363,12 @@ void ControllerScheduler::ProcessRequestApplicationStat(
   message::WorkerReportStatusOfPartitions report_partitions_command;
   SendCommandToPartitionInApplication(application_id,
                                       &report_partitions_command);
+  // The stats will be sent later.
 }
 
 void ControllerScheduler::ProcessRequestShutdownWorker(
     LaunchCommandId launch_command_id,
-    message::RequestShutdownWorker* request_message) {
-  std::unique_ptr<message::RequestShutdownWorker> delete_when_exit(
-      request_message);
+    const message::RequestShutdownWorker& request_message) {
   // TODO(quhang): implement.
 }
 
@@ -361,77 +377,64 @@ void ControllerScheduler::ProcessRequestShutdownWorker(
  */
 
 void ControllerScheduler::ProcessMigrationInPrepared(
-    message::ControllerRespondMigrationInPrepared* respond_message) {
+    const message::ControllerRespondMigrationInPrepared& respond_message) {
   // TODO(quhang): implement.
-  std::unique_ptr<message::ControllerRespondMigrationInPrepared>
-      delete_when_exit(respond_message);
 }
 
 void ControllerScheduler::ProcessMigrationInDone(
-    message::ControllerRespondMigrationInDone* respond_message) {
+    const message::ControllerRespondMigrationInDone& respond_message) {
   // TODO(quhang): implement.
-  std::unique_ptr<message::ControllerRespondMigrationInDone> delete_when_exit(
-      respond_message);
 }
 
 void ControllerScheduler::ProcessPartitionDone(
-    message::ControllerRespondPartitionDone* respond_message) {
-  std::unique_ptr<message::ControllerRespondPartitionDone> delete_when_exit(
-      respond_message);
-  const auto& running_stats = respond_message->running_stats;
-  UpdateRunningStats(respond_message->from_worker_id,
-                     respond_message->application_id,
-                     respond_message->variable_group_id,
-                     respond_message->partition_id, running_stats);
+    const message::ControllerRespondPartitionDone& respond_message) {
+  const auto& running_stats = respond_message.running_stats;
+  UpdateRunningStats(respond_message.from_worker_id,
+                     respond_message.application_id,
+                     respond_message.variable_group_id,
+                     respond_message.partition_id, running_stats);
   CHECK(running_stats.earliest_unfinished_stage_id == StageId::INVALID &&
         running_stats.last_finished_stage_id == StageId::COMPLETE);
   auto& application_record =
-      application_map_.at(respond_message->application_id);
+      application_map_.at(respond_message.application_id);
   if (++application_record.complete_partition ==
       application_record.total_partition) {
-    CleanUpApplication(respond_message->application_id, &application_record);
+    CleanUpApplication(respond_message.application_id, &application_record);
   }
 }
 
 void ControllerScheduler::ProcessStatusOfPartition(
-    message::ControllerRespondStatusOfPartition* respond_message) {
-  std::unique_ptr<message::ControllerRespondStatusOfPartition> delete_when_exit(
-      respond_message);
+    const message::ControllerRespondStatusOfPartition& respond_message) {
   UpdateRunningStats(
-      respond_message->from_worker_id, respond_message->application_id,
-      respond_message->variable_group_id, respond_message->partition_id,
-      respond_message->running_stats);
+      respond_message.from_worker_id, respond_message.application_id,
+      respond_message.variable_group_id, respond_message.partition_id,
+      respond_message.running_stats);
 }
 
 void ControllerScheduler::ProcessStatusOfWorker(
-    message::ControllerRespondStatusOfWorker* respond_message) {
-  std::unique_ptr<message::ControllerRespondStatusOfWorker> delete_when_exit(
-      respond_message);
-  auto from_worker_id = respond_message->from_worker_id;
+    const message::ControllerRespondStatusOfWorker& respond_message) {
+  const auto from_worker_id = respond_message.from_worker_id;
   // Updates worker map.
   if (worker_map_.find(from_worker_id) != worker_map_.end()) {
-    worker_map_[from_worker_id].num_cores = respond_message->num_cores;
+    worker_map_[from_worker_id].num_cores = respond_message.num_cores;
   }
 }
 
 void ControllerScheduler::ProcessReachBarrier(
-    message::ControllerRespondReachBarrier* respond_message) {
-  std::unique_ptr<message::ControllerRespondReachBarrier> delete_when_exit(
-      respond_message);
+    const message::ControllerRespondReachBarrier& respond_message) {
   UpdateRunningStats(
-      respond_message->from_worker_id, respond_message->application_id,
-      respond_message->variable_group_id, respond_message->partition_id,
-      respond_message->running_stats);
+      respond_message.from_worker_id, respond_message.application_id,
+      respond_message.variable_group_id, respond_message.partition_id,
+      respond_message.running_stats);
   auto& application_record =
-      application_map_.at(respond_message->application_id);
+      application_map_.at(respond_message.application_id);
   if (++application_record.blocked_partition ==
       application_record.total_partition) {
     // Update application state if every partition reaches the barrier.
     application_record.blocked_partition = 0;
-    CHECK(application_record.application_state ==
-          ApplicationState::BEFORE_BARRIER);
+    CHECK(application_record.application_state == ApplicationState::RUNNING);
     application_record.application_state = ApplicationState::AT_BARRIER;
-    LOG(INFO) << "Application #" << get_value(respond_message->application_id)
+    LOG(INFO) << "Application #" << get_value(respond_message.application_id)
               << " reached barrier stage.";
   }
 }
@@ -439,20 +442,7 @@ void ControllerScheduler::ProcessReachBarrier(
 /*
  * Application launching related.
  */
-bool ControllerScheduler::HaveEnoughWorkerForLaunching(int fix_num_worker) {
-  if (fix_num_worker != -1 &&
-      static_cast<int>(worker_map_.size()) < fix_num_worker) {
-    // Not enough workers.
-    return false;
-  }
-  if (fix_num_worker == -1 && worker_map_.empty()) {
-    // No workers.
-    return false;
-  }
-  return true;
-}
-
-bool ControllerScheduler::FillInApplicationLaunchInfo(
+bool ControllerScheduler::InitializeApplicationRecord(
     const message::LaunchApplication& launch_message,
     ApplicationRecord* application_record) {
   application_record->binary_location = launch_message.binary_location;
@@ -461,14 +451,11 @@ bool ControllerScheduler::FillInApplicationLaunchInfo(
   if (launch_message.first_barrier_stage >= 0) {
     application_record->first_barrier_stage =
         StageId(launch_message.first_barrier_stage);
-    application_record->application_state = ApplicationState::BEFORE_BARRIER;
   } else {
     application_record->first_barrier_stage = StageId::INVALID;
-    application_record->application_state = ApplicationState::RUNNING;
   }
-  if (launch_message.priority_level < 0) {
-    return false;
-  }
+  application_record->application_state = ApplicationState::RUNNING;
+  CHECK_GE(launch_message.priority_level, 0);
   application_record->priority_level =
       PriorityLevel(launch_message.priority_level);
   application_record->loaded_application = CanaryApplication::LoadApplication(
@@ -489,7 +476,7 @@ bool ControllerScheduler::FillInApplicationLaunchInfo(
   return true;
 }
 
-void ControllerScheduler::AssignPartitionToWorker(
+void ControllerScheduler::DecidePartitionMap(
     ApplicationRecord* application_record) {
   auto& per_app_partition_map = application_record->per_app_partition_map;
   const auto& variable_group_info_map =
@@ -667,6 +654,26 @@ void ControllerScheduler::CleanUpApplication(
   send_command_interface_->DropApplication(application_id);
   // Erases the application record.
   application_map_.erase(application_id);
+}
+
+template <typename InputMessage, typename OutputMessage>
+bool ControllerScheduler::CheckValidApplicationId(
+    const InputMessage& input_message, OutputMessage* output_message) {
+  if (input_message.application_id < 0) {
+    output_message->succeed = false;
+    output_message->error_message = "Invalid application id!";
+    return output_message->succeed;
+  }
+  const auto application_id =
+      static_cast<ApplicationId>(input_message.application_id);
+  if (application_map_.find(application_id) == application_map_.end()) {
+    output_message->succeed = false;
+    output_message->error_message =
+        "The application id does not specify a running applicaiton!";
+    return output_message->succeed;
+  }
+  output_message->succeed = true;
+  return output_message->succeed;
 }
 
 template <typename T>

@@ -56,6 +56,10 @@
 
 namespace canary {
 
+/*
+ * The skeleton of the controller scheduler implementation, which wraps the
+ * asynchronous call into synchounous call into subclass.
+ */
 class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
                                 public LaunchReceiveCommandInterface {
  public:
@@ -114,7 +118,6 @@ class ControllerScheduler : public ControllerSchedulerBase {
   enum class ApplicationState {
     INVALID = -1,
     RUNNING = 0,
-    BEFORE_BARRIER,
     AT_BARRIER,
     COMPLETE
   };
@@ -162,6 +165,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
   virtual ~ControllerScheduler() {}
 
  protected:
+  //! Called when receiving commands from a launcher.
   void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
                                     struct evbuffer* buffer) override;
   //! Called when receiving commands from a worker.
@@ -176,49 +180,66 @@ class ControllerScheduler : public ControllerSchedulerBase {
   /*
    * Processes messages received from the launcher through the RPC interface.
    */
-  void ProcessLaunchApplication(LaunchCommandId launch_command_id,
-                                message::LaunchApplication* launch_message);
+  bool CheckLaunchApplicationMessage(
+      const message::LaunchApplication& launch_message,
+      message::LaunchApplicationResponse* response);
+  void ProcessLaunchApplication(
+      LaunchCommandId launch_command_id,
+      const message::LaunchApplication& launch_message);
+
   void ProcessPauseApplication(LaunchCommandId launch_command_id,
-                               message::PauseApplication* ipause_message);
-  void ProcessResumeApplication(LaunchCommandId launch_command_id,
-                                message::ResumeApplication* resume_message);
+                               const message::PauseApplication& pause_message);
+
+  bool CheckResumeApplicationMessage(
+      const message::ResumeApplication& resume_message,
+      message::ResumeApplicationResponse* response);
+  void ProcessResumeApplication(
+      LaunchCommandId launch_command_id,
+      const message::ResumeApplication& resume_message);
+
+  bool CheckControlApplicationPriorityMessage(
+      const message::ControlApplicationPriority& control_message,
+      message::ControlApplicationPriorityResponse* response);
   void ProcessControlApplicationPriority(
       LaunchCommandId launch_command_id,
-      message::ControlApplicationPriority* control_message);
+      const message::ControlApplicationPriority& control_message);
+
+  bool CheckRequestApplicationStatMessage(
+      const message::RequestApplicationStat& request_message,
+      message::RequestApplicationStatResponse* response);
   void ProcessRequestApplicationStat(
       LaunchCommandId launch_command_id,
-      message::RequestApplicationStat* request_message);
+      const message::RequestApplicationStat& request_message);
+
   void ProcessRequestShutdownWorker(
       LaunchCommandId launch_command_id,
-      message::RequestShutdownWorker* request_message);
+      const message::RequestShutdownWorker& request_message);
 
   /*
    * Processes messages received from workers.
    */
   void ProcessMigrationInPrepared(
-      message::ControllerRespondMigrationInPrepared* respond_message);
+      const message::ControllerRespondMigrationInPrepared& respond_message);
   void ProcessMigrationInDone(
-      message::ControllerRespondMigrationInDone* respond_message);
+      const message::ControllerRespondMigrationInDone& respond_message);
   void ProcessPartitionDone(
-      message::ControllerRespondPartitionDone* respond_message);
+      const message::ControllerRespondPartitionDone& respond_message);
   void ProcessStatusOfPartition(
-      message::ControllerRespondStatusOfPartition* respond_message);
+      const message::ControllerRespondStatusOfPartition& respond_message);
   void ProcessStatusOfWorker(
-      message::ControllerRespondStatusOfWorker* respond_message);
+      const message::ControllerRespondStatusOfWorker& respond_message);
   void ProcessReachBarrier(
-      message::ControllerRespondReachBarrier* respond_message);
+      const message::ControllerRespondReachBarrier& respond_message);
 
   /*
    * Application launching related.
    */
-  //! Whether there are enough workers for launching an application.
-  bool HaveEnoughWorkerForLaunching(int fix_num_worker);
   //! Fills in initial info in the application record.
-  bool FillInApplicationLaunchInfo(
+  bool InitializeApplicationRecord(
       const message::LaunchApplication& launch_message,
       ApplicationRecord* application_record);
   //! Assigns partitions to workers.
-  void AssignPartitionToWorker(ApplicationRecord* application_record);
+  void DecidePartitionMap(ApplicationRecord* application_record);
   //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
   // manner using the number of cores as a weight.
   void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
@@ -238,6 +259,10 @@ class ControllerScheduler : public ControllerSchedulerBase {
   /*
    * Misc functions.
    */
+  //! Checks if the application id is valid, and fills in the response.
+  template <typename InputMessage, typename OutputMessage>
+  bool CheckValidApplicationId(const InputMessage& input_message,
+                               OutputMessage* output_message);
   //! Sends a command to every partition in the application.
   template <typename T>
   void SendCommandToPartitionInApplication(ApplicationId application_id,
@@ -250,6 +275,11 @@ class ControllerScheduler : public ControllerSchedulerBase {
                           VariableGroupId variable_group_id,
                           PartitionId partition_id,
                           const message::RunningStats& running_stats);
+
+ protected:
+  /*
+   * Logging related.
+   */
   //! Initializes logging file.
   void InitializeLoggingFile();
   //! Flushes logging file.
@@ -260,6 +290,7 @@ class ControllerScheduler : public ControllerSchedulerBase {
  private:
   WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
   int last_assigned_partitions_ = 0;
+  //! The next application id to assign.
   ApplicationId next_application_id_ = ApplicationId::FIRST;
 
  protected:
