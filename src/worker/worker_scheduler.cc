@@ -80,12 +80,22 @@ bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
 }
 
 void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
+  // MIGRATION, step four: receives migrated data.
   CHECK(is_ready_);
-  CHECK_NOTNULL(buffer);
-  LOG(FATAL) << "Not implemented.";
-  // TODO(quhang): fill in.
-  // Migrated partitions.
-  // File system traffic.
+  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+  CHECK(header->category_group ==
+        message::MessageCategoryGroup::APPLICATION_DATA_DIRECT);
+  CHECK(header->category == message::MessageCategory::DIRECT_DATA_MIGRATE);
+  message::DirectDataMigrate direct_data_migrate;
+  message::RemoveControlHeader(buffer);
+  message::DeserializeMessage(buffer, &direct_data_migrate);
+  FullPartitionId full_partition_id{direct_data_migrate.application_id,
+                                    direct_data_migrate.variable_group_id,
+                                    direct_data_migrate.partition_id};
+  auto iter = thread_map_.find(full_partition_id);
+  CHECK(iter != thread_map_.end());
+  iter->second->DeliverMessage(StageId::MIGRATE_IN,
+                               direct_data_migrate.raw_buffer.buffer);
 }
 
 #define PROCESS_MESSAGE(TYPE, METHOD)                               \
@@ -211,20 +221,24 @@ void WorkerSchedulerBase::ProcessUnloadPartitions(
 
 void WorkerSchedulerBase::ProcessMigrateInPartitions(
     const message::WorkerMigrateInPartitions& worker_command) {
-  // TODO(quhang): not tested.
+  // MIGRATION, step one: construct the context, and respond to the controller.
   const auto application_id = worker_command.application_id;
   for (const auto& pair : worker_command.partition_list) {
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     ConstructThreadContext(full_partition_id);
-    auto iter = thread_map_.find(full_partition_id);
-    CHECK(iter != thread_map_.end());
-    iter->second->DeliverMessage(StageId::MIGRATE_IN, nullptr);
+    message::ControllerRespondMigrationInDone response;
+    response.from_worker_id = self_worker_id_;
+    response.application_id = full_partition_id.application_id;
+    response.variable_group_id = full_partition_id.variable_group_id;
+    response.partition_id = full_partition_id.partition_id;
+    send_command_interface_->SendCommandToController(
+        message::SerializeMessageWithControlHeader(response));
   }
 }
 
 void WorkerSchedulerBase::WorkerSchedulerBase::ProcessMigrateOutPartitions(
     const message::WorkerMigrateOutPartitions& worker_command) {
-  // TODO(quhang): not tested.
+  // MIGRATION, step two: tell the context to migrate out.
   const auto application_id = worker_command.application_id;
   for (const auto& partition_migrate_record :
        worker_command.migrate_out_partitions) {

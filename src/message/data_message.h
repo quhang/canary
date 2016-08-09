@@ -57,6 +57,20 @@ struct DirectDataHandshake {
 REGISTER_MESSAGE(APPLICATION_DATA_DIRECT, DIRECT_DATA_HANDSHAKE,
                  DirectDataHandshake);
 
+struct DirectDataMigrate {
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  PartitionId partition_id;
+  RawEvbuffer raw_buffer;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(application_id, variable_group_id, partition_id);
+    archive(raw_buffer);
+  }
+};
+REGISTER_MESSAGE(APPLICATION_DATA_DIRECT, DIRECT_DATA_MIGRATE,
+                 DirectDataMigrate);
+
 }  // namespace message
 }  // namespace canary
 #endif  // CANARY_SRC_MESSAGE_DATA_MESSAGE_H_

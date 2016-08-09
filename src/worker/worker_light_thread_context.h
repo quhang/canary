@@ -190,6 +190,7 @@ class WorkerLightThreadContext {
   const CanaryApplication* get_canary_application() const {
     return canary_application_;
   }
+  WorkerSchedulerBase* get_worker_scheduler() { return worker_scheduler_; }
   //! Delivers a message.
   void DeliverMessage(StageId stage_id, struct evbuffer* buffer);
 
@@ -271,6 +272,10 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void ProcessInitCommand(struct evbuffer* command);
   //! Processes a control flow decision.
   void ProcessControlFlowDecision(struct evbuffer* command);
+  //! Processes a migrate in command.
+  void ProcessMigrateIn(struct evbuffer* command);
+  //! Processes a migrate out command.
+  void ProcessMigrateOut(struct evbuffer* command);
   //! Processes a command that releases a buffer.
   void ProcessReleaseBarrier();
 
@@ -327,6 +332,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
     RUNNING,
     PAUSED,
     IN_BARRIER,
+    MIGRATED,
     COMPLETE
   };
   PartitionState partition_state_ = PartitionState::UNINITIALIZED;

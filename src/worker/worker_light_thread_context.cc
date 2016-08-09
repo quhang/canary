@@ -155,13 +155,12 @@ void WorkerExecutionContext::RunCommands() {
         ProcessControlFlowDecision(command);
         break;
       case StageId::MIGRATE_IN:
-        // TODO(quhang): not implemented.
-        LOG(FATAL) << "Not implemented.";
+        ProcessMigrateIn(command);
         break;
       case StageId::MIGRATE_OUT:
-        // TODO(quhang): not implemented.
-        LOG(FATAL) << "Not implemented.";
-        break;
+        ProcessMigrateOut(command);
+        // Caution: the context is already empty, so exits.
+        return;
       case StageId::PAUSE_EXECUTION:
         CHECK(partition_state_ = PartitionState::RUNNING);
         partition_state_ = PartitionState::PAUSED;
@@ -224,7 +223,8 @@ bool WorkerExecutionContext::RunOneStage() {
 }
 
 void WorkerExecutionContext::Run() {
-  if (partition_state_ == PartitionState::COMPLETE) {
+  if (partition_state_ == PartitionState::COMPLETE ||
+      partition_state_ == PartitionState::MIGRATED) {
     return;
   }
   RunCommands();
@@ -237,7 +237,8 @@ void WorkerExecutionContext::Run() {
 }
 
 void WorkerExecutionContext::Report() {
-  if (partition_state_ == PartitionState::COMPLETE) {
+  if (partition_state_ == PartitionState::COMPLETE ||
+      partition_state_ == PartitionState::MIGRATED) {
     return;
   }
   message::ControllerRespondStatusOfPartition report;
@@ -283,6 +284,52 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
       internal_message::to_command<ControlDecisionCommand>(command);
   stage_graph_.FeedControlFlowDecision(struct_message.stage_id,
                                        struct_message.decision);
+}
+
+void WorkerExecutionContext::ProcessMigrateIn(struct evbuffer* command) {
+  // MIGRATION, step five: decodes migrated data.
+  // Deserializes the partition.
+  {
+    CanaryInputArchive archive(command);
+    archive(*this);
+  }
+  // Tells the controller that the partition is migrated in.
+  message::ControllerRespondMigrationInDone response;
+  response.from_worker_id = get_worker_id();
+  response.application_id = get_application_id();
+  response.variable_group_id = get_variable_group_id();
+  response.partition_id = get_partition_id();
+  get_send_command_interface()->SendCommandToController(
+      message::SerializeMessageWithControlHeader(response));
+}
+
+void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
+  // MIGRATION, step three.
+  // Tells the controller that the partition is migrated out.
+  message::ControllerRespondMigrationOutDone response;
+  FillInStats(&response);
+  get_send_command_interface()->SendCommandToController(
+      message::SerializeMessageWithControlHeader(response));
+  // Decodes the receiver worker.
+  using internal_message::MigrateOutCommand;
+  auto struct_message =
+      internal_message::to_command<MigrateOutCommand>(command);
+  // Serializes the partition.
+  message::DirectDataMigrate direct_data_migrate;
+  direct_data_migrate.application_id = get_application_id();
+  direct_data_migrate.variable_group_id = get_variable_group_id();
+  direct_data_migrate.partition_id = get_partition_id();
+  direct_data_migrate.raw_buffer.buffer = evbuffer_new();
+  {
+    CanaryOutputArchive archive(direct_data_migrate.raw_buffer.buffer);
+    archive(*this);
+  }
+  get_send_data_interface()->SendDataToWorker(
+      struct_message.to_worker_id,
+      message::SerializeMessageWithControlHeader(direct_data_migrate));
+  // Kills the context.
+  partition_state_ = PartitionState::MIGRATED;
+  get_worker_scheduler()->KillThreadContext(this);
 }
 
 void WorkerExecutionContext::ProcessReleaseBarrier() {
