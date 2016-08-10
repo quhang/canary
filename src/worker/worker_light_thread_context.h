@@ -121,44 +121,11 @@ class WorkerLightThreadContext {
   struct StageBuffer {
     std::list<struct evbuffer*> buffer_list;
     int expected_buffer = -1;
-    // Caution: after saving, the buffer is destroyed.
-    template <typename Archive>
-    void save(Archive& archive) const {  // NOLINT
-      archive(buffer_list.size());
-      for (auto buffer : buffer_list) {
-        archive(RawEvbuffer{buffer});
-      }
-      archive(expected_buffer);
-    }
-    template <typename Archive>
-    void load(Archive& archive) {  // NOLINT
-      size_t buffer_size;
-      archive(buffer_size);
-      for (size_t i = 0; i < buffer_size; ++i) {
-        RawEvbuffer raw_buffer;
-        archive(raw_buffer);
-        buffer_list.push_back(raw_buffer.buffer);
-      }
-      archive(expected_buffer);
-    }
   };
   //! The buffer storing an internal command.
   struct CommandBuffer {
     StageId stage_id;
     struct evbuffer* command;
-    // Caution: after saving, the buffer is destroyed.
-    template <typename Archive>
-    void save(Archive& archive) const {  // NOLINT
-      archive(stage_id);
-      archive(RawEvbuffer{command});
-    }
-    template <typename Archive>
-    void load(Archive& archive) {  // NOLINT
-      archive(stage_id);
-      RawEvbuffer raw_buffer;
-      archive(raw_buffer);
-      command = raw_buffer.buffer;
-    }
   };
 
  public:
@@ -204,17 +171,8 @@ class WorkerLightThreadContext {
                     std::list<struct evbuffer*>* buffer_list);
 
  public:
-  virtual void load(CanaryInputArchive& archive) {  // NOLINT
-    archive(command_list_);
-    archive(stage_buffer_map_);
-    archive(ready_stages_);
-  }
-  virtual void save(CanaryOutputArchive& archive) const {  // NOLINT
-    // States are destroyed after serialization.
-    archive(command_list_);
-    archive(stage_buffer_map_);
-    archive(ready_stages_);
-  }
+  virtual void load(CanaryInputArchive& archive);         // NOLINT
+  virtual void save(CanaryOutputArchive& archive) const;  // NOLINT
 
  private:
   // Used for scheduling, protected by the lock of the worker scheduler.
@@ -232,17 +190,17 @@ class WorkerLightThreadContext {
   const CanaryApplication* canary_application_ = nullptr;
   WorkerSchedulerBase* worker_scheduler_ = nullptr;
   //! Synchronization lock.
-  pthread_mutex_t internal_lock_;
+  mutable pthread_mutex_t internal_lock_;
 
   /*
    * States that need serialization.
    */
   //! Received commands.
-  std::list<CommandBuffer> command_list_;
+  mutable std::list<CommandBuffer> command_list_;
   //! Received data.
-  std::map<StageId, StageBuffer> stage_buffer_map_;
+  mutable std::map<StageId, StageBuffer> stage_buffer_map_;
   //! Ready stages.
-  std::list<StageId> ready_stages_;
+  mutable std::list<StageId> ready_stages_;
 };
 
 class WorkerExecutionContext : public WorkerLightThreadContext {
@@ -298,30 +256,10 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void DeallocatePartitionData();
 
  public:
-  void load(CanaryInputArchive& archive) override {  // NOLINT
-    WorkerLightThreadContext::load(archive);
-    archive(partition_state_);
-    archive(stage_graph_);
-    archive(pending_gather_stages_);
-    AllocatePartitionData();
-    for (auto& pair : local_partition_data_) {
-      VariableId variable_id;
-      archive(variable_id);
-      CHECK(pair.first == variable_id);
-      pair.second->Deserialize(archive);
-    }
-  }
-  void save(CanaryOutputArchive& archive) const override {  // NOLINT
-    WorkerLightThreadContext::save(archive);
-    archive(partition_state_);
-    archive(stage_graph_);
-    archive(pending_gather_stages_);
-    for (auto& pair : local_partition_data_) {
-      archive(pair.first);
-      pair.second->Serialize(archive);
-      pair.second->Finalize();
-    }
-  }
+  //! Deserialization function.
+  void load(CanaryInputArchive& archive) override;  // NOLINT
+  //! Serialization function. Data are destroyed after serialization.
+  void save(CanaryOutputArchive& archive) const override;  // NOLINT
 
  private:
   StageGraph stage_graph_;

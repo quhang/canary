@@ -133,6 +133,63 @@ bool WorkerLightThreadContext::RetrieveData(
   return result;
 }
 
+void WorkerLightThreadContext::load(CanaryInputArchive& archive) {  // NOLINT
+  PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
+  size_t command_list_size;
+  archive(command_list_size);
+  for (size_t index = 0; index < command_list_size; ++index) {
+    StageId stage_id;
+    RawEvbuffer raw_buffer;
+    archive(stage_id, raw_buffer);
+    command_list_.resize(command_list_.size() + 1);
+    command_list_.back().stage_id = stage_id;
+    command_list_.back().command = raw_buffer.buffer;
+  }
+  size_t stage_buffer_map_size;
+  archive(stage_buffer_map_size);
+  for (size_t index = 0; index < stage_buffer_map_size; ++index) {
+    StageId stage_id;
+    int expected_buffer;
+    archive(stage_id, expected_buffer);
+    if (expected_buffer != -1) {
+      stage_buffer_map_[stage_id].expected_buffer = expected_buffer;
+    }
+    size_t buffer_list_size;
+    archive(buffer_list_size);
+    for (size_t inner_index = 0; inner_index < buffer_list_size;
+         ++inner_index) {
+      RawEvbuffer raw_buffer;
+      archive(raw_buffer);
+      stage_buffer_map_[stage_id].buffer_list.push_back(raw_buffer.buffer);
+    }
+  }
+  archive(ready_stages_);
+  pthread_mutex_unlock(&internal_lock_);
+}
+
+void WorkerLightThreadContext::save(CanaryOutputArchive& archive)  // NOLINT
+    const {
+  PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
+  archive(command_list_.size());
+  for (auto& command_buffer : command_list_) {
+    archive(command_buffer.stage_id, RawEvbuffer{command_buffer.command});
+  }
+  command_list_.clear();
+  archive(stage_buffer_map_.size());
+  for (auto& pair : stage_buffer_map_) {
+    archive(pair.first, pair.second.expected_buffer);
+    auto& buffer_list = pair.second.buffer_list;
+    archive(buffer_list.size());
+    for (auto& buffer_element : buffer_list) {
+      archive(RawEvbuffer{buffer_element});
+    }
+  }
+  stage_buffer_map_.clear();
+  archive(ready_stages_);
+  ready_stages_.clear();
+  pthread_mutex_unlock(&internal_lock_);
+}
+
 void WorkerExecutionContext::Initialize() {
   stage_graph_.set_statement_info_map(
       get_canary_application()->get_statement_info_map());
@@ -490,6 +547,33 @@ void WorkerExecutionContext::DeallocatePartitionData() {
       pair.second->Finalize();
       pair.second.reset();
     }
+  }
+}
+
+void WorkerExecutionContext::load(CanaryInputArchive& archive) {  // NOLINT
+  WorkerLightThreadContext::load(archive);
+  archive(partition_state_);
+  archive(stage_graph_);
+  archive(pending_gather_stages_);
+  AllocatePartitionData();
+  for (auto& pair : local_partition_data_) {
+    VariableId variable_id;
+    archive(variable_id);
+    CHECK(pair.first == variable_id);
+    pair.second->Deserialize(archive);
+  }
+}
+
+void WorkerExecutionContext::save(CanaryOutputArchive& archive)  // NOLINT
+    const {
+  WorkerLightThreadContext::save(archive);
+  archive(partition_state_);
+  archive(stage_graph_);
+  archive(pending_gather_stages_);
+  for (auto& pair : local_partition_data_) {
+    archive(pair.first);
+    pair.second->Serialize(archive);
+    pair.second->Finalize();
   }
 }
 
