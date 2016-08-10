@@ -345,6 +345,10 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
 
 void WorkerExecutionContext::ProcessMigrateIn(struct evbuffer* command) {
   // MIGRATION, step five: decodes migrated data.
+  VLOG(1) << "Process migrate in " << get_value(get_worker_id()) << "/"
+          << get_value(get_application_id()) << "/"
+          << get_value(get_variable_group_id()) << "/"
+          << get_value(get_partition_id());
   // Deserializes the partition.
   {
     CanaryInputArchive archive(command);
@@ -362,6 +366,10 @@ void WorkerExecutionContext::ProcessMigrateIn(struct evbuffer* command) {
 
 void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
   // MIGRATION, step three.
+  VLOG(1) << "Process migrate out " << get_value(get_worker_id()) << "/"
+          << get_value(get_application_id()) << "/"
+          << get_value(get_variable_group_id()) << "/"
+          << get_value(get_partition_id());
   // Tells the controller that the partition is migrated out.
   message::ControllerRespondMigrationOutDone response;
   FillInStats(&response);

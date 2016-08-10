@@ -201,6 +201,27 @@ struct RequestShutdownWorkerResponse {
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_SHUTDOWN_WORKER_RESPONSE,
                  RequestShutdownWorkerResponse);
 
+//! Triggers the scheduling algorithm.
+struct TriggerScheduling {
+  int scheduling_algorithm = -1;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(scheduling_algorithm);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, TRIGGER_SCHEDULING, TriggerScheduling);
+
+//! Response of the scheduling algorithm execution.
+struct TriggerSchedulingResponse {
+  bool succeed = false;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(succeed);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, TRIGGER_SCHEDULING_RESPONSE,
+                 TriggerSchedulingResponse);
+
 }  // namespace message
 }  // namespace canary
 

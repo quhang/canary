@@ -56,9 +56,10 @@
 
 namespace canary {
 
-/*
- * The skeleton of the controller scheduler implementation, which wraps the
- * asynchronous call into synchounous call into subclass.
+/**
+ * The base class of a controller scheduler, which hooks the scheduler with the
+ * communication layer so that it can exchange messages with workers or
+ * launchers.
  */
 class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
                                 public LaunchReceiveCommandInterface {
@@ -71,9 +72,8 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
   void Initialize(network::EventMainThread* event_main_thread,
                   ControllerSendCommandInterface* send_command_interface,
                   LaunchSendCommandInterface* launch_send_command_interface);
-
   /*
-   * Callbacks exposed to the synchronous context.
+   * Receives commands from the communication layer.
    */
   //! Called when receiving a launching command. The message header is kept, and
   // the buffer ownership is transferred.
@@ -89,6 +89,9 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
   void NotifyWorkerIsUp(WorkerId worker_id) override;
 
  protected:
+  /*
+   * Internal synchonous calls.
+   */
   //! Called when receiving launching commands from a launcher.
   virtual void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
                                             struct evbuffer* buffer) = 0;
@@ -106,6 +109,13 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
   LaunchSendCommandInterface* launch_send_command_interface_ = nullptr;
 };
 
+/**
+ * The controller scheduler implements most execution management
+ * functionalities. It processes commands from workers or launchers, and tracks
+ * the running states of workers and applications. But it does not specify the
+ * scheduling algorithmx. All method calls in this class are synchronous due to
+ * the wrapper in ControllerSchedulerBase.
+ */
 class ControllerScheduler : public ControllerSchedulerBase {
  protected:
   //! Represents an active worker.
@@ -179,6 +189,8 @@ class ControllerScheduler : public ControllerSchedulerBase {
  private:
   /*
    * Processes messages received from the launcher through the RPC interface.
+   * All the commands are checked for correctness since user inputs are not
+   * trusted.
    */
   bool CheckLaunchApplicationMessage(
       const message::LaunchApplication& launch_message,
