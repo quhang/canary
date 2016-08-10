@@ -40,6 +40,7 @@
 #ifndef CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 #define CANARY_SRC_CONTROLLER_CONTROLLER_SCHEDULER_H_
 
+#include <list>
 #include <map>
 #include <set>
 #include <string>
@@ -118,49 +119,74 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
  */
 class ControllerScheduler : public ControllerSchedulerBase {
  protected:
-  //! Represents an active worker.
+  //! Represents a worker.
   struct WorkerRecord {
+    //! The number of cores.
     int num_cores = -1;
+    //! CPU utilization percentage of all applications.
+    double all_cpu_usage_percentage = -1;
+    //! CPU utilization percentage of canary.
+    double canary_cpu_usage_percentage = -1;
+    //! All available memory space in gb.
+    double available_memory_gb = -1;
+    //! Memory space used by Canary in gb.
+    double used_memory_gb = -1;
+    //! Partitions owned by the worker.
     std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
+    //! The worker's state.
+    enum class WorkerState {
+      INVALID,
+      RUNNING,
+      KILLED
+    } worker_state = WorkerState::INVALID;
+
+   private:
+    friend class ControllerScheduler;
+    //! Applications loaded by the worker.
     std::set<ApplicationId> loaded_applications;
   };
-  //! Represents the execution state of an application.
-  enum class ApplicationState {
-    INVALID = -1,
-    RUNNING = 0,
-    AT_BARRIER,
-    COMPLETE
-  };
-  //! Represents an active application.
+
+  //! Represents an application.
   struct ApplicationRecord {
+    //! Describing the variables in the application.
+    const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
+        nullptr;
+    //! The application's partition map.
+    PerApplicationPartitionMap per_app_partition_map;
+    //! Priority level of the application, lower means higher priority.
+    PriorityLevel priority_level;
+    //! The total of cycles spent for the application.
+    double total_used_cycles = 0;
+    //! Represents the execution state of an application.
+    enum class ApplicationState {
+      INVALID,
+      RUNNING,
+      AT_BARRIER,
+      COMPLETE
+    } application_state = ApplicationState::INVALID;
+
+   private:
+    friend class ControllerScheduler;
+    //! The loaded application.
+    CanaryApplication* loaded_application = nullptr;
+    //! Internal usage, the dynamic loading handle of the application.
+    void* loading_handle = nullptr;
+
     //! Binary location of the application.
     std::string binary_location;
     //! The application parameter.
     std::string application_parameter;
     //! The first barrier stage, at which all partitions should pause and wait
     // for resuming.
-    StageId first_barrier_stage = StageId::INVALID;
-    //! Priority level of the application, lower means higher priority.
-    PriorityLevel priority_level;
-    //! Internal usage, the dynamic loading handle of the application.
-    void* loading_handle = nullptr;
-    //! The loaded application.
-    CanaryApplication* loaded_application = nullptr;
-    //! Describing the variables in the application.
-    const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
-        nullptr;
-    //! The application's partition map.
-    PerApplicationPartitionMap per_app_partition_map;
+    StageId next_barrier_stage = StageId::INVALID;
+
     //! The total number of partitions.
     int total_partition = 0;
     //! The total number of complete partitions.
     int complete_partition = 0;
     //! The total number of partitions blocked at a barrier.
     int blocked_partition = 0;
-    //! The execution state of an application.
-    ApplicationState application_state = ApplicationState::INVALID;
-    //! The total of cycles spent for the application.
-    double total_used_cycles = 0;
+
     //! The identifier of a triggered report.
     int report_id = -1;
     //! The number of partitions that have reported since the last time the
@@ -170,11 +196,30 @@ class ControllerScheduler : public ControllerSchedulerBase {
     std::vector<LaunchCommandId> report_command_list;
   };
 
+  //! Represents a partition.
+  struct PartitionRecord {
+    //! Total cycles used by the partition.
+    double total_used_cycles = 0;
+    //! Cycles used by the partition in the recent iterations.
+    std::list<double> loop_cycles;
+    //! Maximum size of the list.
+    static const int kMaxListSize = 10;
+    //! The partition's state.
+    enum class PartitionState {
+      INVALID
+    } partition_state = PartitionState::INVALID;
+  };
+
+ protected:
+  std::map<WorkerId, WorkerRecord> worker_map_;
+  std::map<ApplicationId, ApplicationRecord> application_map_;
+  std::map<FullPartitionId, PartitionRecord> partition_record_map_;
+
  public:
   ControllerScheduler() {}
   virtual ~ControllerScheduler() {}
 
- protected:
+ private:
   //! Called when receiving commands from a launcher.
   void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
                                     struct evbuffer* buffer) override;
@@ -185,8 +230,6 @@ class ControllerScheduler : public ControllerSchedulerBase {
   //! Called when a worker is up. The up notification and down notification are
   // paired.
   void InternalNotifyWorkerIsUp(WorkerId worker_id) override;
-
- private:
   /*
    * Processes messages received from the launcher through the RPC interface.
    * All the commands are checked for correctness since user inputs are not
@@ -244,32 +287,35 @@ class ControllerScheduler : public ControllerSchedulerBase {
       const message::ControllerRespondReachBarrier& respond_message);
 
   /*
-   * Application launching related.
+   * Handling the state of an application.
    */
-  //! Fills in initial info in the application record.
+  //! Initializes an application record.
   bool InitializeApplicationRecord(
+      ApplicationId application_id,
       const message::LaunchApplication& launch_message,
-      ApplicationRecord* application_record);
-  //! Assigns partitions to workers.
-  void DecidePartitionMap(ApplicationRecord* application_record);
-  //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
-  // manner using the number of cores as a weight.
-  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
-  //! Gets the next assigned worker id.
-  WorkerId NextAssignWorkerId();
-  //! Loads an application on all workers.
-  void RequestLoadApplicationOnAllWorkers(
-      ApplicationId application_id,
-      const ApplicationRecord& application_record);
-  //! Updates the partitions each workers own.
-  void UpdateWorkerOwnedPartitions(
-      ApplicationId application_id,
-      const PerApplicationPartitionMap& per_app_partition_map);
-  //! Requests workers to load partitions.
-  void RequestLoadPartitions(ApplicationId application_id);
+      message::LaunchApplicationResponse* response);
+  //! Processes running stats.
+  void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
+                          VariableGroupId variable_group_id,
+                          PartitionId partition_id,
+                          const message::RunningStats& running_stats);
+  //! Cleans up an application after it is complete.
+  void CleanUpApplication(ApplicationId application_id);
 
   /*
-   * Misc functions.
+   * Application launching related.
+   */
+  //! Checks whether the partition map is filled in correctly by the scheduling
+  // algorithm.
+  bool CheckPartitionMapIntegrity(ApplicationId application_id);
+  //! Updates the partitions each workers own, and initializes the partition
+  // record.
+  void UpdateApplicationStateBasedOnPartitionMap(ApplicationId application_id);
+  //! Loads partitions and applications.
+  void InitializePartitionsOfApplicationOnWorkers(ApplicationId application_id);
+
+  /*
+   * Helper functions.
    */
   //! Checks if the application id is valid, and fills in the response.
   template <typename InputMessage, typename OutputMessage>
@@ -279,36 +325,52 @@ class ControllerScheduler : public ControllerSchedulerBase {
   template <typename T>
   void SendCommandToPartitionInApplication(ApplicationId application_id,
                                            T* template_command);
-  //! Cleans up an application after it is complete.
-  void CleanUpApplication(ApplicationId application_id,
-                          ApplicationRecord* application_record);
-  //! Processes running stats.
-  void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
-                          VariableGroupId variable_group_id,
-                          PartitionId partition_id,
-                          const message::RunningStats& running_stats);
 
- protected:
   /*
-   * Logging related.
+   * Logging facility.
    */
-  //! Initializes logging file.
+  //! Initializes logging file if haven't.
   void InitializeLoggingFile();
   //! Flushes logging file.
   void FlushLoggingFile();
+  //! Logs an application.
+  void LogApplication(ApplicationId application_id,
+                      const std::string& binary_location,
+                      const std::string& application_parameter);
   //! Transforms the application parameter string to printable string.
   static std::string TransformString(const std::string& input);
+  //! Logs a running stat report.
+  void LogRunningStats(WorkerId worker_id, ApplicationId application_id,
+                       VariableGroupId variable_group_id,
+                       PartitionId partition_id,
+                       const message::RunningStats& running_stats);
+
+ private:
+  //! Logging file handler.
+  FILE* log_file_ = nullptr;
+  //! The next application id to assign.
+  ApplicationId next_application_id_ = ApplicationId::FIRST;
+
+ private:
+  //! Assigns partitions to workers.
+  void DecidePartitionMap(ApplicationRecord* application_record);
+  //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
+  // manner using the number of cores as a weight.
+  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
+  //! Gets the next assigned worker id.
+  WorkerId NextAssignWorkerId();
 
  private:
   WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
   int last_assigned_partitions_ = 0;
-  //! The next application id to assign.
-  ApplicationId next_application_id_ = ApplicationId::FIRST;
 
  protected:
-  FILE* log_file_ = nullptr;
-  std::map<WorkerId, WorkerRecord> worker_map_;
-  std::map<ApplicationId, ApplicationRecord> application_map_;
+  bool MigratePartition(FullPartitionId full_partition_id,
+                        WorkerId to_worker_id) {
+    // MigrateIn=>MigrateIn prepared=>MigrateOut=>MigrateIn done=>Change
+    // partition map and everything.
+    return true;
+  }
 };
 
 }  // namespace canary
