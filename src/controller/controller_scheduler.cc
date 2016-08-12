@@ -130,7 +130,7 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                     ProcessMigrationInDone);
     // A worker completes a partition.
     PROCESS_MESSAGE(CONTROLLER_RESPOND_PARTITION_DONE, ProcessPartitionDone);
-    // A worker responds the status of a partiton.
+    // A worker responds the status of a partition.
     PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_PARTITION,
                     ProcessStatusOfPartition);
     // A worker responds its status.
@@ -443,7 +443,7 @@ void ControllerScheduler::ProcessReachBarrier(
 }
 
 /*
- * Handling the state of an applicaiton.
+ * Handling the state of an application.
  */
 
 bool ControllerScheduler::InitializeApplicationRecord(
@@ -655,7 +655,7 @@ bool ControllerScheduler::CheckValidApplicationId(
   if (application_map_.find(application_id) == application_map_.end()) {
     output_message->succeed = false;
     output_message->error_message =
-        "The application id does not specify a running applicaiton!";
+        "The application id does not specify a running application!";
     return output_message->succeed;
   }
   output_message->succeed = true;

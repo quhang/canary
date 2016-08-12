@@ -50,6 +50,7 @@
 
 #include "controller/controller_communication_interface.h"
 #include "controller/launch_communication_interface.h"
+#include "controller/scheduling_info.h"
 #include "message/message_include.h"
 #include "shared/canary_application.h"
 #include "shared/network.h"
@@ -110,6 +111,9 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
   LaunchSendCommandInterface* launch_send_command_interface_ = nullptr;
 };
 
+class LoadSchedule;
+class PlacementSchedule;
+
 /**
  * The controller scheduler implements most execution management
  * functionalities. It processes commands from workers or launchers, and tracks
@@ -117,104 +121,8 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
  * scheduling algorithmx. All method calls in this class are synchronous due to
  * the wrapper in ControllerSchedulerBase.
  */
-class ControllerScheduler : public ControllerSchedulerBase {
- protected:
-  //! Represents a worker.
-  struct WorkerRecord {
-    //! The number of cores.
-    int num_cores = -1;
-    //! CPU utilization percentage of all applications.
-    double all_cpu_usage_percentage = -1;
-    //! CPU utilization percentage of canary.
-    double canary_cpu_usage_percentage = -1;
-    //! All available memory space in gb.
-    double available_memory_gb = -1;
-    //! Memory space used by Canary in gb.
-    double used_memory_gb = -1;
-    //! Partitions owned by the worker.
-    std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
-    //! The worker's state.
-    enum class WorkerState {
-      INVALID,
-      RUNNING,
-      KILLED
-    } worker_state = WorkerState::INVALID;
-
-   private:
-    friend class ControllerScheduler;
-    //! Applications loaded by the worker.
-    std::set<ApplicationId> loaded_applications;
-  };
-
-  //! Represents an application.
-  struct ApplicationRecord {
-    //! Describing the variables in the application.
-    const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
-        nullptr;
-    //! The application's partition map.
-    PerApplicationPartitionMap per_app_partition_map;
-    //! Priority level of the application, lower means higher priority.
-    PriorityLevel priority_level;
-    //! The total of cycles spent for the application.
-    double total_used_cycles = 0;
-    //! Represents the execution state of an application.
-    enum class ApplicationState {
-      INVALID,
-      RUNNING,
-      AT_BARRIER,
-      COMPLETE
-    } application_state = ApplicationState::INVALID;
-
-   private:
-    friend class ControllerScheduler;
-    //! The loaded application.
-    CanaryApplication* loaded_application = nullptr;
-    //! Internal usage, the dynamic loading handle of the application.
-    void* loading_handle = nullptr;
-
-    //! Binary location of the application.
-    std::string binary_location;
-    //! The application parameter.
-    std::string application_parameter;
-    //! The first barrier stage, at which all partitions should pause and wait
-    // for resuming.
-    StageId next_barrier_stage = StageId::INVALID;
-
-    //! The total number of partitions.
-    int total_partition = 0;
-    //! The total number of complete partitions.
-    int complete_partition = 0;
-    //! The total number of partitions blocked at a barrier.
-    int blocked_partition = 0;
-
-    //! The identifier of a triggered report.
-    int report_id = -1;
-    //! The number of partitions that have reported since the last time the
-    // report id was changed.
-    std::set<FullPartitionId> report_partition_set;
-    //! Lauchers that wait for reporting the running stats.
-    std::vector<LaunchCommandId> report_command_list;
-  };
-
-  //! Represents a partition.
-  struct PartitionRecord {
-    //! Total cycles used by the partition.
-    double total_used_cycles = 0;
-    //! Cycles used by the partition in the recent iterations.
-    std::list<double> loop_cycles;
-    //! Maximum size of the list.
-    static const int kMaxListSize = 10;
-    //! The partition's state.
-    enum class PartitionState {
-      INVALID
-    } partition_state = PartitionState::INVALID;
-  };
-
- protected:
-  std::map<WorkerId, WorkerRecord> worker_map_;
-  std::map<ApplicationId, ApplicationRecord> application_map_;
-  std::map<FullPartitionId, PartitionRecord> partition_record_map_;
-
+class ControllerScheduler : public ControllerSchedulerBase,
+                            public SchedulingInfo {
  public:
   ControllerScheduler() {}
   virtual ~ControllerScheduler() {}
@@ -345,11 +253,33 @@ class ControllerScheduler : public ControllerSchedulerBase {
                        PartitionId partition_id,
                        const message::RunningStats& running_stats);
 
+  /*
+   * Implements the SchedulingInfo interface.
+   */
+  const std::map<WorkerId, WorkerRecord>& get_worker_map() const override {
+    return worker_map_;
+  }
+  const std::map<ApplicationId, ApplicationRecord>& get_application_map()
+      const override {
+    return application_map_;
+  }
+  const std::map<FullPartitionId, PartitionRecord>& get_partition_record_map()
+      const override {
+    return partition_record_map_;
+  }
+
  private:
   //! Logging file handler.
   FILE* log_file_ = nullptr;
   //! The next application id to assign.
   ApplicationId next_application_id_ = ApplicationId::FIRST;
+  //! Scheduling info.
+  std::map<WorkerId, WorkerRecord> worker_map_;
+  std::map<ApplicationId, ApplicationRecord> application_map_;
+  std::map<FullPartitionId, PartitionRecord> partition_record_map_;
+  //! Scheduling algorithms.
+  std::map<std::string, PlacementSchedule*> placement_schedule_algorithms_;
+  std::map<std::string, LoadSchedule*> load_schedule_algorithms_;
 
  private:
   //! Assigns partitions to workers.
