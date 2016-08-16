@@ -64,6 +64,9 @@ class SchedulingInfo {
  public:
   //! Represents a worker.
   struct WorkerRecord {
+    /*
+     * Reported by a worker.
+     */
     //! The number of cores.
     int num_cores = -1;
     //! CPU utilization percentage of all applications (might not be Canary).
@@ -74,10 +77,11 @@ class SchedulingInfo {
     double available_memory_gb = 0;
     //! Memory space used by Canary in GB.
     double used_memory_gb = 0;
+    /*
+     * Maintained by the controller.
+     */
     //! Partitions owned by the worker, indexed by the application id.
     std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
-    // The number of owned partitions.
-    int num_owned_partitions = 0;
     //! The worker's state.
     enum class WorkerState {
       INVALID,
@@ -89,21 +93,33 @@ class SchedulingInfo {
    private:
     //! The private information is used internally.
     friend class ControllerScheduler;
+    /*
+     * Maintained by the controller.
+     */
     //! Applications loaded by the worker.
     std::set<ApplicationId> loaded_applications;
   };
 
   //! Represents an application.
   struct ApplicationRecord {
+    /*
+     * Reported by a worker.
+     */
+    //! The total of cycles spent for the application.
+    double total_used_cycles = 0;
+    /*
+     * Filled in during initialization.
+     */
     //! Describing the variables in the application.
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
         nullptr;
+    /*
+     * Maintained by the controller.
+     */
     //! The application's partition map.
     PerApplicationPartitionMap per_app_partition_map;
     //! Priority level of the application, lower means higher priority.
     PriorityLevel priority_level;
-    //! The total of cycles spent for the application.
-    double total_used_cycles = 0;
     //! Represents the execution state of an application.
     enum class ApplicationState {
       INVALID,
@@ -115,26 +131,30 @@ class SchedulingInfo {
    private:
     //! The private information is used internally.
     friend class ControllerScheduler;
+    /*
+     * Filled in during initialization.
+     */
     //! The loaded application.
     CanaryApplication* loaded_application = nullptr;
     //! Internal usage, the dynamic loading handle of the application.
     void* loading_handle = nullptr;
-
     //! Binary location of the application.
     std::string binary_location;
     //! The application parameter.
     std::string application_parameter;
-    //! The first barrier stage, at which all partitions should pause and wait
-    // for resuming.
-    StageId next_barrier_stage = StageId::INVALID;
-
+    /*
+     * Maintained by the controller.
+     */
     //! The total number of partitions.
     int total_partition = 0;
     //! The total number of complete partitions.
     int complete_partition = 0;
     //! The total number of partitions blocked at a barrier.
     int blocked_partition = 0;
-
+    //! The total number of partitions that are being migrated.
+    int migrating_partition = 0;
+    //! The next barrier stage, at which all partitions should pause.
+    StageId next_barrier_stage = StageId::INVALID;
     //! The identifier of a triggered report.
     int report_id = -1;
     //! The number of partitions that have reported since the last time the
@@ -146,12 +166,18 @@ class SchedulingInfo {
 
   //! Represents a partition.
   struct PartitionRecord {
+    /*
+     * Reported by a worker.
+     */
     //! Total cycles used by the partition.
     double total_used_cycles = 0;
     //! Cycles used by the partition in the recent iterations.
     std::list<double> loop_cycles;
     //! Maximum size of the list.
     static const int kMaxListSize = 10;
+    /*
+     * Maintained by the controller.
+     */
     //! The partition's state.
     enum class PartitionState {
       INVALID,
@@ -159,8 +185,9 @@ class SchedulingInfo {
       MIGRATE_INITIATED,  // After issueing MIGRATE_IN to the destine worker.
       MIGRATE_PREPARED,   // After issueing MIGRATE_OUT to the source worker.
     } partition_state = PartitionState::INVALID;
-    //! The owner. TODO.
+    //! The owner.
     WorkerId owned_worker_id = WorkerId::INVALID;
+    //! The destination worker of a migration.
     WorkerId next_worker_id = WorkerId::INVALID;
   };
 

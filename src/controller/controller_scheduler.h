@@ -115,11 +115,11 @@ class LoadSchedule;
 class PlacementSchedule;
 
 /**
- * The controller scheduler implements most execution management
- * functionalities. It processes commands from workers or launchers, and tracks
- * the running states of workers and applications. But it does not specify the
- * scheduling algorithmx. All method calls in this class are synchronous due to
- * the wrapper in ControllerSchedulerBase.
+ * This class implements most execution management functionalities. It processes
+ * commands from workers or launchers, and tracks the running states of workers
+ * and applications. But it does not specify the scheduling algorithm. All
+ * method calls in this class are synchronous due to the wrapper in
+ * ControllerSchedulerBase.
  */
 class ControllerScheduler : public ControllerSchedulerBase,
                             public SchedulingInfo {
@@ -143,67 +143,83 @@ class ControllerScheduler : public ControllerSchedulerBase,
    * All the commands are checked for correctness since user inputs are not
    * trusted.
    */
+  //! Checks launching application message.
   bool CheckLaunchApplicationMessage(
       const message::LaunchApplication& launch_message,
       message::LaunchApplicationResponse* response);
+  //! Launches an application.
   void ProcessLaunchApplication(
       LaunchCommandId launch_command_id,
       const message::LaunchApplication& launch_message);
-
+  //! Pauses an application.
   void ProcessPauseApplication(LaunchCommandId launch_command_id,
                                const message::PauseApplication& pause_message);
-
+  //! Checks resuming application message.
   bool CheckResumeApplicationMessage(
       const message::ResumeApplication& resume_message,
       message::ResumeApplicationResponse* response);
+  //! Resumes a paused application.
   void ProcessResumeApplication(
       LaunchCommandId launch_command_id,
       const message::ResumeApplication& resume_message);
-
+  //! Checks priority tuning message.
   bool CheckControlApplicationPriorityMessage(
       const message::ControlApplicationPriority& control_message,
       message::ControlApplicationPriorityResponse* response);
+  //! Changes application running priority.
   void ProcessControlApplicationPriority(
       LaunchCommandId launch_command_id,
       const message::ControlApplicationPriority& control_message);
-
+  //! Checks application stat request.
   bool CheckRequestApplicationStatMessage(
       const message::RequestApplicationStat& request_message,
       message::RequestApplicationStatResponse* response);
+  //! Requests application stats.
   void ProcessRequestApplicationStat(
       LaunchCommandId launch_command_id,
       const message::RequestApplicationStat& request_message);
-
+  //! Requests shutting down workers.
   void ProcessRequestShutdownWorker(
       LaunchCommandId launch_command_id,
       const message::RequestShutdownWorker& request_message);
-
   /*
    * Processes messages received from workers.
    */
+  //! A worker is ready for receiving a migrated partition.
   void ProcessMigrationInPrepared(
       const message::ControllerRespondMigrationInPrepared& respond_message);
+  //! A worker already sent a migrated partition.
   void ProcessMigrationOutDone(
       const message::ControllerRespondMigrationOutDone& respond_message);
+  //! A worker already received a migrated partition.
   void ProcessMigrationInDone(
       const message::ControllerRespondMigrationInDone& respond_message);
+  //! A worker completes a partition.
   void ProcessPartitionDone(
       const message::ControllerRespondPartitionDone& respond_message);
+  //! A worker responds the status of a partition.
   void ProcessStatusOfPartition(
       const message::ControllerRespondStatusOfPartition& respond_message);
+  //! A worker responds its status.
   void ProcessStatusOfWorker(
       const message::ControllerRespondStatusOfWorker& respond_message);
+  //! A worker responds that a barrier has been reached.
   void ProcessReachBarrier(
       const message::ControllerRespondReachBarrier& respond_message);
-
   /*
    * Handling the state of an application.
    */
   //! Initializes an application record.
-  bool InitializeApplicationRecord(
+  void InitializeApplicationRecord(
       ApplicationId application_id,
       const message::LaunchApplication& launch_message,
-      message::LaunchApplicationResponse* response);
+      CanaryApplication* loaded_application, void* loading_handle);
+  //! Gets an application record.
+  ApplicationRecord& GetApplicationRecord(ApplicationId application_id) {
+    auto iter = application_map_.find(application_id);
+    CHECK(iter != application_map_.end());
+    return iter->second;
+  }
   //! Processes running stats.
   void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
                           VariableGroupId variable_group_id,
@@ -211,19 +227,30 @@ class ControllerScheduler : public ControllerSchedulerBase,
                           const message::RunningStats& running_stats);
   //! Cleans up an application after it is complete.
   void CleanUpApplication(ApplicationId application_id);
-
   /*
    * Application launching related.
    */
   //! Checks whether the partition map is filled in correctly by the scheduling
   // algorithm.
-  bool CheckPartitionMapIntegrityAndMerge(ApplicationId application_id);
+  bool CheckSchedulingAlgorithmOutputAndFillInPartitionMap(
+      ApplicationId application_id);
   //! Updates the partitions each workers own, and initializes the partition
   // record.
-  void UpdateApplicationStateBasedOnPartitionMap(ApplicationId application_id);
+  void InitializePartitionsInApplication(ApplicationId application_id);
   //! Loads partitions and applications.
-  void InitializePartitionsOfApplicationOnWorkers(ApplicationId application_id);
-
+  void LaunchApplicationAndPartitions(ApplicationId application_id);
+  /*
+   * Handling worker states.
+   */
+  //! Initializes a worker record.
+  void InitializeWorkerRecord(WorkerId worker_id);
+  //! Finalizes a worker record.
+  void FinalizeWorkerRecord(WorkerId worker_id);
+  //! Initializes a partition record.
+  void InitializePartitionRecord(const FullPartitionId& full_partition_id,
+                                 WorkerId worker_id);
+  //! Finalizes a partition record.
+  void FinalizePartitionRecord(const FullPartitionId& full_partition_id);
   /*
    * Helper functions.
    */
@@ -238,7 +265,6 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! Migrates a partition, and returns true if it succeeds.
   bool MigratePartition(FullPartitionId full_partition_id,
                         WorkerId to_worker_id);
-
   /*
    * Logging facility.
    */
@@ -257,9 +283,10 @@ class ControllerScheduler : public ControllerSchedulerBase,
                        VariableGroupId variable_group_id,
                        PartitionId partition_id,
                        const message::RunningStats& running_stats);
-
   /*
    * Implements the SchedulingInfo interface.
+   * The wrapping is necessary since the data members are stored in this
+   * subclass.
    */
   const std::map<WorkerId, WorkerRecord>& get_worker_map() const override {
     return worker_map_;
@@ -272,12 +299,13 @@ class ControllerScheduler : public ControllerSchedulerBase,
       const override {
     return partition_record_map_;
   }
-
   /*
    * Constructs scheduling algorithms.
    */
-  PlacementSchedule* get_placement_schedule(const std::string& name);
-  LoadSchedule* get_load_schedule(const std::string& name);
+  //! Retrieves a placement scheduling algorithm by a name.
+  PlacementSchedule* GetPlacementSchedule(const std::string& name);
+  //! Retrieves a load balancing scheduling algorithm by a name.
+  LoadSchedule* GetLoadSchedule(const std::string& name);
 
  private:
   //! Logging file handler.
