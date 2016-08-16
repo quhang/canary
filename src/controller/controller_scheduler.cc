@@ -110,6 +110,8 @@ void ControllerScheduler::InternalReceiveLaunchCommand(
     // Requests shutting down workers.
     PROCESS_LAUNCH_MESSAGE(REQUEST_SHUTDOWN_WORKER,
                            ProcessRequestShutdownWorker);
+    // Requests shutting down workers.
+    PROCESS_LAUNCH_MESSAGE(TRIGGER_SCHEDULING, ProcessTriggerScheduling);
     default:
       LOG(FATAL) << "Unexpected message type!";
   }  // switch category.
@@ -249,6 +251,8 @@ void ControllerScheduler::ProcessLaunchApplication(
       new PerApplicationPartitionMap(application_record.per_app_partition_map));
   InitializePartitionsInApplication(assigned_application_id);
   LaunchApplicationAndPartitions(assigned_application_id);
+  // Logs the placement.
+  LogPartitionPlacement();
   // Sends response to the launcher.
   response.succeed = true;
   response.application_id = get_value(assigned_application_id);
@@ -392,10 +396,72 @@ void ControllerScheduler::ProcessRequestApplicationStat(
   // The stats will be sent later.
 }
 
+bool ControllerScheduler::CheckRequestShutdownWorkerMessage(
+    const message::RequestShutdownWorker& request_message,
+    message::RequestShutdownWorkerResponse* response) {
+  for (int worker_id_int : request_message.shutdown_worker_id_set) {
+    if (worker_id_int < 0) {
+      response->succeed = false;
+      response->error_message = "Invalid worker id!";
+      return response->succeed;
+    }
+    auto worker_id = static_cast<WorkerId>(worker_id_int);
+    if (worker_map_.find(worker_id) == worker_map_.end()) {
+      response->succeed = false;
+      response->error_message = "The specified worker does not exist!";
+      return response->succeed;
+    }
+  }
+  response->succeed = true;
+  return response->succeed;
+}
+
 void ControllerScheduler::ProcessRequestShutdownWorker(
     LaunchCommandId launch_command_id,
     const message::RequestShutdownWorker& request_message) {
-  // TODO(quhang): implement.
+  message::RequestShutdownWorkerResponse response;
+  if (!CheckRequestShutdownWorkerMessage(request_message, &response)) {
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  for (int worker_id_int : request_message.shutdown_worker_id_set) {
+    auto worker_id = static_cast<WorkerId>(worker_id_int);
+    auto& worker_record = GetWorkerRecord(worker_id);
+    // Further scheduling loop will remove running partitions out of the worker.
+    worker_record.worker_state = WorkerRecord::WorkerState::KILLED;
+  }
+  response.succeed = true;
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
+}
+
+void ControllerScheduler::ProcessTriggerScheduling(
+    LaunchCommandId launch_command_id,
+    const message::TriggerScheduling& trigger_message) {
+  message::TriggerSchedulingResponse response;
+  auto load_schedule = GetLoadSchedule(trigger_message.scheduling_algorithm);
+  if (!load_schedule) {
+    response.succeed = false;
+    response.error_message = "Invalid load balancing algorithm!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  // Clears partition placement decisions.
+  ClearPartitionPlacement();
+  // Invokes the user-defined placement algorithm.
+  load_schedule->BalanceLoad();
+  // Migrates partitions.
+  for (const auto& pair : RetrievePartitionPlacement()) {
+    CHECK(MigratePartition(pair.first, pair.second))
+        << "The load balancing algorithm is wrong!";
+  }
+  response.succeed = true;
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
 
 /*
@@ -406,9 +472,7 @@ void ControllerScheduler::ProcessMigrationInPrepared(
   auto full_partition_id = FullPartitionId{respond_message.application_id,
                                            respond_message.variable_group_id,
                                            respond_message.partition_id};
-  CHECK(partition_record_map_.find(full_partition_id) !=
-        partition_record_map_.end());
-  auto& partition_record = partition_record_map_.at(full_partition_id);
+  auto& partition_record = GetPartitionRecord(full_partition_id);
   CHECK(partition_record.partition_state ==
         PartitionRecord::PartitionState::MIGRATE_INITIATED);
   CHECK(partition_record.next_worker_id == respond_message.from_worker_id);
@@ -426,21 +490,54 @@ void ControllerScheduler::ProcessMigrationInPrepared(
 }
 
 void ControllerScheduler::ProcessMigrationOutDone(
-    const message::ControllerRespondMigrationOutDone& respond_message) {}
+    const message::ControllerRespondMigrationOutDone& respond_message) {
+  UpdateRunningStats(
+      respond_message.from_worker_id, respond_message.application_id,
+      respond_message.variable_group_id, respond_message.partition_id,
+      respond_message.running_stats);
+}
 
 void ControllerScheduler::ProcessMigrationInDone(
     const message::ControllerRespondMigrationInDone& respond_message) {
-  auto full_partition_id = FullPartitionId{respond_message.application_id,
-                                           respond_message.variable_group_id,
-                                           respond_message.partition_id};
-  CHECK(partition_record_map_.find(full_partition_id) !=
-        partition_record_map_.end());
-  auto& partition_record = partition_record_map_.at(full_partition_id);
+  const auto full_partition_id = FullPartitionId{
+      respond_message.application_id, respond_message.variable_group_id,
+      respond_message.partition_id};
+  auto& partition_record = GetPartitionRecord(full_partition_id);
+  const auto src_worker_id = partition_record.owned_worker_id;
+  const auto dst_worker_id = partition_record.next_worker_id;
+  const auto application_id = respond_message.application_id;
+  CHECK(dst_worker_id == respond_message.from_worker_id);
+  // Updates the partition record.
   CHECK(partition_record.partition_state ==
         PartitionRecord::PartitionState::MIGRATE_PREPARED);
+  partition_record.owned_worker_id = dst_worker_id;
   partition_record.next_worker_id = WorkerId::INVALID;
   partition_record.partition_state = PartitionRecord::PartitionState::RUNNING;
-  // TODO: update all states.
+  // Updates the application record.
+  auto& application_record = GetApplicationRecord(application_id);
+  if (--application_record.migrating_partition == 0) {
+    LogPartitionPlacement();
+    LOG(INFO) << "Application(id=" << get_value(application_id)
+              << " finishes migration.";
+  }
+  // Updates the worker records.
+  auto& src_worker_record = GetWorkerRecord(src_worker_id);
+  src_worker_record.owned_partitions[application_id].erase(full_partition_id);
+  if (src_worker_record.owned_partitions[application_id].empty()) {
+    src_worker_record.owned_partitions.erase(application_id);
+  }
+  if (src_worker_record.worker_state == WorkerRecord::WorkerState::KILLED &&
+      src_worker_record.owned_partitions.empty()) {
+    send_command_interface_->ShutDownWorker(src_worker_id);
+  }
+  auto& dst_worker_record = GetWorkerRecord(dst_worker_id);
+  dst_worker_record.owned_partitions[application_id].insert(full_partition_id);
+  // Updates the partition map.
+  auto partition_map_update = new PartitionMapUpdate;
+  partition_map_update->emplace_back(full_partition_id,
+                                     respond_message.from_worker_id);
+  // Caution: ownership is transferred.
+  send_command_interface_->UpdatePartitionMap(partition_map_update);
 }
 
 void ControllerScheduler::ProcessPartitionDone(
@@ -471,6 +568,7 @@ void ControllerScheduler::ProcessStatusOfPartition(
 void ControllerScheduler::ProcessStatusOfWorker(
     const message::ControllerRespondStatusOfWorker& respond_message) {
   const auto from_worker_id = respond_message.from_worker_id;
+  // TODO(quhang): more.
   // Updates worker map.
   if (worker_map_.find(from_worker_id) != worker_map_.end()) {
     worker_map_[from_worker_id].num_cores = respond_message.num_cores;
@@ -582,6 +680,11 @@ void ControllerScheduler::CleanUpApplication(ApplicationId application_id) {
       FinalizePartitionRecord(full_partition_id);
     }
     owned_partitions.erase(application_id);
+    // Shutsdown the worker.
+    if (pair.second.worker_state == WorkerRecord::WorkerState::KILLED &&
+        owned_partitions.empty()) {
+      send_command_interface_->ShutDownWorker(pair.first);
+    }
   }
   // Unloads the application.
   message::WorkerUnloadApplication unload_application_command;
@@ -634,6 +737,13 @@ bool ControllerScheduler::CheckSchedulingAlgorithmOutputAndFillInPartitionMap(
         partition_id >=
             PartitionId(
                 variable_group_info_map.at(variable_group_id).parallelism)) {
+      return false;
+    }
+    if (worker_map_.find(pair.second) == worker_map_.end()) {
+      return false;
+    }
+    const auto& worker_record = GetWorkerRecord(pair.second);
+    if (worker_record.worker_state != WorkerRecord::WorkerState::RUNNING) {
       return false;
     }
     ++specified_partitions;
@@ -784,13 +894,20 @@ void ControllerScheduler::SendCommandToPartitionInApplication(
   }
 }
 
-bool ControllerScheduler::MigratePartition(FullPartitionId full_partition_id,
-                                           WorkerId to_worker_id) {
+bool ControllerScheduler::MigratePartition(
+    const FullPartitionId& full_partition_id, WorkerId to_worker_id) {
+  if (worker_map_.find(to_worker_id) == worker_map_.end()) {
+    return false;
+  }
+  auto& worker_record = GetWorkerRecord(to_worker_id);
+  if (worker_record.worker_state != WorkerRecord::WorkerState::RUNNING) {
+    return false;
+  }
   if (partition_record_map_.find(full_partition_id) ==
       partition_record_map_.end()) {
     return false;
   }
-  auto& partition_record = partition_record_map_.at(full_partition_id);
+  auto& partition_record = GetPartitionRecord(full_partition_id);
   if (partition_record.partition_state !=
       PartitionRecord::PartitionState::RUNNING) {
     return false;
@@ -801,8 +918,28 @@ bool ControllerScheduler::MigratePartition(FullPartitionId full_partition_id,
   partition_record.partition_state =
       PartitionRecord::PartitionState::MIGRATE_INITIATED;
   partition_record.next_worker_id = to_worker_id;
-  // The order:
-  // MigrateIn=>MigrateIn prepared=>MigrateOut=>MigrateIn done.
+  auto& application_record =
+      GetApplicationRecord(full_partition_id.application_id);
+  ++application_record.migrating_partition;
+  // Loads application.
+  const auto application_id = full_partition_id.application_id;
+  if (worker_record.loaded_applications.find(application_id) ==
+      worker_record.loaded_applications.end()) {
+    message::WorkerLoadApplication load_application_command;
+    load_application_command.application_id = application_id;
+    load_application_command.binary_location =
+        application_record.binary_location;
+    load_application_command.application_parameter =
+        application_record.application_parameter;
+    load_application_command.first_barrier_stage =
+        application_record.next_barrier_stage;
+    load_application_command.priority_level = application_record.priority_level;
+    send_command_interface_->SendCommandToWorker(
+        to_worker_id,
+        message::SerializeMessageWithControlHeader(load_application_command));
+    worker_record.loaded_applications.insert(application_id);
+  }
+  // Gets the destination prepared.
   message::WorkerMigrateInPartitions migrate_in_command;
   migrate_in_command.application_id = full_partition_id.application_id;
   migrate_in_command.partition_list.emplace_back(
@@ -860,6 +997,26 @@ void ControllerScheduler::LogRunningStats(
   for (const auto& pair : cycle_stats) {
     fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
             get_value(pair.second.first), pair.second.second * 1.e3);
+  }
+  FlushLoggingFile();
+}
+
+void ControllerScheduler::LogPartitionPlacement() {
+  if (FLAGS_log_placement) {
+    return;
+  }
+  InitializeLoggingFile();
+  for (const auto& pair : worker_map_) {
+    fprintf(log_file_, "M %d ", get_value(pair.first));
+    for (const auto& in_pair : pair.second.owned_partitions) {
+      fprintf(log_file_, "%d ", get_value(in_pair.first));
+      for (const auto& full_partition_id : in_pair.second) {
+        fprintf(log_file_, "%d/%d ",
+                get_value(full_partition_id.variable_group_id),
+                get_value(full_partition_id.partition_id));
+      }
+    }
+    fprintf(log_file_, "\n");
   }
   FlushLoggingFile();
 }

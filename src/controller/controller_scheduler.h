@@ -178,10 +178,18 @@ class ControllerScheduler : public ControllerSchedulerBase,
   void ProcessRequestApplicationStat(
       LaunchCommandId launch_command_id,
       const message::RequestApplicationStat& request_message);
+  //! Checks worker shutting down request.
+  bool CheckRequestShutdownWorkerMessage(
+      const message::RequestShutdownWorker& request_message,
+      message::RequestShutdownWorkerResponse* response);
   //! Requests shutting down workers.
   void ProcessRequestShutdownWorker(
       LaunchCommandId launch_command_id,
       const message::RequestShutdownWorker& request_message);
+  //! Triggers the scheduling loop.
+  void ProcessTriggerScheduling(
+      LaunchCommandId launch_command_id,
+      const message::TriggerScheduling& trigger_message);
   /*
    * Processes messages received from workers.
    */
@@ -244,11 +252,24 @@ class ControllerScheduler : public ControllerSchedulerBase,
    */
   //! Initializes a worker record.
   void InitializeWorkerRecord(WorkerId worker_id);
+  //! Gets a worker record.
+  WorkerRecord& GetWorkerRecord(WorkerId worker_id) {
+    auto iter = worker_map_.find(worker_id);
+    CHECK(iter != worker_map_.end());
+    return iter->second;
+  }
   //! Finalizes a worker record.
   void FinalizeWorkerRecord(WorkerId worker_id);
   //! Initializes a partition record.
   void InitializePartitionRecord(const FullPartitionId& full_partition_id,
                                  WorkerId worker_id);
+  //! Gets a partition record.
+  PartitionRecord& GetPartitionRecord(
+      const FullPartitionId& full_partition_id) {
+    auto iter = partition_record_map_.find(full_partition_id);
+    CHECK(iter != partition_record_map_.end());
+    return iter->second;
+  }
   //! Finalizes a partition record.
   void FinalizePartitionRecord(const FullPartitionId& full_partition_id);
   /*
@@ -263,7 +284,7 @@ class ControllerScheduler : public ControllerSchedulerBase,
   void SendCommandToPartitionInApplication(ApplicationId application_id,
                                            T* template_command);
   //! Migrates a partition, and returns true if it succeeds.
-  bool MigratePartition(FullPartitionId full_partition_id,
+  bool MigratePartition(const FullPartitionId& full_partition_id,
                         WorkerId to_worker_id);
   /*
    * Logging facility.
@@ -278,6 +299,8 @@ class ControllerScheduler : public ControllerSchedulerBase,
                       const std::string& application_parameter);
   //! Transforms the application parameter string to printable string.
   static std::string TransformString(const std::string& input);
+  //! Logs partition placement.
+  void LogPartitionPlacement();
   //! Logs a running stat report.
   void LogRunningStats(WorkerId worker_id, ApplicationId application_id,
                        VariableGroupId variable_group_id,

@@ -97,6 +97,7 @@ DECLARE_string(controller_log_name);
 DECLARE_string(launch_service);
 DECLARE_string(worker_service);
 DECLARE_int32(worker_threads);
+DECLARE_bool(log_placement);
 
 namespace canary {
 //! Wrapper for evbuffer, to be serialized/deserialized.

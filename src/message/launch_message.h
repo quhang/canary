@@ -196,10 +196,9 @@ REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_SHUTDOWN_WORKER,
 struct RequestShutdownWorkerResponse {
   bool succeed = false;
   std::string error_message;
-  int shutdown_worker_num = 0;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(succeed, error_message, shutdown_worker_num);
+    archive(succeed, error_message);
   }
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_SHUTDOWN_WORKER_RESPONSE,
@@ -213,10 +212,11 @@ struct RequestWorkerStat {
 REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_WORKER_STAT, RequestWorkerStat);
 struct RequestWorkerStatResponse {
   bool succeed = false;
+  std::string error_message;
   std::map<int, double> cpu_util_percentage_map;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(cpu_util_percentage_map);
+    archive(succeed, error_message, cpu_util_percentage_map);
   }
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_WORKER_STAT_RESPONSE,
@@ -231,13 +231,13 @@ struct TriggerScheduling {
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, TRIGGER_SCHEDULING, TriggerScheduling);
-
 //! Response of the scheduling algorithm execution.
 struct TriggerSchedulingResponse {
   bool succeed = false;
+  std::string error_message;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(succeed);
+    archive(succeed, error_message);
   }
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, TRIGGER_SCHEDULING_RESPONSE,

@@ -85,7 +85,6 @@ class SchedulingInfo {
     //! The worker's state.
     enum class WorkerState {
       INVALID,
-      UP,
       RUNNING,
       KILLED
     } worker_state = WorkerState::INVALID;
