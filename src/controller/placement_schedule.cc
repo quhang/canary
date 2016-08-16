@@ -40,6 +40,7 @@
 #include "controller/placement_schedule.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace canary {
 

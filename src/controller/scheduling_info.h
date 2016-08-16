@@ -67,25 +67,27 @@ class SchedulingInfo {
     //! The number of cores.
     int num_cores = -1;
     //! CPU utilization percentage of all applications (might not be Canary).
-    double all_cpu_usage_percentage = -1;
+    double all_cpu_usage_percentage = 0;
     //! CPU utilization percentage of Canary.
-    double canary_cpu_usage_percentage = -1;
+    double canary_cpu_usage_percentage = 0;
     //! All available memory space in GB.
-    double available_memory_gb = -1;
+    double available_memory_gb = 0;
     //! Memory space used by Canary in GB.
-    double used_memory_gb = -1;
-    //! Partitions owned by the worker.
+    double used_memory_gb = 0;
+    //! Partitions owned by the worker, indexed by the application id.
     std::map<ApplicationId, std::set<FullPartitionId>> owned_partitions;
     // The number of owned partitions.
     int num_owned_partitions = 0;
     //! The worker's state.
     enum class WorkerState {
       INVALID,
+      UP,
       RUNNING,
       KILLED
     } worker_state = WorkerState::INVALID;
 
    private:
+    //! The private information is used internally.
     friend class ControllerScheduler;
     //! Applications loaded by the worker.
     std::set<ApplicationId> loaded_applications;
@@ -111,6 +113,7 @@ class SchedulingInfo {
     } application_state = ApplicationState::INVALID;
 
    private:
+    //! The private information is used internally.
     friend class ControllerScheduler;
     //! The loaded application.
     CanaryApplication* loaded_application = nullptr;
@@ -151,8 +154,14 @@ class SchedulingInfo {
     static const int kMaxListSize = 10;
     //! The partition's state.
     enum class PartitionState {
-      INVALID
+      INVALID,
+      RUNNING,            // RUNNING.
+      MIGRATE_INITIATED,  // After issueing MIGRATE_IN to the destine worker.
+      MIGRATE_PREPARED,   // After issueing MIGRATE_OUT to the source worker.
     } partition_state = PartitionState::INVALID;
+    //! The owner. TODO.
+    WorkerId owned_worker_id = WorkerId::INVALID;
+    WorkerId next_worker_id = WorkerId::INVALID;
   };
 
  public:

@@ -40,6 +40,7 @@
 #ifndef CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_LAUNCH_MESSAGE_H_
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -65,6 +66,7 @@ struct LaunchApplication {
   //! The first barrier stage.
   int first_barrier_stage = -1;
   int priority_level = -1;
+  //! Placement algorithm to use.
   std::string placement_algorithm;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
@@ -203,9 +205,26 @@ struct RequestShutdownWorkerResponse {
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_SHUTDOWN_WORKER_RESPONSE,
                  RequestShutdownWorkerResponse);
 
+struct RequestWorkerStat {
+  template <typename Archive>
+  void serialize(Archive&) {  // NOLINT
+  }
+};
+REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_WORKER_STAT, RequestWorkerStat);
+struct RequestWorkerStatResponse {
+  bool succeed = false;
+  std::map<int, double> cpu_util_percentage_map;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(cpu_util_percentage_map);
+  }
+};
+REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_WORKER_STAT_RESPONSE,
+                 RequestWorkerStatResponse);
+
 //! Triggers the scheduling algorithm.
 struct TriggerScheduling {
-  int scheduling_algorithm = -1;
+  std::string scheduling_algorithm;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(scheduling_algorithm);

@@ -41,6 +41,7 @@
 #define CANARY_SRC_CONTROLLER_PLACEMENT_SCHEDULE_H_
 
 #include <string>
+#include <vector>
 
 #include "shared/canary_internal.h"
 

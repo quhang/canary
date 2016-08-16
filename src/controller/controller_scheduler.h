@@ -183,6 +183,8 @@ class ControllerScheduler : public ControllerSchedulerBase,
    */
   void ProcessMigrationInPrepared(
       const message::ControllerRespondMigrationInPrepared& respond_message);
+  void ProcessMigrationOutDone(
+      const message::ControllerRespondMigrationOutDone& respond_message);
   void ProcessMigrationInDone(
       const message::ControllerRespondMigrationInDone& respond_message);
   void ProcessPartitionDone(
@@ -233,6 +235,9 @@ class ControllerScheduler : public ControllerSchedulerBase,
   template <typename T>
   void SendCommandToPartitionInApplication(ApplicationId application_id,
                                            T* template_command);
+  //! Migrates a partition, and returns true if it succeeds.
+  bool MigratePartition(FullPartitionId full_partition_id,
+                        WorkerId to_worker_id);
 
   /*
    * Logging facility.
@@ -286,14 +291,6 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! Scheduling algorithms.
   std::map<std::string, PlacementSchedule*> placement_schedule_algorithms_;
   std::map<std::string, LoadSchedule*> load_schedule_algorithms_;
-
- protected:
-  bool MigratePartition(FullPartitionId full_partition_id,
-                        WorkerId to_worker_id) {
-    // MigrateIn=>MigrateIn prepared=>MigrateOut=>MigrateIn done=>Change
-    // partition map and everything.
-    return true;
-  }
 };
 
 }  // namespace canary
