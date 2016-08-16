@@ -48,20 +48,55 @@
 
 namespace canary {
 
+/**
+ * The base class of a placement scheduling algorithm.
+ */
 class PlacementSchedule {
  protected:
+  //! Constructor.
   explicit PlacementSchedule(SchedulingInfo* scheduling_info)
-      : scheduling_info_(scheduling_info) {}
+      : scheduling_info_(CHECK_NOTNULL(scheduling_info)) {}
+  //! Destructor.
   virtual ~PlacementSchedule() {}
 
  public:
+  //! Factory class.
   static PlacementSchedule* ConstructPlacementSchedule(
       SchedulingInfo* scheduling_info, const std::string& name = "default");
-
+  //! Interface for invoking the placement algorithm.
   virtual void PlaceApplication(ApplicationId application_id) = 0;
 
  protected:
   SchedulingInfo* scheduling_info_ = nullptr;
+};
+
+/**
+ * The default placement algorithm that places partitions evenly on workers.
+ */
+class EvenlyPlacementSchedule : public PlacementSchedule {
+ public:
+  //! Constructor.
+  explicit EvenlyPlacementSchedule(SchedulingInfo* scheduling_info)
+      : PlacementSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~EvenlyPlacementSchedule() {}
+
+ public:
+  //! Invoking the placement algorithm.
+  void PlaceApplication(ApplicationId application_id) override;
+
+ private:
+  //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
+  // manner using the number of cores as a weight.
+  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
+  //! Gets the next assigned worker id.
+  WorkerId NextAssignWorkerId();
+
+ private:
+  //! The last worker that was assigned a partition.
+  WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
+  //! How many partitions were assigned to the last worker.
+  int last_assigned_partitions_ = 0;
 };
 
 }  // namespace canary

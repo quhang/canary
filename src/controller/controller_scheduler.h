@@ -215,7 +215,7 @@ class ControllerScheduler : public ControllerSchedulerBase,
    */
   //! Checks whether the partition map is filled in correctly by the scheduling
   // algorithm.
-  bool CheckPartitionMapIntegrity(ApplicationId application_id);
+  bool CheckPartitionMapIntegrityAndMerge(ApplicationId application_id);
   //! Updates the partitions each workers own, and initializes the partition
   // record.
   void UpdateApplicationStateBasedOnPartitionMap(ApplicationId application_id);
@@ -268,6 +268,12 @@ class ControllerScheduler : public ControllerSchedulerBase,
     return partition_record_map_;
   }
 
+  /*
+   * Constructs scheduling algorithms.
+   */
+  PlacementSchedule* get_placement_schedule(const std::string& name);
+  LoadSchedule* get_load_schedule(const std::string& name);
+
  private:
   //! Logging file handler.
   FILE* log_file_ = nullptr;
@@ -280,19 +286,6 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! Scheduling algorithms.
   std::map<std::string, PlacementSchedule*> placement_schedule_algorithms_;
   std::map<std::string, LoadSchedule*> load_schedule_algorithms_;
-
- private:
-  //! Assigns partitions to workers.
-  void DecidePartitionMap(ApplicationRecord* application_record);
-  //! Returns NUM_SLOT worker id, by assigning load to workers in a round-robin
-  // manner using the number of cores as a weight.
-  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
-  //! Gets the next assigned worker id.
-  WorkerId NextAssignWorkerId();
-
- private:
-  WorkerId last_assigned_worker_id_ = WorkerId::INVALID;
-  int last_assigned_partitions_ = 0;
 
  protected:
   bool MigratePartition(FullPartitionId full_partition_id,

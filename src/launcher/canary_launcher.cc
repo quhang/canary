@@ -57,6 +57,8 @@ DEFINE_int32(launch_num_worker, -1,
              "Specify the number of worker. -1 means any.");
 DEFINE_int32(launch_first_barrier, -1, "Specify the first barrier stage.");
 DEFINE_int32(launch_priority, 100, "Specify the priority level.");
+DEFINE_string(launch_placement_algorithm, "default",
+              "Specify the placement algorithm.");
 
 // --resume_application=1
 DEFINE_int32(resume_application, -1,
@@ -95,6 +97,7 @@ int main(int argc, char** argv) {
     launch_application.fix_num_worker = FLAGS_launch_num_worker;
     launch_application.first_barrier_stage = FLAGS_launch_first_barrier;
     launch_application.priority_level = FLAGS_launch_priority;
+    launch_application.placement_algorithm = FLAGS_launch_placement_algorithm;
     auto response =
         launch_helper.LaunchAndWaitResponse<message::LaunchApplicationResponse>(
             launch_application);

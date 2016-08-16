@@ -43,6 +43,9 @@
 #include <cstdio>
 #include <vector>
 
+#include "controller/load_schedule.h"
+#include "controller/placement_schedule.h"
+
 namespace canary {
 
 void ControllerSchedulerBase::Initialize(
@@ -212,13 +215,27 @@ void ControllerScheduler::ProcessLaunchApplication(
         message::SerializeMessageWithControlHeader(response));
     return;
   }
-  auto& application_record = application_map_.at(assigned_application_id);
-  // TODO(quhang): adds interface.
+  // Gets the placement schedule.
+  auto placement_schedule =
+      get_placement_schedule(launch_message.placement_algorithm);
+  if (!placement_schedule) {
+    response.succeed = false;
+    response.error_message =
+        "The placement algorithm is not specified correctly!";
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  // Clears partition placement decisions.
+  ClearPartitionPlacement();
+  // Invokes the user-defined placement algorithm.
+  placement_schedule->PlaceApplication(assigned_application_id);
   // Fills in the partition map.
-  DecidePartitionMap(&application_record);
-  CHECK(CheckPartitionMapIntegrity(assigned_application_id))
+  CHECK(CheckPartitionMapIntegrityAndMerge(assigned_application_id))
       << "The partition map is not filled in correctly!";
   // Sends the partition map to workers.
+  auto& application_record = application_map_.at(assigned_application_id);
   send_command_interface_->AddApplication(
       assigned_application_id,
       new PerApplicationPartitionMap(application_record.per_app_partition_map));
@@ -534,7 +551,7 @@ void ControllerScheduler::CleanUpApplication(ApplicationId application_id) {
                                       &unload_partitions_command);
   // Rewinds states in the other two maps.
   for (auto& pair : worker_map_) {
-    auto owned_partitions = pair.second.owned_partitions;
+    auto& owned_partitions = pair.second.owned_partitions;
     for (auto full_partition_id : owned_partitions[application_id]) {
       partition_record_map_.erase(full_partition_id);
     }
@@ -565,28 +582,34 @@ void ControllerScheduler::CleanUpApplication(ApplicationId application_id) {
 /*
  * Launching an application based on the partition map.
  */
-bool ControllerScheduler::CheckPartitionMapIntegrity(
+bool ControllerScheduler::CheckPartitionMapIntegrityAndMerge(
     ApplicationId application_id) {
-  const auto& application_record = application_map_.at(application_id);
-  const auto& per_app_partition_map = application_record.per_app_partition_map;
+  auto& application_record = application_map_.at(application_id);
+  auto& per_app_partition_map = application_record.per_app_partition_map;
   const auto& variable_group_info_map =
       *application_record.variable_group_info_map;
-  if (per_app_partition_map.QueryNumVariableGroup() !=
-      static_cast<int>(variable_group_info_map.size())) {
-    return false;
-  }
+  per_app_partition_map.SetNumVariableGroup(variable_group_info_map.size());
   for (const auto& pair : variable_group_info_map) {
-    if (per_app_partition_map.QueryPartitioning(pair.first) !=
-        static_cast<int>(pair.second.parallelism)) {
+    per_app_partition_map.SetPartitioning(pair.first, pair.second.parallelism);
+  }
+  for (const auto& pair : RetrievePartitionPlacement()) {
+    auto full_partition_id = pair.first;
+    auto variable_group_id = full_partition_id.variable_group_id;
+    auto partition_id = full_partition_id.partition_id;
+    if (application_id != full_partition_id.application_id) {
       return false;
     }
-    for (int index = 0; index < pair.second.parallelism; ++index) {
-      auto worker_id = per_app_partition_map.QueryWorkerId(
-          pair.first, static_cast<PartitionId>(index));
-      if (worker_map_.find(worker_id) == worker_map_.end()) {
-        return false;
-      }
+    if (variable_group_id < VariableGroupId::FIRST ||
+        variable_group_id >= VariableGroupId(variable_group_info_map.size())) {
+      return false;
     }
+    if (partition_id < PartitionId::FIRST ||
+        partition_id >= PartitionId(
+            variable_group_info_map.at(variable_group_id).parallelism)) {
+      return false;
+    }
+    per_app_partition_map.SetWorkerId(variable_group_id, partition_id,
+                                      pair.second);
   }
   return true;
 }
@@ -743,66 +766,29 @@ void ControllerScheduler::FlushLoggingFile() {
   }
 }
 
-void ControllerScheduler::DecidePartitionMap(
-    ApplicationRecord* application_record) {
-  auto& per_app_partition_map = application_record->per_app_partition_map;
-  const auto& variable_group_info_map =
-      *application_record->variable_group_info_map;
-  per_app_partition_map.SetNumVariableGroup(variable_group_info_map.size());
-  for (const auto& pair : variable_group_info_map) {
-    per_app_partition_map.SetPartitioning(pair.first, pair.second.parallelism);
-    // Birdshot randomized placement.
-    // Assigns partitions to workers randomly, and the number of assigned
-    // partitions is based on the number of worker cores.
-    std::vector<WorkerId> worker_id_list;
-    GetWorkerAssignment(pair.second.parallelism, &worker_id_list);
-    std::random_shuffle(worker_id_list.begin(), worker_id_list.end());
-    auto iter = worker_id_list.begin();
-    for (int index = 0; index < pair.second.parallelism; ++index) {
-      per_app_partition_map.SetWorkerId(
-          pair.first, static_cast<PartitionId>(index), *(iter++));
+PlacementSchedule* ControllerScheduler::get_placement_schedule(
+    const std::string& name) {
+  if (placement_schedule_algorithms_.find(name) ==
+      placement_schedule_algorithms_.end()) {
+    PlacementSchedule* result =
+        PlacementSchedule::ConstructPlacementSchedule(this, name);
+    if (result) {
+      placement_schedule_algorithms_[name] = result;
     }
+    return result;
   }
+  return placement_schedule_algorithms_.at(name);
 }
 
-void ControllerScheduler::GetWorkerAssignment(
-    int num_slot, std::vector<WorkerId>* assignment) {
-  assignment->clear();
-  assignment->resize(num_slot);
-  for (auto& worker_id : *assignment) {
-    auto iter = worker_map_.find(last_assigned_worker_id_);
-    if (iter == worker_map_.end()) {
-      // Assigns a partition to the next worker.
-      worker_id = NextAssignWorkerId();
-      last_assigned_partitions_ = 1;
-      continue;
+LoadSchedule* ControllerScheduler::get_load_schedule(const std::string& name) {
+  if (load_schedule_algorithms_.find(name) == load_schedule_algorithms_.end()) {
+    LoadSchedule* result = LoadSchedule::ConstructLoadSchedule(this, name);
+    if (result) {
+      load_schedule_algorithms_[name] = result;
     }
-    if (iter->second.num_cores == -1) {
-      LOG(WARNING) << "The number of cores for a worker is unknown!";
-      CHECK_EQ(last_assigned_partitions_, 1);
-      worker_id = NextAssignWorkerId();
-      last_assigned_partitions_ = 1;
-    } else {
-      if (last_assigned_partitions_ < iter->second.num_cores) {
-        worker_id = last_assigned_worker_id_;
-        ++last_assigned_partitions_;
-      } else {
-        worker_id = NextAssignWorkerId();
-        last_assigned_partitions_ = 1;
-      }
-    }
+    return result;
   }
-}
-
-WorkerId ControllerScheduler::NextAssignWorkerId() {
-  CHECK(!worker_map_.empty());
-  auto iter = worker_map_.upper_bound(last_assigned_worker_id_);
-  if (iter == worker_map_.end()) {
-    last_assigned_worker_id_ = worker_map_.begin()->first;
-  } else {
-    last_assigned_worker_id_ = iter->first;
-  }
-  return last_assigned_worker_id_;
+  return load_schedule_algorithms_.at(name);
 }
 
 }  // namespace canary

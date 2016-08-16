@@ -39,4 +39,79 @@
 
 #include "controller/placement_schedule.h"
 
-namespace canary {}  // namespace canary
+#include <algorithm>
+
+namespace canary {
+
+PlacementSchedule* PlacementSchedule::ConstructPlacementSchedule(
+    SchedulingInfo* scheduling_info, const std::string& name) {
+  CHECK_EQ(name, "default") << "Placement algorithm is not implemented!";
+  return new EvenlyPlacementSchedule(scheduling_info);
+}
+
+void EvenlyPlacementSchedule::PlaceApplication(ApplicationId application_id) {
+  const auto& application_record =
+      scheduling_info_->get_application_map().at(application_id);
+  const auto& variable_group_info_map =
+      *application_record.variable_group_info_map;
+  for (const auto& pair : variable_group_info_map) {
+    // Birdshot randomized placement.
+    // Assigns partitions to workers randomly, and the number of assigned
+    // partitions is based on the number of worker cores.
+    std::vector<WorkerId> worker_id_list;
+    GetWorkerAssignment(pair.second.parallelism, &worker_id_list);
+    std::random_shuffle(worker_id_list.begin(), worker_id_list.end());
+    auto iter = worker_id_list.begin();
+    for (int index = 0; index < pair.second.parallelism; ++index) {
+      scheduling_info_->DecidePartitionPlacement(
+          FullPartitionId{application_id, pair.first,
+                          static_cast<PartitionId>(index)},
+          *(iter++));
+    }
+  }
+}
+
+void EvenlyPlacementSchedule::GetWorkerAssignment(
+    int num_slot, std::vector<WorkerId>* assignment) {
+  assignment->clear();
+  assignment->resize(num_slot);
+  const auto& worker_map = scheduling_info_->get_worker_map();
+  for (auto& worker_id : *assignment) {
+    auto iter = worker_map.find(last_assigned_worker_id_);
+    if (iter == worker_map.end()) {
+      // Assigns a partition to the next worker.
+      worker_id = NextAssignWorkerId();
+      last_assigned_partitions_ = 1;
+      continue;
+    }
+    // TODO(quhang): unclear.
+    if (iter->second.num_cores == -1) {
+      LOG(WARNING) << "The number of cores for a worker is unknown!";
+      CHECK_EQ(last_assigned_partitions_, 1);
+      worker_id = NextAssignWorkerId();
+      last_assigned_partitions_ = 1;
+    } else {
+      if (last_assigned_partitions_ < iter->second.num_cores) {
+        worker_id = last_assigned_worker_id_;
+        ++last_assigned_partitions_;
+      } else {
+        worker_id = NextAssignWorkerId();
+        last_assigned_partitions_ = 1;
+      }
+    }
+  }
+}
+
+WorkerId EvenlyPlacementSchedule::NextAssignWorkerId() {
+  const auto& worker_map = scheduling_info_->get_worker_map();
+  CHECK(!worker_map.empty());
+  auto iter = worker_map.upper_bound(last_assigned_worker_id_);
+  if (iter == worker_map.end()) {
+    last_assigned_worker_id_ = worker_map.begin()->first;
+  } else {
+    last_assigned_worker_id_ = iter->first;
+  }
+  return last_assigned_worker_id_;
+}
+
+}  // namespace canary

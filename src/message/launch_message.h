@@ -65,10 +65,12 @@ struct LaunchApplication {
   //! The first barrier stage.
   int first_barrier_stage = -1;
   int priority_level = -1;
+  std::string placement_algorithm;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(binary_location, application_parameter);
     archive(fix_num_worker, first_barrier_stage, priority_level);
+    archive(placement_algorithm);
   }
 };
 REGISTER_MESSAGE(LAUNCH_COMMAND, LAUNCH_APPLICATION, LaunchApplication);

@@ -56,7 +56,9 @@ class LoadSchedule {
 
  public:
   static LoadSchedule* ConstructLoadSchedule(
-      SchedulingInfo* scheduling_info, const std::string& name = "default");
+      SchedulingInfo* scheduling_info, const std::string& name = "default") {
+    return nullptr;
+  }
 
   virtual void BalanceLoad() = 0;
 
