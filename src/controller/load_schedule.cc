@@ -39,4 +39,58 @@
 
 #include "controller/load_schedule.h"
 
-namespace canary {}  // namespace canary
+#include <iterator>
+
+namespace canary {
+
+LoadSchedule* LoadSchedule::ConstructLoadSchedule(
+    SchedulingInfo* scheduling_info, const std::string& name) {
+  if (name == "default") {
+    return new TestLoadSchedule(scheduling_info);
+  }
+  if (name == "test") {
+    return new TestLoadSchedule(scheduling_info);
+  }
+  if (name == "balance") {
+    return new BalancedPartitionNumberLoadSchedule(scheduling_info);
+  }
+  if (name == "straggler") {
+    return new StragglerMitigationLoadSchedule(scheduling_info);
+  }
+  return nullptr;
+}
+
+void TestLoadSchedule::BalanceLoad() {
+  const auto& worker_map = scheduling_info_->get_worker_map();
+  if (worker_map.size() < 2u) {
+    return;
+  }
+  const auto first_iter = worker_map.cbegin();
+  if (first_iter->second.owned_partitions.empty()) {
+    return;
+  }
+  const auto first_full_partition_id =
+      *first_iter->second.owned_partitions.cbegin()->second.cbegin();
+  const auto second_iter = std::next(first_iter);
+  if (second_iter->second.owned_partitions.empty()) {
+    return;
+  }
+  const auto second_full_partition_id =
+      *second_iter->second.owned_partitions.cbegin()->second.cbegin();
+  LOG(INFO) << "Swapping between worker(" << get_value(first_iter->first)
+            << ") and worker(" << get_value(second_iter->first) << ").";
+  LOG(INFO) << "Swapping Partition("
+            << get_value(first_full_partition_id.application_id) << "/"
+            << get_value(first_full_partition_id.variable_group_id) << "/"
+            << get_value(first_full_partition_id.partition_id)
+            << ") and Partition("
+            << get_value(second_full_partition_id.application_id) << "/"
+            << get_value(second_full_partition_id.variable_group_id) << "/"
+            << get_value(second_full_partition_id.partition_id) << ").";
+  scheduling_info_->DecidePartitionPlacement(first_full_partition_id,
+                                             second_iter->first);
+  scheduling_info_->DecidePartitionPlacement(second_full_partition_id,
+                                             first_iter->first);
+}
+
+}  // namespace canary

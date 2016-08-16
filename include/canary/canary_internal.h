@@ -391,6 +391,13 @@ struct FullPartitionId {
   ApplicationId application_id;
   VariableGroupId variable_group_id;
   PartitionId partition_id;
+  std::string GetString() const {
+    std::stringstream ss;
+    ss << get_value(application_id) << "/" <<
+        get_value(variable_group_id) << "/" <<
+        get_value(partition_id);
+    return ss.str();
+  }
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(application_id, variable_group_id, partition_id);

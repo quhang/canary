@@ -74,6 +74,13 @@ DEFINE_int32(control_priority, 100, "Specify the priority level.");
 DEFINE_int32(report_application, -1,
              "Report the running stats of an application.");
 
+// --trigger_scheduling=default
+DEFINE_string(trigger_scheduling, "", "Triggers the scheduling algorithm.");
+
+DEFINE_int32(shutdown_worker, -1, "Shuts down a specified number of worker.");
+DEFINE_int32(shutdown_worker_start_id, -1,
+             "The id from which workers are shutdown.");
+
 int main(int argc, char** argv) {
   using namespace canary;  // NOLINT
   InitializeCanaryWorker(&argc, &argv);
@@ -150,6 +157,35 @@ int main(int argc, char** argv) {
           response.application_id, response.cycles);
     } else {
       printf("Reporting application's running stats failed!\n%s\n",
+             response.error_message.c_str());
+    }
+  } else if (!FLAGS_trigger_scheduling.empty()) {
+    message::TriggerScheduling trigger_scheduling;
+    trigger_scheduling.scheduling_algorithm = FLAGS_trigger_scheduling;
+    auto response =
+        launch_helper.LaunchAndWaitResponse<message::TriggerSchedulingResponse>(
+            trigger_scheduling);
+    if (response.succeed) {
+      printf("A scheduling loop was run.\n");
+    } else {
+      printf("Failed to run the scheduling loop!\n%s\n",
+             response.error_message.c_str());
+    }
+  } else if (FLAGS_shutdown_worker != -1) {
+    message::RequestShutdownWorker shutdown_worker;
+    for (int worker_id = FLAGS_shutdown_worker_start_id;
+         worker_id < FLAGS_shutdown_worker_start_id + FLAGS_shutdown_worker;
+         ++worker_id) {
+      shutdown_worker.shutdown_worker_id_set.insert(worker_id);
+    }
+    auto response =
+        launch_helper
+            .LaunchAndWaitResponse<message::RequestShutdownWorkerResponse>(
+                shutdown_worker);
+    if (response.succeed) {
+      printf("Workers are shut down correctly.\n");
+    } else {
+      printf("Worker shutting donw failed!\n%s\n",
              response.error_message.c_str());
     }
   }

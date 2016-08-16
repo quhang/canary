@@ -472,6 +472,8 @@ void ControllerScheduler::ProcessMigrationInPrepared(
   auto full_partition_id = FullPartitionId{respond_message.application_id,
                                            respond_message.variable_group_id,
                                            respond_message.partition_id};
+  VLOG(1) << "Migrating partition(" << full_partition_id.GetString()
+          << ") is prepared.";
   auto& partition_record = GetPartitionRecord(full_partition_id);
   CHECK(partition_record.partition_state ==
         PartitionRecord::PartitionState::MIGRATE_INITIATED);
@@ -502,6 +504,8 @@ void ControllerScheduler::ProcessMigrationInDone(
   const auto full_partition_id = FullPartitionId{
       respond_message.application_id, respond_message.variable_group_id,
       respond_message.partition_id};
+  VLOG(1) << "Migrating partition(" << full_partition_id.GetString()
+          << ") is done.";
   auto& partition_record = GetPartitionRecord(full_partition_id);
   const auto src_worker_id = partition_record.owned_worker_id;
   const auto dst_worker_id = partition_record.next_worker_id;
@@ -896,6 +900,8 @@ void ControllerScheduler::SendCommandToPartitionInApplication(
 
 bool ControllerScheduler::MigratePartition(
     const FullPartitionId& full_partition_id, WorkerId to_worker_id) {
+  VLOG(1) << "Migrating partition(" << full_partition_id.GetString()
+          << ") to worker(" << get_value(to_worker_id) << ").";
   if (worker_map_.find(to_worker_id) == worker_map_.end()) {
     return false;
   }

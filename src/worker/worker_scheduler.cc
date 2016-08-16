@@ -87,7 +87,7 @@ void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
         message::MessageCategoryGroup::APPLICATION_DATA_DIRECT);
   CHECK(header->category == message::MessageCategory::DIRECT_DATA_MIGRATE);
   message::DirectDataMigrate direct_data_migrate;
-  message::RemoveControlHeader(buffer);
+  message::RemoveDataHeader(buffer);
   message::DeserializeMessage(buffer, &direct_data_migrate);
   FullPartitionId full_partition_id{direct_data_migrate.application_id,
                                     direct_data_migrate.variable_group_id,
@@ -226,7 +226,7 @@ void WorkerSchedulerBase::ProcessMigrateInPartitions(
   for (const auto& pair : worker_command.partition_list) {
     FullPartitionId full_partition_id{application_id, pair.first, pair.second};
     ConstructThreadContext(full_partition_id);
-    message::ControllerRespondMigrationInDone response;
+    message::ControllerRespondMigrationInPrepared response;
     response.from_worker_id = self_worker_id_;
     response.application_id = full_partition_id.application_id;
     response.variable_group_id = full_partition_id.variable_group_id;

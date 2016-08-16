@@ -56,14 +56,33 @@ class LoadSchedule {
 
  public:
   static LoadSchedule* ConstructLoadSchedule(
-      SchedulingInfo* scheduling_info, const std::string& name = "default") {
-    return nullptr;
-  }
+      SchedulingInfo* scheduling_info, const std::string& name = "default");
 
   virtual void BalanceLoad() = 0;
 
  protected:
   SchedulingInfo* scheduling_info_ = nullptr;
+};
+
+class TestLoadSchedule : public LoadSchedule {
+ public:
+  explicit TestLoadSchedule(SchedulingInfo* scheduling_info)
+      : LoadSchedule(scheduling_info) {}
+  void BalanceLoad() override;
+};
+
+class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
+ public:
+  explicit BalancedPartitionNumberLoadSchedule(SchedulingInfo* scheduling_info)
+      : LoadSchedule(scheduling_info) {}
+  void BalanceLoad() override {}
+};
+
+class StragglerMitigationLoadSchedule : public LoadSchedule {
+ public:
+  explicit StragglerMitigationLoadSchedule(SchedulingInfo* scheduling_info)
+      : LoadSchedule(scheduling_info) {}
+  void BalanceLoad() override {}
 };
 
 }  // namespace canary

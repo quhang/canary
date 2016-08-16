@@ -389,9 +389,14 @@ void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
     CanaryOutputArchive archive(direct_data_migrate.raw_buffer.buffer);
     archive(*this);
   }
-  get_send_data_interface()->SendDataToWorker(
-      struct_message.to_worker_id,
-      message::SerializeMessageWithControlHeader(direct_data_migrate));
+  struct evbuffer* buffer = SerializeMessage(direct_data_migrate);
+  // The length before adding the header.
+  const auto length = evbuffer_get_length(buffer);
+  auto header = message::AddHeader<message::DataHeader>(buffer);
+  header->length = length;
+  header->FillInMessageType(direct_data_migrate);
+  get_send_data_interface()->SendDataToWorker(struct_message.to_worker_id,
+                                              buffer);
   // Kills the context.
   partition_state_ = PartitionState::MIGRATED;
   get_worker_scheduler()->KillThreadContext(this);
