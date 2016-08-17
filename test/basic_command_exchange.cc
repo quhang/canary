@@ -166,6 +166,7 @@ TEST(basic, basic_command_exchange) {
                           FLAGS_controller_host, FLAGS_controller_service,
                           std::to_string(std::stoi(FLAGS_worker_service) + i));
       event_main_thread->Run();
+      manager->Finalize();
       LOG(INFO) << "Exit worker thread " << i;
     });
   }

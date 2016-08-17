@@ -61,6 +61,8 @@ int main(int argc, char** argv) {
 
   // The main thread runs both the manager and the scheduler.
   event_main_thread.Run();
+  LOG(WARNING) << "The core loop exits.";
+  manager.Finalize();
 
   return 0;
 }

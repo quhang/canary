@@ -456,8 +456,16 @@ void ControllerScheduler::ProcessTriggerScheduling(
   load_schedule->BalanceLoad();
   // Migrates partitions.
   for (const auto& pair : RetrievePartitionPlacement()) {
-    CHECK(MigratePartition(pair.first, pair.second))
-        << "The load balancing algorithm is wrong!";
+    if (!MigratePartition(pair.first, pair.second)) {
+      LOG(ERROR) << "The load balancing algorithm cannot run, please retry!";
+      response.succeed = false;
+      response.error_message =
+          "The load balancing algorithm cannot run, please retry!";
+      launch_send_command_interface_->SendLaunchResponseCommand(
+          launch_command_id,
+          message::SerializeMessageWithControlHeader(response));
+      return;
+    }
   }
   response.succeed = true;
   launch_send_command_interface_->SendLaunchResponseCommand(
@@ -522,7 +530,7 @@ void ControllerScheduler::ProcessMigrationInDone(
   if (--application_record.migrating_partition == 0) {
     LogPartitionPlacement();
     LOG(INFO) << "Application(id=" << get_value(application_id)
-              << " finishes migration.";
+              << ") finishes migration.";
   }
   // Updates the worker records.
   auto& src_worker_record = GetWorkerRecord(src_worker_id);

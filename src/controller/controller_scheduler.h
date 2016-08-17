@@ -111,6 +111,7 @@ class ControllerSchedulerBase : public ControllerReceiveCommandInterface,
   LaunchSendCommandInterface* launch_send_command_interface_ = nullptr;
 };
 
+// Forward declaration.
 class LoadSchedule;
 class PlacementSchedule;
 

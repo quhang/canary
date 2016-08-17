@@ -69,7 +69,10 @@ void WorkerDataRouter::Initialize(WorkerId worker_id,
 }
 
 void WorkerDataRouter::Finalize() {
-  evconnlistener_free(listening_event_);
+  if (listening_event_) {
+    evconnlistener_free(listening_event_);
+    listening_event_ = nullptr;
+  }
   for (auto& pair : worker_id_to_status_) {
     auto peer_record = &pair.second;
     if (peer_record->read_event) {
@@ -495,7 +498,10 @@ void WorkerDataRouter::UpdateAddedWorker(message::UpdateAddedWorker* message) {
 void WorkerDataRouter::ShutDownWorker(message::ShutDownWorker* message) {
   CHECK(is_initialized_);
   delete message;
-  Finalize();
+  if (listening_event_) {
+    evconnlistener_free(listening_event_);
+    listening_event_ = nullptr;
+  }
 }
 
 /*

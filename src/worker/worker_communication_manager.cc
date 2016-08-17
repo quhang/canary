@@ -63,17 +63,23 @@ void WorkerCommunicationManager::Initialize(
 }
 
 void WorkerCommunicationManager::Finalize() {
+  CHECK(event_base_got_exit(event_base_))
+      << "Cannot finalize a communication manager "
+      << "while the core loop is running!";
   if (controller_record.read_event) {
     event_free(controller_record.read_event);
+    controller_record.read_event = nullptr;
   }
   if (controller_record.write_event) {
     event_free(controller_record.write_event);
+    controller_record.write_event = nullptr;
   }
-  if (controller_record.socket_fd >= -1) {
+  if (controller_record.socket_fd >= 0) {
     network::close_socket(controller_record.socket_fd);
+    controller_record.socket_fd = -1;
   }
   controller_record.is_shutdown = true;
-  CHECK_EQ(event_base_loopbreak(event_base_), 0);
+  data_router_.Finalize();
 }
 
 /*
@@ -278,7 +284,13 @@ void WorkerCommunicationManager::ProcessShutDownWorkerMessage(
   VLOG(1) << "Worker shutdown is requested. (id="
           << get_value(controller_record.assigned_worker_id) << ")";
   data_router_.ShutDownWorker(message);
-  Finalize();
+  LOG(WARNING) << "Worker (id="
+               << get_value(controller_record.assigned_worker_id)
+               << ") is shutting down in 5 seconds.";
+  struct timeval five_sec;
+  five_sec.tv_sec = 5;
+  five_sec.tv_usec = 0;
+  event_base_loopexit(event_main_thread_->get_event_base(), &five_sec);
 }
 
 /*

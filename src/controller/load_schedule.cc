@@ -46,7 +46,7 @@ namespace canary {
 LoadSchedule* LoadSchedule::ConstructLoadSchedule(
     SchedulingInfo* scheduling_info, const std::string& name) {
   if (name == "default") {
-    return new TestLoadSchedule(scheduling_info);
+    return new BalancedPartitionNumberLoadSchedule(scheduling_info);
   }
   if (name == "test") {
     return new TestLoadSchedule(scheduling_info);
@@ -91,6 +91,90 @@ void TestLoadSchedule::BalanceLoad() {
                                              second_iter->first);
   scheduling_info_->DecidePartitionPlacement(second_full_partition_id,
                                              first_iter->first);
+}
+
+void BalancedPartitionNumberLoadSchedule::BalanceLoad() {
+  GrabWorkerInfo();
+  if (total_cores_ == 0) {
+    return;
+  }
+  CalculateExpectedNumPartitions();
+  IssuePartitionPlacementDecision();
+}
+
+void BalancedPartitionNumberLoadSchedule::GrabWorkerInfo() {
+  worker_info_.clear();
+  total_cores_ = 0;
+  total_partitions_ = 0;
+  for (const auto& pair : scheduling_info_->get_worker_map()) {
+    auto& worker_info_record = worker_info_[pair.first];
+    worker_info_record.worker_id = pair.first;
+    for (const auto& internal_pair : pair.second.owned_partitions) {
+      const auto& partition_set = internal_pair.second;
+      worker_info_record.owned_partitions.insert(partition_set.begin(),
+                                                 partition_set.end());
+      total_partitions_ += partition_set.size();
+    }
+    if (pair.second.worker_state ==
+        SchedulingInfo::WorkerRecord::WorkerState::RUNNING) {
+      worker_info_record.num_cores = pair.second.num_cores;
+      total_cores_ += pair.second.num_cores;
+    } else {
+      worker_info_record.num_cores = 0;
+    }
+  }
+}
+
+void BalancedPartitionNumberLoadSchedule::CalculateExpectedNumPartitions() {
+  const int num_partitions_per_core = total_partitions_ / total_cores_;
+  int num_remain_partitions = total_partitions_ % total_cores_;
+  for (auto& pair : worker_info_) {
+    auto& worker_info_record = pair.second;
+    if (worker_info_record.num_cores == 0) {
+      worker_info_record.expected_num_partitions = 0;
+    } else {
+      worker_info_record.expected_num_partitions =
+          worker_info_record.num_cores * num_partitions_per_core;
+    }
+  }
+  while (num_remain_partitions != 0) {
+    for (auto& pair : worker_info_) {
+      auto& worker_info_record = pair.second;
+      if (worker_info_record.num_cores != 0) {
+        ++worker_info_record.expected_num_partitions;
+        if (--num_remain_partitions == 0) {
+          break;
+        }
+      }
+    }
+  }
+}
+
+void BalancedPartitionNumberLoadSchedule::IssuePartitionPlacementDecision() {
+  for (auto& pair : worker_info_) {
+    auto& worker_info_record = pair.second;
+    while (static_cast<int>(worker_info_record.owned_partitions.size()) >
+           worker_info_record.expected_num_partitions) {
+      OffloadPartition(&worker_info_record);
+    }
+  }
+}
+
+bool BalancedPartitionNumberLoadSchedule::OffloadPartition(
+    WorkerInfoRecord* worker_info_record) {
+  for (auto& pair : worker_info_) {
+    auto& candidate_record = pair.second;
+    if (static_cast<int>(candidate_record.owned_partitions.size()) <
+        candidate_record.expected_num_partitions) {
+      auto iter = worker_info_record->owned_partitions.begin();
+      scheduling_info_->DecidePartitionPlacement(*iter,
+                                                 candidate_record.worker_id);
+      candidate_record.owned_partitions.insert(*iter);
+      worker_info_record->owned_partitions.erase(iter);
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace canary

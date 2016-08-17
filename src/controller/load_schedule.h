@@ -40,6 +40,8 @@
 #ifndef CANARY_SRC_CONTROLLER_LOAD_SCHEDULE_H_
 #define CANARY_SRC_CONTROLLER_LOAD_SCHEDULE_H_
 
+#include <map>
+#include <set>
 #include <string>
 
 #include "shared/canary_internal.h"
@@ -48,22 +50,32 @@
 
 namespace canary {
 
+/**
+ * A load schedule algorithm migrates partitions between workers for the best
+ * performance or resource requirement.
+ */
 class LoadSchedule {
  protected:
+  //! Constructor.
   explicit LoadSchedule(SchedulingInfo* scheduling_info)
       : scheduling_info_(scheduling_info) {}
+  //! Destructor.
   virtual ~LoadSchedule() {}
 
  public:
+  //! Factory method.
   static LoadSchedule* ConstructLoadSchedule(
       SchedulingInfo* scheduling_info, const std::string& name = "default");
-
+  //! Invokes the load balancing algorithm.
   virtual void BalanceLoad() = 0;
 
  protected:
   SchedulingInfo* scheduling_info_ = nullptr;
 };
 
+/**
+ * A test load balancing algorithm, which swaps two partitions.
+ */
 class TestLoadSchedule : public LoadSchedule {
  public:
   explicit TestLoadSchedule(SchedulingInfo* scheduling_info)
@@ -71,11 +83,32 @@ class TestLoadSchedule : public LoadSchedule {
   void BalanceLoad() override;
 };
 
+/**
+ * A simple load balancing algorithm, which balances the number of partitions
+ * across workers.
+ */
 class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
  public:
   explicit BalancedPartitionNumberLoadSchedule(SchedulingInfo* scheduling_info)
       : LoadSchedule(scheduling_info) {}
-  void BalanceLoad() override {}
+  void BalanceLoad() override;
+
+ private:
+  struct WorkerInfoRecord {
+    WorkerId worker_id = WorkerId::INVALID;
+    std::set<FullPartitionId> owned_partitions;
+    int num_cores = 0;
+    int expected_num_partitions = 0;
+  };
+
+  void GrabWorkerInfo();
+  void CalculateExpectedNumPartitions();
+  void IssuePartitionPlacementDecision();
+  bool OffloadPartition(WorkerInfoRecord* worker_info_record);
+
+  std::map<WorkerId, WorkerInfoRecord> worker_info_;
+  int total_cores_ = 0;
+  int total_partitions_ = 0;
 };
 
 class StragglerMitigationLoadSchedule : public LoadSchedule {
