@@ -154,6 +154,10 @@ class ControllerScheduler : public ControllerSchedulerBase,
   void ProcessLaunchApplication(
       LaunchCommandId launch_command_id,
       const message::LaunchApplication& launch_message);
+  // Checks pausing application message.
+  bool CheckPauseApplicationMessage(
+      const message::PauseApplication& pause_message,
+      message::PauseApplicationResponse* response);
   //! Pauses an application.
   void ProcessPauseApplication(LaunchCommandId launch_command_id,
                                const message::PauseApplication& pause_message);
@@ -218,6 +222,9 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! A worker responds its status.
   void ProcessStatusOfWorker(
       const message::ControllerRespondStatusOfWorker& respond_message);
+  // A worker responds that it is paused.
+  void ProcessRespondPauseExecution(
+      const message::ControllerRespondPauseExecution& respond_message);
   //! A worker responds that a barrier has been reached.
   void ProcessReachBarrier(
       const message::ControllerRespondReachBarrier& respond_message);

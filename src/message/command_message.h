@@ -219,7 +219,7 @@ struct WorkerInstallBarrier {
   StageId barrier_stage;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, partition_list);
+    archive(application_id, partition_list, barrier_stage);
   }
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_INSTALL_BARRIER, WorkerInstallBarrier);

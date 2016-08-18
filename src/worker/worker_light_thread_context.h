@@ -85,6 +85,13 @@ struct MigrateOutCommand {
     archive(to_worker_id);
   }
 };
+struct InstallBarrierCommand {
+  StageId barrier_stage_id;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(barrier_stage_id);
+  }
+};
 
 template <typename CommandType>
 struct evbuffer* to_buffer(const CommandType& command) {
@@ -234,6 +241,10 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void ProcessMigrateIn(struct evbuffer* command);
   //! Processes a migrate out command.
   void ProcessMigrateOut(struct evbuffer* command);
+  //! Processes a command that pauses execution.
+  void ProcessPauseExecution();
+  //! Processes a command that installs a barrier.
+  void ProcessInstallBarrier(struct evbuffer* command);
   //! Processes a command that releases a buffer.
   void ProcessReleaseBarrier();
 

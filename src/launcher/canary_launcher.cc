@@ -64,6 +64,9 @@ DEFINE_string(launch_placement_algorithm, "default",
 DEFINE_int32(resume_application, -1,
              "Resume an application given its application id.");
 
+DEFINE_int32(pause_application, -1,
+             "Pause an application given its application id.");
+
 // --control_application=1 --control_priority=99
 DEFINE_int32(control_application, -1,
              "Control an application's priority given its application id.");
@@ -117,6 +120,19 @@ int main(int argc, char** argv) {
       printf("Launching application failed!\n%s\n",
              response.error_message.c_str());
     }
+  } else if (FLAGS_pause_application != -1) {
+    message::PauseApplication pause_application;
+    pause_application.application_id = FLAGS_pause_application;
+    auto response =
+        launch_helper.LaunchAndWaitResponse<message::PauseApplicationResponse>(
+            pause_application);
+    if (response.succeed) {
+      printf("Pausing application (id=%d) succeeded.\n",
+             response.application_id);
+    } else {
+      printf("Pausing application failed!\n%s\n",
+             response.error_message.c_str());
+    }
   } else if (FLAGS_resume_application != -1) {
     message::ResumeApplication resume_application;
     resume_application.application_id = FLAGS_resume_application;
@@ -155,8 +171,9 @@ int main(int argc, char** argv) {
     if (response.succeed) {
       printf(
           "Reporting application's running stat (id=%d): "
-          "used %.3f cycles.\n",
-          response.application_id, response.cycles);
+          "used %.3f cycles at stage %d.\n",
+          response.application_id, response.cycles,
+          response.furthest_complete_stage_id);
     } else {
       printf("Reporting application's running stats failed!\n%s\n",
              response.error_message.c_str());

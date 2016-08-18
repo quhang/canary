@@ -175,9 +175,12 @@ struct RequestApplicationStatResponse {
   std::string error_message;
   //! The total of cycles used in seconds.
   double cycles = 0;
+  //! The id of the furthest complete stage id.
+  int furthest_complete_stage_id = 0;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
-    archive(application_id, succeed, error_message, cycles);
+    archive(application_id, succeed, error_message, cycles,
+            furthest_complete_stage_id);
   }
 };
 REGISTER_MESSAGE(LAUNCH_RESPONSE_COMMAND, REQUEST_APPLICATION_STAT_RESPONSE,

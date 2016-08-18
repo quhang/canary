@@ -151,6 +151,9 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                     ProcessStatusOfPartition);
     // A worker responds its status.
     PROCESS_MESSAGE(CONTROLLER_RESPOND_STATUS_OF_WORKER, ProcessStatusOfWorker);
+    // A worker responds that it is paused.
+    PROCESS_MESSAGE(CONTROLLER_RESPOND_PAUSE_EXECUTION,
+                    ProcessRespondPauseExecution);
     // A worker responds that a barrier has been reached.
     PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
     default:
@@ -264,11 +267,56 @@ void ControllerScheduler::ProcessLaunchApplication(
             << " (" << launch_message.binary_location.c_str() << ").";
 }
 
+bool ControllerScheduler::CheckPauseApplicationMessage(
+    const message::PauseApplication& pause_message,
+    message::PauseApplicationResponse* response) {
+  if (!CheckValidApplicationId(pause_message, response)) {
+    return response->succeed;
+  }
+  const auto application_id =
+      static_cast<ApplicationId>(pause_message.application_id);
+  auto& application_record = GetApplicationRecord(application_id);
+  if (application_record.application_state !=
+      ApplicationRecord::ApplicationState::RUNNING) {
+    response->succeed = false;
+    response->error_message =
+        "The application cannot be paused because it is not running!";
+    return response->succeed;
+  }
+  if (application_record.next_barrier_stage != StageId::INVALID) {
+    response->succeed = false;
+    response->error_message =
+        "The application cannot be paused "
+        "because it has been set up a barrier!";
+    return response->succeed;
+  }
+  response->succeed = true;
+  return response->succeed;
+}
+
 void ControllerScheduler::ProcessPauseApplication(
     LaunchCommandId launch_command_id,
     const message::PauseApplication& pause_message) {
-  // TODO(quhang): not implemented.
-  // First pause, then wait for installing barrier.
+  message::PauseApplicationResponse response;
+  if (!CheckPauseApplicationMessage(pause_message, &response)) {
+    launch_send_command_interface_->SendLaunchResponseCommand(
+        launch_command_id,
+        message::SerializeMessageWithControlHeader(response));
+    return;
+  }
+  const auto application_id =
+      static_cast<ApplicationId>(pause_message.application_id);
+  auto& application_record = GetApplicationRecord(application_id);
+  CHECK(application_record.application_state ==
+        ApplicationRecord::ApplicationState::RUNNING);
+  application_record.application_state =
+      ApplicationRecord::ApplicationState::PAUSING;
+  message::WorkerPauseExecution pause_execution_command;
+  SendCommandToPartitionInApplication(application_id, &pause_execution_command);
+  response.succeed = true;
+  response.application_id = pause_message.application_id;
+  launch_send_command_interface_->SendLaunchResponseCommand(
+      launch_command_id, message::SerializeMessageWithControlHeader(response));
 }
 
 bool ControllerScheduler::CheckResumeApplicationMessage(
@@ -626,6 +674,35 @@ void ControllerScheduler::ProcessStatusOfWorker(
   }
 }
 
+void ControllerScheduler::ProcessRespondPauseExecution(
+    const message::ControllerRespondPauseExecution& respond_message) {
+  UpdateRunningStats(
+      respond_message.from_worker_id, respond_message.application_id,
+      respond_message.variable_group_id, respond_message.partition_id,
+      respond_message.running_stats);
+  auto& application_record =
+      GetApplicationRecord(respond_message.application_id);
+  if (++application_record.paused_partition ==
+      application_record.total_partition) {
+    // Update application state if every partition is paused.
+    application_record.paused_partition = 0;
+    CHECK(application_record.application_state ==
+          ApplicationRecord::ApplicationState::PAUSING);
+    application_record.application_state =
+        ApplicationRecord::ApplicationState::RUNNING;
+    application_record.next_barrier_stage =
+        application_record.furthest_complete_stage_id;
+    LOG(INFO) << "Application #" << get_value(respond_message.application_id)
+              << " is set up a barrier at stage "
+              << get_value(application_record.next_barrier_stage);
+    message::WorkerInstallBarrier install_barrier_command;
+    install_barrier_command.barrier_stage =
+        application_record.next_barrier_stage;
+    SendCommandToPartitionInApplication(respond_message.application_id,
+                                        &install_barrier_command);
+  }
+}
+
 void ControllerScheduler::ProcessReachBarrier(
     const message::ControllerRespondReachBarrier& respond_message) {
   UpdateRunningStats(
@@ -693,6 +770,9 @@ void ControllerScheduler::UpdateRunningStats(
   LogRunningStats(worker_id, application_id, variable_group_id, partition_id,
                   running_stats);
   auto& application_record = GetApplicationRecord(application_id);
+  application_record.furthest_complete_stage_id =
+      std::max(application_record.furthest_complete_stage_id,
+               running_stats.last_finished_stage_id);
   const auto& cycle_stats = running_stats.cycle_stats;
   for (const auto& pair : cycle_stats) {
     application_record.total_used_cycles += pair.second.second;
@@ -705,6 +785,8 @@ void ControllerScheduler::UpdateRunningStats(
     response.application_id = get_value(application_id);
     response.succeed = true;
     response.cycles = application_record.total_used_cycles;
+    response.furthest_complete_stage_id =
+        get_value(application_record.furthest_complete_stage_id);
     for (auto launch_command_id : application_record.report_command_list) {
       launch_send_command_interface_->SendLaunchResponseCommand(
           launch_command_id,

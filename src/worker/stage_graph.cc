@@ -168,8 +168,7 @@ bool StageGraph::InsertBarrier(StageId stage_id) {
   CHECK(next_barrier_stage_id_ == StageId::INVALID)
       << "Barriers cannot be nested!";
   next_barrier_stage_id_ = stage_id;
-  CHECK(last_finished_stage_id_ <= stage_id)
-      << "Invalid barrier: the execution already passed the barrier stage!";
+  CHECK(last_finished_stage_id_ <= stage_id);
   CHECK(barrier_ready_stage_queue_.empty());
   auto iter = ready_stage_queue_.begin();
   while (iter != ready_stage_queue_.end()) {

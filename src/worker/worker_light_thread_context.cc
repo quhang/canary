@@ -221,14 +221,12 @@ void WorkerExecutionContext::RunCommands() {
       case StageId::PAUSE_EXECUTION:
         CHECK(partition_state_ = PartitionState::RUNNING);
         partition_state_ = PartitionState::PAUSED;
-        // TODO(quhang): not implemented.
-        LOG(FATAL) << "Not implemented.";
+        ProcessPauseExecution();
         break;
       case StageId::INSTALL_BARRIER:
         CHECK(partition_state_ = PartitionState::PAUSED);
         partition_state_ = PartitionState::RUNNING;
-        // TODO(quhang): not implemented.
-        LOG(FATAL) << "Not implemented.";
+        ProcessInstallBarrier(command);
         break;
       case StageId::RELEASE_BARRIER:
         CHECK(partition_state_ == PartitionState::IN_BARRIER);
@@ -400,6 +398,21 @@ void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
   // Kills the context.
   partition_state_ = PartitionState::MIGRATED;
   get_worker_scheduler()->KillThreadContext(this);
+}
+
+void WorkerExecutionContext::ProcessPauseExecution() {
+  message::ControllerRespondPauseExecution report;
+  FillInStats(&report);
+  get_send_command_interface()->SendCommandToController(
+      message::SerializeMessageWithControlHeader(report));
+}
+
+void WorkerExecutionContext::ProcessInstallBarrier(struct evbuffer* command) {
+  using internal_message::InstallBarrierCommand;
+  auto struct_message =
+      internal_message::to_command<InstallBarrierCommand>(command);
+  CHECK(struct_message.barrier_stage_id != StageId::INVALID);
+  stage_graph_.InsertBarrier(struct_message.barrier_stage_id);
 }
 
 void WorkerExecutionContext::ProcessReleaseBarrier() {

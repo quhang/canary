@@ -272,12 +272,18 @@ void WorkerSchedulerBase::ProcessReportRunningStatus(
 
 void WorkerSchedulerBase::ProcessPauseExecution(
     const message::WorkerPauseExecution& worker_command) {
-  // TODO(quhang): not implemented.
+  DeliverCommandToEachThread(worker_command, StageId::PAUSE_EXECUTION,
+                             []() { return nullptr; });
 }
 
 void WorkerSchedulerBase::ProcessInstallBarrier(
     const message::WorkerInstallBarrier& worker_command) {
-  // TODO(quhang): not implemented.
+  DeliverCommandToEachThread(
+      worker_command, StageId::INSTALL_BARRIER,
+      [barrier_stage = worker_command.barrier_stage]() {
+        return internal_message::to_buffer(
+            internal_message::InstallBarrierCommand{barrier_stage});
+      });
 }
 
 void WorkerSchedulerBase::ProcessReleaseBarrier(

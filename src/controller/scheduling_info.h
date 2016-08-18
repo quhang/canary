@@ -106,6 +106,8 @@ class SchedulingInfo {
      */
     //! The total of cycles spent for the application.
     double total_used_cycles = 0;
+    //! The furthest completed stage.
+    StageId furthest_complete_stage_id = StageId::INVALID;
     /*
      * Filled in during initialization.
      */
@@ -123,6 +125,7 @@ class SchedulingInfo {
     enum class ApplicationState {
       INVALID,
       RUNNING,
+      PAUSING,
       AT_BARRIER,
       COMPLETE
     } application_state = ApplicationState::INVALID;
@@ -148,6 +151,8 @@ class SchedulingInfo {
     int total_partition = 0;
     //! The total number of complete partitions.
     int complete_partition = 0;
+    //! The total number of paused partitions.
+    int paused_partition = 0;
     //! The total number of partitions blocked at a barrier.
     int blocked_partition = 0;
     //! The total number of partitions that are being migrated.
