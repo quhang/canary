@@ -17,6 +17,7 @@ cxx_static_library(canary_core "${cxx_default}"
     shared/initialize.cc
     shared/network.cc
     shared/partition_map.cc
+    shared/resource_monitor.cc
     message/message.cc
     controller/controller_communication_manager.cc
     controller/controller_scheduler.cc

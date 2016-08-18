@@ -26,3 +26,5 @@ cxx_executable(basic_client . "canary_core")
 cxx_executable(basic_load_and_print . "canary_core")
 
 cxx_executable(playground . "canary_core")
+
+cxx_executable(basic_resource_monitor . "canary_core")
