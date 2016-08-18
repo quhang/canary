@@ -423,7 +423,7 @@ void WorkerExecutionContext::RunGatherStage(
   const int needed_message = (statement_info.int_task_function)(&task_context);
   const auto end_time = time::Clock::now();
   CHECK_EQ(needed_message, 0);
-  stage_graph_.CompleteStage(stage_id, time::timepoint_to_double(start_time),
+  stage_graph_.CompleteStage(stage_id,
                              time::duration_to_double(end_time - start_time));
 }
 
@@ -443,8 +443,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       (statement_info.void_task_function)(&task_context);
       const auto end_time = time::Clock::now();
       stage_graph_.CompleteStage(
-          stage_id, time::timepoint_to_double(start_time),
-          time::duration_to_double(end_time - start_time));
+          stage_id, time::duration_to_double(end_time - start_time));
       break;
     }
     case CanaryApplication::StatementType::SCATTER: {
@@ -452,8 +451,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       (statement_info.void_task_function)(&task_context);
       const auto end_time = time::Clock::now();
       stage_graph_.CompleteStage(
-          stage_id, time::timepoint_to_double(start_time),
-          time::duration_to_double(end_time - start_time));
+          stage_id, time::duration_to_double(end_time - start_time));
       break;
     }
     case CanaryApplication::StatementType::GATHER: {
@@ -464,8 +462,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       if (needed_message == 0) {
         VLOG(1) << "Gather stage needs no data, and falls throught.";
         stage_graph_.CompleteStage(
-            stage_id, time::timepoint_to_double(start_time),
-            time::duration_to_double(end_time - start_time));
+            stage_id, time::duration_to_double(end_time - start_time));
       } else {
         VLOG(1) << "Gather stage needs message of " << needed_message;
         pending_gather_stages_[stage_id] = statement_id;
@@ -478,8 +475,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const bool decision = (statement_info.bool_task_function)(&task_context);
       const auto end_time = time::Clock::now();
       stage_graph_.CompleteStage(
-          stage_id, time::timepoint_to_double(start_time),
-          time::duration_to_double(end_time - start_time));
+          stage_id, time::duration_to_double(end_time - start_time));
       // Broadcast control flow decision.
       for (const auto& pair :
            *get_canary_application()->get_variable_group_info_map()) {

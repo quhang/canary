@@ -52,8 +52,7 @@ void StageGraph::Initialize(VariableGroupId self_variable_group_id,
   SpawnLocalStages();
 }
 
-void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
-                               double cycles) {
+void StageGraph::CompleteStage(StageId complete_stage_id, double cycles) {
   CHECK(!IsBlockedStage(complete_stage_id))
       << "Internal error when implementing a barrier!";
   VLOG(1) << "Complete stage " << get_value(complete_stage_id);
@@ -72,7 +71,8 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double timestamp,
   // Updates running stats.
   if (self_partition_id_ == PartitionId::FIRST && statement_info.track_needed) {
     timestamp_storage_[complete_stage_id] =
-        std::make_pair(stage_record.statement_id, timestamp);
+        std::make_pair(stage_record.statement_id,
+                       time::timepoint_to_double(time::WallClock::now()));
   }
   UpdateCycleStats(complete_stage_id, stage_record.statement_id, cycles);
   // Updates variable access map, so that later spawned stages do not depend on

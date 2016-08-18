@@ -473,17 +473,20 @@ namespace time {
  *   std::cout << to_double(duration);
  */
 typedef std::chrono::steady_clock Clock;
+typedef std::chrono::system_clock WallClock;
 //! Time point type.
 typedef Clock::time_point Timepoint;
 //! Time duration type.
 typedef Clock::duration Duration;
 
 //! Convert a time duration to double.
-inline double duration_to_double(const Duration& input) {
+template <typename DurationType>
+inline double duration_to_double(const DurationType& input) {
   return std::chrono::duration<double>(input).count();
 }
 
-inline double timepoint_to_double(const Timepoint& time_point) {
+template <typename TimepointType>
+inline double timepoint_to_double(const TimepointType& time_point) {
   return duration_to_double(time_point.time_since_epoch());
 }
 

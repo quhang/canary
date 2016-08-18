@@ -125,7 +125,9 @@ class PlacementSchedule;
 class ControllerScheduler : public ControllerSchedulerBase,
                             public SchedulingInfo {
  public:
-  ControllerScheduler() {}
+  ControllerScheduler() {
+    min_timestamp_ = time::timepoint_to_double(time::WallClock::now());
+  }
   virtual ~ControllerScheduler() {}
 
  private:
@@ -334,6 +336,7 @@ class ControllerScheduler : public ControllerSchedulerBase,
  private:
   //! Logging file handler.
   FILE* log_file_ = nullptr;
+  double min_timestamp_ = -1;
   //! The next application id to assign.
   ApplicationId next_application_id_ = ApplicationId::FIRST;
   //! Scheduling info.

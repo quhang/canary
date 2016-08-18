@@ -91,8 +91,7 @@ class StageGraph {
   void Initialize(VariableGroupId self_variable_group_id,
                   PartitionId self_partition_id);
   //! Reports complete stage.
-  void CompleteStage(StageId complete_stage_id, double timestamp,
-                     double cycles);
+  void CompleteStage(StageId complete_stage_id, double cycles);
   //! Gets the next ready stage.
   std::pair<StageId, StatementId> GetNextReadyStage();
   //! Feeds a control flow decision.

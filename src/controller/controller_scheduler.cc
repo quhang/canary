@@ -525,13 +525,6 @@ void ControllerScheduler::ProcessMigrationInDone(
   partition_record.owned_worker_id = dst_worker_id;
   partition_record.next_worker_id = WorkerId::INVALID;
   partition_record.partition_state = PartitionRecord::PartitionState::RUNNING;
-  // Updates the application record.
-  auto& application_record = GetApplicationRecord(application_id);
-  if (--application_record.migrating_partition == 0) {
-    LogPartitionPlacement();
-    LOG(INFO) << "Application(id=" << get_value(application_id)
-              << ") finishes migration.";
-  }
   // Updates the worker records.
   auto& src_worker_record = GetWorkerRecord(src_worker_id);
   src_worker_record.owned_partitions[application_id].erase(full_partition_id);
@@ -544,6 +537,13 @@ void ControllerScheduler::ProcessMigrationInDone(
   }
   auto& dst_worker_record = GetWorkerRecord(dst_worker_id);
   dst_worker_record.owned_partitions[application_id].insert(full_partition_id);
+  // Updates the application record.
+  auto& application_record = GetApplicationRecord(application_id);
+  if (--application_record.migrating_partition == 0) {
+    LogPartitionPlacement();
+    LOG(INFO) << "Application(id=" << get_value(application_id)
+              << ") finishes migration.";
+  }
   // Updates the partition map.
   auto partition_map_update = new PartitionMapUpdate;
   partition_map_update->emplace_back(full_partition_id,
@@ -1000,12 +1000,10 @@ void ControllerScheduler::LogRunningStats(
           get_value(variable_group_id), get_value(partition_id),
           get_value(worker_id));
   const auto& timestamp_stats = running_stats.timestamp_stats;
-  // TODO(quhang): min_timestamp is not correct.
-  const auto min_timestamp = timestamp_stats.cbegin()->second.second;
   for (const auto& pair : timestamp_stats) {
     fprintf(log_file_, "T %d %d %f\n", get_value(pair.first),
             get_value(pair.second.first),
-            (pair.second.second - min_timestamp) * 1.e3);
+            (pair.second.second - min_timestamp_) * 1.e3);
   }
   const auto& cycle_stats = running_stats.cycle_stats;
   for (const auto& pair : cycle_stats) {
