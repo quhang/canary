@@ -80,8 +80,7 @@ def analyze_file(filename):
                 timestamp = float(line.split()[3])
                 application_stat.add_statement_stat(stage_id,
                                                     statement_id, timestamp)
-            else:
-                assert category == 'B'
+            elif category == 'B':
                 application_stat_dict = dict()
                 worker_stat = set()
     print 'worker = {}'.format(len(worker_stat))
