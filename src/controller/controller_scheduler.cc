@@ -107,6 +107,8 @@ void ControllerScheduler::InternalReceiveLaunchCommand(
     // Requests running stats of an application.
     PROCESS_LAUNCH_MESSAGE(REQUEST_APPLICATION_STAT,
                            ProcessRequestApplicationStat);
+    // Requests running stats of workers.
+    PROCESS_LAUNCH_MESSAGE(REQUEST_WORKER_STAT, ProcessRequestWorkerStat);
     // Requests shutting down workers.
     PROCESS_LAUNCH_MESSAGE(REQUEST_SHUTDOWN_WORKER,
                            ProcessRequestShutdownWorker);
@@ -182,12 +184,12 @@ bool ControllerScheduler::CheckLaunchApplicationMessage(
     return response->succeed;
   }
   if (launch_message.fix_num_worker != -1 &&
-      static_cast<int>(worker_map_.size()) < launch_message.fix_num_worker) {
+      num_running_worker_ < launch_message.fix_num_worker) {
     response->succeed = false;
     response->error_message = "Need more workers for launching!";
     return response->succeed;
   }
-  if (launch_message.fix_num_worker == -1 && worker_map_.empty()) {
+  if (launch_message.fix_num_worker == -1 && num_running_worker_ == 0) {
     response->succeed = false;
     response->error_message = "No worker is launched!";
     return response->succeed;
@@ -386,14 +388,26 @@ void ControllerScheduler::ProcessRequestApplicationStat(
   const auto application_id =
       static_cast<ApplicationId>(request_message.application_id);
   auto& application_record = GetApplicationRecord(application_id);
-  // Builds a new report id.
-  ++application_record.report_id;
   application_record.report_partition_set.clear();
   application_record.report_command_list.push_back(launch_command_id);
   message::WorkerReportStatusOfPartitions report_partitions_command;
   SendCommandToPartitionInApplication(application_id,
                                       &report_partitions_command);
   // The stats will be sent later.
+}
+
+void ControllerScheduler::ProcessRequestWorkerStat(
+    LaunchCommandId launch_command_id, const message::RequestWorkerStat&) {
+  worker_report_command_list_.push_back(launch_command_id);
+  report_worker_set_.clear();
+  message::WorkerReportRunningStatus request_worker;
+  for (auto& pair : worker_map_) {
+    if (pair.second.worker_state == WorkerRecord::WorkerState::RUNNING) {
+      send_command_interface_->SendCommandToWorker(
+          pair.first,
+          message::SerializeMessageWithControlHeader(request_worker));
+    }
+  }
 }
 
 bool ControllerScheduler::CheckRequestShutdownWorkerMessage(
@@ -431,6 +445,7 @@ void ControllerScheduler::ProcessRequestShutdownWorker(
     auto& worker_record = GetWorkerRecord(worker_id);
     // Further scheduling loop will remove running partitions out of the worker.
     worker_record.worker_state = WorkerRecord::WorkerState::KILLED;
+    --num_running_worker_;
   }
   response.succeed = true;
   launch_send_command_interface_->SendLaunchResponseCommand(
@@ -580,10 +595,34 @@ void ControllerScheduler::ProcessStatusOfPartition(
 void ControllerScheduler::ProcessStatusOfWorker(
     const message::ControllerRespondStatusOfWorker& respond_message) {
   const auto from_worker_id = respond_message.from_worker_id;
-  // TODO(quhang): more.
   // Updates worker map.
   if (worker_map_.find(from_worker_id) != worker_map_.end()) {
-    worker_map_[from_worker_id].num_cores = respond_message.num_cores;
+    auto& worker_record = worker_map_.at(from_worker_id);
+    worker_record.num_cores = respond_message.num_cores;
+    worker_record.all_cpu_usage_percentage =
+        respond_message.all_cpu_usage_percentage;
+    worker_record.canary_cpu_usage_percentage =
+        respond_message.canary_cpu_usage_percentage;
+    worker_record.available_memory_gb = respond_message.available_memory_gb;
+    worker_record.used_memory_gb = respond_message.used_memory_gb;
+  }
+  // Sends back results.
+  report_worker_set_.insert(from_worker_id);
+  if (static_cast<int>(report_worker_set_.size()) >= num_running_worker_) {
+    message::RequestWorkerStatResponse response;
+    response.succeed = true;
+    for (const auto& pair : worker_map_) {
+      response.cpu_util_percentage_map[get_value(pair.first)] =
+          std::make_pair(pair.second.canary_cpu_usage_percentage,
+                         pair.second.all_cpu_usage_percentage -
+                             pair.second.canary_cpu_usage_percentage);
+    }
+    for (auto launch_command_id : worker_report_command_list_) {
+      launch_send_command_interface_->SendLaunchResponseCommand(
+          launch_command_id,
+          message::SerializeMessageWithControlHeader(response));
+    }
+    worker_report_command_list_.clear();
   }
 }
 
@@ -823,6 +862,7 @@ void ControllerScheduler::InitializeWorkerRecord(WorkerId worker_id) {
   CHECK(worker_map_.find(worker_id) == worker_map_.end());
   auto& worker_record = worker_map_[worker_id];
   worker_record.worker_state = WorkerRecord::WorkerState::RUNNING;
+  ++num_running_worker_;
   // Default, the number of core is seen as one.
   worker_record.num_cores = 1;
 }
@@ -830,6 +870,9 @@ void ControllerScheduler::InitializeWorkerRecord(WorkerId worker_id) {
 void ControllerScheduler::FinalizeWorkerRecord(WorkerId worker_id) {
   CHECK(worker_id != WorkerId::INVALID);
   auto iter = worker_map_.find(worker_id);
+  if (iter->second.worker_state == WorkerRecord::WorkerState::RUNNING) {
+    --num_running_worker_;
+  }
   if (iter == worker_map_.end()) {
     LOG(ERROR) << "Failed to finalize a worker!";
   }

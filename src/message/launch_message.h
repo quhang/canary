@@ -43,6 +43,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "message/message.h"
 
@@ -213,7 +214,8 @@ REGISTER_MESSAGE(LAUNCH_COMMAND, REQUEST_WORKER_STAT, RequestWorkerStat);
 struct RequestWorkerStatResponse {
   bool succeed = false;
   std::string error_message;
-  std::map<int, double> cpu_util_percentage_map;
+  // WorkerId -> (canary_usage, other_usage).
+  std::map<int, std::pair<double, double>> cpu_util_percentage_map;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(succeed, error_message, cpu_util_percentage_map);

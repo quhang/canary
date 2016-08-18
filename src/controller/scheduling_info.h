@@ -154,8 +154,6 @@ class SchedulingInfo {
     int migrating_partition = 0;
     //! The next barrier stage, at which all partitions should pause.
     StageId next_barrier_stage = StageId::INVALID;
-    //! The identifier of a triggered report.
-    int report_id = -1;
     //! The number of partitions that have reported since the last time the
     // report id was changed.
     std::set<FullPartitionId> report_partition_set;

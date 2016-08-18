@@ -177,6 +177,15 @@ struct WorkerReportStatusOfPartitions {
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_STATUS_OF_PARTITIONS,
                  WorkerReportStatusOfPartitions);
 
+//! Asks a worker to report its running status.
+struct WorkerReportRunningStatus {
+  template <typename Archive>
+  void serialize(Archive&) {  // NOLINT
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_REPORT_RUNNING_STATUS,
+                 WorkerReportRunningStatus);
+
 //! Changes the priority of an application.
 struct WorkerChangeApplicationPriority {
   ApplicationId application_id;
@@ -336,9 +345,19 @@ REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_PARTITION,
 struct ControllerRespondStatusOfWorker {
   WorkerId from_worker_id;
   int num_cores = -1;
+  //! CPU utilization percentage of all applications (might not be Canary).
+  double all_cpu_usage_percentage = 0;
+  //! CPU utilization percentage of Canary.
+  double canary_cpu_usage_percentage = 0;
+  //! All available memory space in GB.
+  double available_memory_gb = 0;
+  //! Memory space used by Canary in GB.
+  double used_memory_gb = 0;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(from_worker_id, num_cores);
+    archive(all_cpu_usage_percentage, canary_cpu_usage_percentage,
+            available_memory_gb, used_memory_gb);
   }
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_STATUS_OF_WORKER,

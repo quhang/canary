@@ -123,6 +123,7 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_MIGRATE_OUT_PARTITIONS, ProcessMigrateOutPartitions);
     PROCESS_MESSAGE(WORKER_REPORT_STATUS_OF_PARTITIONS,
                     ProcessReportStatusOfPartitions);
+    PROCESS_MESSAGE(WORKER_REPORT_RUNNING_STATUS, ProcessReportRunningStatus);
     PROCESS_MESSAGE(WORKER_CHANGE_APPLICATION_PRIORITY,
                     ProcessChangeApplicationPriority);
     PROCESS_MESSAGE(WORKER_PAUSE_EXECUTION, ProcessPauseExecution);
@@ -138,12 +139,9 @@ void WorkerSchedulerBase::AssignWorkerId(WorkerId worker_id) {
   CHECK(!is_ready_);
   is_ready_ = true;
   self_worker_id_ = worker_id;
+  resource_monitor_.Initialize();
   // Responds with the worker status.
-  message::ControllerRespondStatusOfWorker respond_status;
-  respond_status.from_worker_id = self_worker_id_;
-  respond_status.num_cores = num_cores_;
-  send_command_interface_->SendCommandToController(
-      message::SerializeMessageWithControlHeader(respond_status));
+  ReportWorkerStatus();
   // Starts execution.
   StartExecution();
 }
@@ -267,6 +265,11 @@ void WorkerSchedulerBase::ProcessReportStatusOfPartitions(
   }
 }
 
+void WorkerSchedulerBase::ProcessReportRunningStatus(
+    const message::WorkerReportRunningStatus&) {
+  ReportWorkerStatus();
+}
+
 void WorkerSchedulerBase::ProcessPauseExecution(
     const message::WorkerPauseExecution& worker_command) {
   // TODO(quhang): not implemented.
@@ -301,6 +304,22 @@ void WorkerSchedulerBase::DeliverCommandToEachThread(
         << "Failed to deliver a command to a partition";
     iter->second->DeliverMessage(command_stage_id, generator());
   }
+}
+
+void WorkerSchedulerBase::ReportWorkerStatus() {
+  // Responds with the worker status.
+  message::ControllerRespondStatusOfWorker respond_status;
+  respond_status.from_worker_id = self_worker_id_;
+  respond_status.num_cores = num_cores_;
+  respond_status.all_cpu_usage_percentage =
+      resource_monitor_.get_all_cpu_usage_percentage();
+  respond_status.canary_cpu_usage_percentage =
+      resource_monitor_.get_canary_cpu_usage_percentage();
+  respond_status.available_memory_gb =
+      resource_monitor_.get_available_memory_gb();
+  respond_status.used_memory_gb = resource_monitor_.get_used_memory_gb();
+  send_command_interface_->SendCommandToController(
+      message::SerializeMessageWithControlHeader(respond_status));
 }
 
 /*

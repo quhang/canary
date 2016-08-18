@@ -81,6 +81,8 @@ DEFINE_int32(shutdown_worker, -1, "Shuts down a specified number of worker.");
 DEFINE_int32(shutdown_worker_start_id, -1,
              "The id from which workers are shutdown.");
 
+DEFINE_bool(report_workers, false, "Requests worker stats.");
+
 int main(int argc, char** argv) {
   using namespace canary;  // NOLINT
   InitializeCanaryWorker(&argc, &argv);
@@ -186,6 +188,21 @@ int main(int argc, char** argv) {
       printf("Workers are shut down correctly.\n");
     } else {
       printf("Worker shutting donw failed!\n%s\n",
+             response.error_message.c_str());
+    }
+  } else if (FLAGS_report_workers) {
+    message::RequestWorkerStat request_worker_stat;
+    auto response =
+        launch_helper.LaunchAndWaitResponse<message::RequestWorkerStatResponse>(
+            request_worker_stat);
+    if (response.succeed) {
+      printf("Worker stats are retrieved.\n");
+      for (const auto& pair : response.cpu_util_percentage_map) {
+        printf("Worker (id=%d): Canary uses %.1f%%, others use %.1f%%\n",
+               pair.first, pair.second.first, pair.second.second);
+      }
+    } else {
+      printf("Retrieving worker stats failed!\n%s\n",
              response.error_message.c_str());
     }
   }

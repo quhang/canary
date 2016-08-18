@@ -181,6 +181,10 @@ class ControllerScheduler : public ControllerSchedulerBase,
   void ProcessRequestApplicationStat(
       LaunchCommandId launch_command_id,
       const message::RequestApplicationStat& request_message);
+  //! Requests worker stats.
+  void ProcessRequestWorkerStat(
+      LaunchCommandId launch_command_id,
+      const message::RequestWorkerStat& request_message);
   //! Checks worker shutting down request.
   bool CheckRequestShutdownWorkerMessage(
       const message::RequestShutdownWorker& request_message,
@@ -343,6 +347,9 @@ class ControllerScheduler : public ControllerSchedulerBase,
   std::map<WorkerId, WorkerRecord> worker_map_;
   std::map<ApplicationId, ApplicationRecord> application_map_;
   std::map<FullPartitionId, PartitionRecord> partition_record_map_;
+  int num_running_worker_ = 0;
+  std::set<WorkerId> report_worker_set_;
+  std::list<LaunchCommandId> worker_report_command_list_;
   //! Scheduling algorithms.
   std::map<std::string, PlacementSchedule*> placement_schedule_algorithms_;
   std::map<std::string, LoadSchedule*> load_schedule_algorithms_;

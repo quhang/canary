@@ -177,4 +177,30 @@ bool BalancedPartitionNumberLoadSchedule::OffloadPartition(
   return false;
 }
 
+void StragglerMitigationLoadSchedule::BalanceLoad() {
+  GrabWorkerInfo();
+  if (total_cores_ == 0) {
+    return;
+  }
+  double max_stolen_cpu = 0;
+  WorkerId max_stolen_cpu_worker_id = WorkerId::INVALID;
+  for (auto& pair : worker_info_) {
+    auto& worker_record = scheduling_info_->get_worker_map().at(pair.first);
+    double stolen_cpu = worker_record.all_cpu_usage_percentage -
+                        worker_record.canary_cpu_usage_percentage;
+    if (stolen_cpu > max_stolen_cpu) {
+      max_stolen_cpu = stolen_cpu;
+      max_stolen_cpu_worker_id = pair.first;
+    }
+  }
+  if (max_stolen_cpu_worker_id != WorkerId::INVALID) {
+    total_cores_ -= worker_info_.at(max_stolen_cpu_worker_id).num_cores;
+    worker_info_.at(max_stolen_cpu_worker_id).num_cores = 0;
+    LOG(INFO) << "Offloading computations away from worker (id="
+              << get_value(max_stolen_cpu_worker_id) << ").";
+  }
+  CalculateExpectedNumPartitions();
+  IssuePartitionPlacementDecision();
+}
+
 }  // namespace canary

@@ -93,7 +93,7 @@ class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
       : LoadSchedule(scheduling_info) {}
   void BalanceLoad() override;
 
- private:
+ protected:
   struct WorkerInfoRecord {
     WorkerId worker_id = WorkerId::INVALID;
     std::set<FullPartitionId> owned_partitions;
@@ -111,11 +111,15 @@ class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
   int total_partitions_ = 0;
 };
 
-class StragglerMitigationLoadSchedule : public LoadSchedule {
+/**
+ * Mitigates straggler by killing the worker with the most stolen CPU.
+ */
+class StragglerMitigationLoadSchedule
+    : public BalancedPartitionNumberLoadSchedule {
  public:
   explicit StragglerMitigationLoadSchedule(SchedulingInfo* scheduling_info)
-      : LoadSchedule(scheduling_info) {}
-  void BalanceLoad() override {}
+      : BalancedPartitionNumberLoadSchedule(scheduling_info) {}
+  void BalanceLoad() override;
 };
 
 }  // namespace canary

@@ -85,19 +85,18 @@ class ResourceMonitor {
 
  private:
   template <typename IteratorType>
-  bool GetNextUnsignedLong(IteratorType* iterator, unsigned long* result);
-  void SubmitMeasurement(unsigned long canary_cpu_ticks,
-                         unsigned long all_cpu_ticks,
-                         unsigned long idle_cpu_ticks);
+  bool GetNextUnsignedLong(IteratorType* iterator, uint64_t* result);
+  void SubmitMeasurement(uint64_t canary_cpu_ticks, uint64_t all_cpu_ticks,
+                         uint64_t idle_cpu_ticks);
 
  private:
   bool initialized_ = false;
   std::regex token_regex_ = std::regex("\\s+");
 
   bool after_first_sample_ = false;
-  unsigned long last_canary_cpu_ticks_;
-  unsigned long last_all_cpu_ticks_;
-  unsigned long last_idle_cpu_ticks_;
+  uint64_t last_canary_cpu_ticks_;
+  uint64_t last_all_cpu_ticks_;
+  uint64_t last_idle_cpu_ticks_;
   double canary_cpu_usage_percentage_ = 0;
   double all_cpu_usage_percentage_ = 0;
 

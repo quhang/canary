@@ -39,6 +39,7 @@
 
 #include "shared/resource_monitor.h"
 
+#include <string>
 #include <thread>
 
 namespace canary {
@@ -58,7 +59,7 @@ void ResourceMonitor::Initialize() {
 
 template <typename IteratorType>
 bool ResourceMonitor::GetNextUnsignedLong(IteratorType* iterator,
-                                          unsigned long* result) try {
+                                          uint64_t* result) try {
   if (*iterator == IteratorType()) {
     return false;
   }
@@ -79,7 +80,7 @@ bool ResourceMonitor::Measure() {
     LOG(ERROR) << "Cannot open /proc/self/stat!";
     return false;
   }
-  unsigned long canary_user_ticks, canary_sys_ticks;
+  uint64_t canary_user_ticks, canary_sys_ticks;
   if (fscanf(process_stat_file,
              "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
              &canary_user_ticks, &canary_sys_ticks) != 2) {
@@ -94,7 +95,7 @@ bool ResourceMonitor::Measure() {
   }
   constexpr int kLineBufferSize = 0x400;
   char line_buffer[kLineBufferSize];
-  unsigned long global_user_ticks, global_sys_ticks, global_idle_ticks;
+  uint64_t global_user_ticks, global_sys_ticks, global_idle_ticks;
   while (fgets(line_buffer, kLineBufferSize, global_stat_file)) {
     std::string line_string(line_buffer);
     auto iter = std::sregex_token_iterator(line_string.begin(),
@@ -132,9 +133,9 @@ bool ResourceMonitor::Measure() {
   return false;
 }
 
-void ResourceMonitor::SubmitMeasurement(unsigned long canary_cpu_ticks,
-                                        unsigned long all_cpu_ticks,
-                                        unsigned long idle_cpu_ticks) {
+void ResourceMonitor::SubmitMeasurement(uint64_t canary_cpu_ticks,
+                                        uint64_t all_cpu_ticks,
+                                        uint64_t idle_cpu_ticks) {
   PCHECK(pthread_mutex_lock(&internal_lock_) == 0);
   if (after_first_sample_) {
     canary_cpu_usage_percentage_ = 100. *

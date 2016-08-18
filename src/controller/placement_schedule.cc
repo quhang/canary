@@ -79,26 +79,19 @@ void EvenlyPlacementSchedule::GetWorkerAssignment(
   const auto& worker_map = scheduling_info_->get_worker_map();
   for (auto& worker_id : *assignment) {
     auto iter = worker_map.find(last_assigned_worker_id_);
-    if (iter == worker_map.end()) {
-      // Assigns a partition to the next worker.
-      worker_id = NextAssignWorkerId();
-      last_assigned_partitions_ = 1;
-      continue;
-    }
-    // TODO(quhang): unclear.
-    if (iter->second.num_cores == -1) {
-      LOG(WARNING) << "The number of cores for a worker is unknown!";
-      CHECK_EQ(last_assigned_partitions_, 1);
-      worker_id = NextAssignWorkerId();
-      last_assigned_partitions_ = 1;
+    if (iter != worker_map.end() &&
+        iter->second.worker_state ==
+            SchedulingInfo::WorkerRecord::WorkerState::RUNNING &&
+        (last_assigned_partitions_ < iter->second.num_cores)) {
+      worker_id = last_assigned_worker_id_;
+      ++last_assigned_partitions_;
     } else {
-      if (last_assigned_partitions_ < iter->second.num_cores) {
-        worker_id = last_assigned_worker_id_;
-        ++last_assigned_partitions_;
-      } else {
+      // Assigns a partition to the next running worker.
+      do {
         worker_id = NextAssignWorkerId();
-        last_assigned_partitions_ = 1;
-      }
+      } while (worker_map.at(worker_id).worker_state !=
+               SchedulingInfo::WorkerRecord::WorkerState::RUNNING);
+      last_assigned_partitions_ = 1;
     }
   }
 }

@@ -53,6 +53,7 @@
 #include "shared/canary_application.h"
 #include "shared/network.h"
 #include "shared/partition_map.h"
+#include "shared/resource_monitor.h"
 #include "worker/worker_communication_interface.h"
 #include "worker/worker_light_thread_context.h"
 
@@ -127,6 +128,9 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   //! Asks a partition to report status.
   void ProcessReportStatusOfPartitions(
       const message::WorkerReportStatusOfPartitions& worker_command);
+  //! Asks a worker to report status.
+  void ProcessReportRunningStatus(
+      const message::WorkerReportRunningStatus& worker_command);
   //! Changes the priority of an application.
   void ProcessChangeApplicationPriority(
       const message::WorkerChangeApplicationPriority& worker_command);
@@ -144,6 +148,8 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   void DeliverCommandToEachThread(const T& command_from_controller,
                                   StageId command_stage_id,
                                   std::function<struct evbuffer*()> generator);
+  //! Reports worker status.
+  void ReportWorkerStatus();
 
  protected:
   /*
@@ -224,6 +230,7 @@ class WorkerSchedulerBase : public WorkerReceiveCommandInterface,
   bool is_ready_ = false;
   WorkerId self_worker_id_ = WorkerId::INVALID;
   int num_cores_ = -1;
+  ResourceMonitor resource_monitor_;
 };
 
 /**
