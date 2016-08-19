@@ -78,8 +78,12 @@ class LoadSchedule {
  */
 class TestLoadSchedule : public LoadSchedule {
  public:
+  //! Constructor.
   explicit TestLoadSchedule(SchedulingInfo* scheduling_info)
       : LoadSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~TestLoadSchedule() {}
+  //! Invokes the load balancing algorithm.
   void BalanceLoad() override;
 };
 
@@ -89,8 +93,12 @@ class TestLoadSchedule : public LoadSchedule {
  */
 class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
  public:
+  //! Constructor.
   explicit BalancedPartitionNumberLoadSchedule(SchedulingInfo* scheduling_info)
       : LoadSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~BalancedPartitionNumberLoadSchedule() {}
+  //! Invokes the load balancing algorithm.
   void BalanceLoad() override;
 
  protected:
@@ -117,9 +125,16 @@ class BalancedPartitionNumberLoadSchedule : public LoadSchedule {
 class StragglerMitigationLoadSchedule
     : public BalancedPartitionNumberLoadSchedule {
  public:
+  //! Constructor.
   explicit StragglerMitigationLoadSchedule(SchedulingInfo* scheduling_info)
       : BalancedPartitionNumberLoadSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~StragglerMitigationLoadSchedule() {}
+  //! Invokes the load balancing algorithm.
   void BalanceLoad() override;
+
+ private:
+  void FigureOutStraggler();
 };
 
 }  // namespace canary

@@ -182,6 +182,12 @@ void StragglerMitigationLoadSchedule::BalanceLoad() {
   if (total_cores_ == 0) {
     return;
   }
+  FigureOutStraggler();
+  CalculateExpectedNumPartitions();
+  IssuePartitionPlacementDecision();
+}
+
+void StragglerMitigationLoadSchedule::FigureOutStraggler() {
   double max_stolen_cpu = 0;
   WorkerId max_stolen_cpu_worker_id = WorkerId::INVALID;
   for (auto& pair : worker_info_) {
@@ -199,8 +205,6 @@ void StragglerMitigationLoadSchedule::BalanceLoad() {
     LOG(INFO) << "Offloading computations away from worker (id="
               << get_value(max_stolen_cpu_worker_id) << ").";
   }
-  CalculateExpectedNumPartitions();
-  IssuePartitionPlacementDecision();
 }
 
 }  // namespace canary
