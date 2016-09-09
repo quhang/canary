@@ -54,6 +54,7 @@ class BarrierTestApplication : public CanaryApplication {
       printf("%.9f %d\n",
              time::timepoint_to_double(time::WallClock::now()),
              *sum);
+      fflush(stdout);
       return 0;
     });
 
