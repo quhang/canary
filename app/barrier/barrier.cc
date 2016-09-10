@@ -11,6 +11,7 @@
 
 static int FLAG_app_partitions = 2;   // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
+static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
 
 namespace canary {
 
@@ -20,6 +21,7 @@ class BarrierTestApplication : public CanaryApplication {
   void Program() override {
     // Declares variables.
     auto d_component = DeclareVariable<int>(FLAG_app_partitions);
+    auto d_inter = DeclareVariable<int>(FLAG_app_intermediate);
     auto d_sum = DeclareVariable<int>(1);
 
     WriteAccess(d_sum);
@@ -43,7 +45,22 @@ class BarrierTestApplication : public CanaryApplication {
 
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
-      task_context->Scatter(0, task_context->ReadVariable(d_component));
+      task_context->Scatter(
+          task_context->GetPartitionId() % task_context->GetGatherParallelism(),
+          task_context->ReadVariable(d_component));
+    });
+
+    WriteAccess(d_inter);
+    Gather([=](CanaryTaskContext* task_context) -> int {
+      EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
+      int* sum = task_context->WriteVariable(d_inter);
+      *sum = task_context->Reduce(0, std::plus<int>());
+      return 0;
+    });
+
+    ReadAccess(d_inter);
+    Scatter([=](CanaryTaskContext* task_context) {
+      task_context->Scatter(0, task_context->ReadVariable(d_inter));
     });
 
     WriteAccess(d_sum);
@@ -69,6 +86,7 @@ class BarrierTestApplication : public CanaryApplication {
       cereal::XMLInputArchive archive(ss);
       LoadFlag("partitions", FLAG_app_partitions, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
+      LoadFlag("intermediate", FLAG_app_intermediate, archive);
     }
   }
 };
