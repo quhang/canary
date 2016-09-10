@@ -52,7 +52,11 @@ class BarrierTestApplication : public CanaryApplication {
 
     WriteAccess(d_inter);
     Gather([=](CanaryTaskContext* task_context) -> int {
-      EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
+      const int remain = task_context->GetScatterParallelism() %
+                         task_context->GetGatherParallelism();
+      EXPECT_GATHER_SIZE(task_context->GetScatterParallelism() /
+                         task_context->GetGatherParallelism() +
+                         (task_context->GetPartitionId() < remain ? 1 : 0));
       int* sum = task_context->WriteVariable(d_inter);
       *sum = task_context->Reduce(0, std::plus<int>());
       return 0;
