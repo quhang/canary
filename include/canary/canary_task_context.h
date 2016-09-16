@@ -57,6 +57,7 @@ class WorkerSendDataInterface;
  */
 class CanaryTaskContext {
   friend class WorkerExecutionContext;
+
  public:
   CanaryTaskContext() {}
   virtual ~CanaryTaskContext() {}

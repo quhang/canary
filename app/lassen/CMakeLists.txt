@@ -1,5 +1,5 @@
 ##
-# PARSEC application.
+# Lassen application.
 
 project(lassen CXX)
 

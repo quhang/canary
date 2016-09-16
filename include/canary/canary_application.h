@@ -327,8 +327,8 @@ class CanaryApplication {
   virtual void Program() = 0;
   virtual void LoadParameter(const std::string& parameter) = 0;
   template <typename T>
-  void LoadFlag(const std::string& name, T& value,
-                cereal::XMLInputArchive& archive) {
+  void LoadFlag(const std::string& name, T& value,   // NOLINT
+                cereal::XMLInputArchive& archive) {  // NOLINT
     try {
       archive(cereal::make_nvp(name, value));
     } catch (cereal::Exception&) {

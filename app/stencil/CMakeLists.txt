@@ -1,5 +1,5 @@
 ##
-# PARSEC application.
+# Stencil computation application.
 
 project(stencil CXX)
 

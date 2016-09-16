@@ -1,5 +1,5 @@
 ##
-# Logistic regression application.
+# K-means clustering application.
 
 project(kmean_loop CXX)
 

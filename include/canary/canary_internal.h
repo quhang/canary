@@ -76,6 +76,9 @@
 #include <type_traits>
 #include <utility>
 
+// Strings are used for printing debugging info.
+#include <string>
+
 /**
  * Marks a class as non-copyable and non-movable.
  */
@@ -255,36 +258,36 @@ using cereal::CanaryOutputArchive;
 /**
  * Makes a scoped enumeration type countable.
  */
-#define COUNTABLE_ENUM(T)                                         \
-  inline constexpr std::underlying_type<T>::type get_value(T t) { \
-    return static_cast<std::underlying_type<T>::type>(t);         \
-  }                                                               \
+#define COUNTABLE_ENUM(T)                                                   \
+  inline constexpr std::underlying_type<T>::type get_value(T t) {           \
+    return static_cast<std::underlying_type<T>::type>(t);                   \
+  }                                                                         \
   inline constexpr std::underlying_type<T>::type get_distance(T t1, T t2) { \
-    return get_value(t2) - get_value(t1);                         \
-  }                                                               \
-  inline constexpr T get_next(const T& t, int inc = 1) {          \
-    return static_cast<T>(get_value(t) + inc);                    \
-  }                                                               \
-  inline constexpr T get_prev(const T& t) {                       \
-    return static_cast<T>(get_value(t) - 1);                      \
-  }                                                               \
-  inline T operator++(T & t) {                                    \
-    t = get_next(t);                                              \
-    return t;                                                     \
-  }                                                               \
-  inline T operator++(T & t, int) {                               \
-    T result = t;                                                 \
-    ++t;                                                          \
-    return result;                                                \
-  }                                                               \
-  inline T operator--(T & t) {                                    \
-    t = get_prev(t);                                              \
-    return t;                                                     \
-  }                                                               \
-  inline T operator--(T & t, int) {                               \
-    T result = t;                                                 \
-    --t;                                                          \
-    return result;                                                \
+    return get_value(t2) - get_value(t1);                                   \
+  }                                                                         \
+  inline constexpr T get_next(const T& t, int inc = 1) {                    \
+    return static_cast<T>(get_value(t) + inc);                              \
+  }                                                                         \
+  inline constexpr T get_prev(const T& t) {                                 \
+    return static_cast<T>(get_value(t) - 1);                                \
+  }                                                                         \
+  inline T operator++(T& t) {                                               \
+    t = get_next(t);                                                        \
+    return t;                                                               \
+  }                                                                         \
+  inline T operator++(T& t, int) {                                          \
+    T result = t;                                                           \
+    ++t;                                                                    \
+    return result;                                                          \
+  }                                                                         \
+  inline T operator--(T& t) {                                               \
+    t = get_prev(t);                                                        \
+    return t;                                                               \
+  }                                                                         \
+  inline T operator--(T& t, int) {                                          \
+    T result = t;                                                           \
+    --t;                                                                    \
+    return result;                                                          \
   }  // NOLINT
 
 namespace canary {
@@ -358,7 +361,9 @@ enum class StageId : int32_t {
   CONTROL_FLOW_DECISION,
   INIT,
   // Normal stages.
-  INVALID = -1, FIRST = 0 };
+  INVALID = -1,
+  FIRST = 0
+};
 COUNTABLE_ENUM(StageId);
 
 /**
@@ -393,9 +398,8 @@ struct FullPartitionId {
   PartitionId partition_id;
   std::string GetString() const {
     std::stringstream ss;
-    ss << get_value(application_id) << "/" <<
-        get_value(variable_group_id) << "/" <<
-        get_value(partition_id);
+    ss << get_value(application_id) << "/" << get_value(variable_group_id)
+       << "/" << get_value(partition_id);
     return ss.str();
   }
   template <typename Archive>
@@ -489,7 +493,6 @@ template <typename TimepointType>
 inline double timepoint_to_double(const TimepointType& time_point) {
   return duration_to_double(time_point.time_since_epoch());
 }
-
 
 }  // namespace time
 }  // namespace canary

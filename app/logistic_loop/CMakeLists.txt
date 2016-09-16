@@ -1,5 +1,5 @@
 ##
-# Logistic regression application.
+# Logistic regression application running a fixed number of loops.
 
 project(logistic_loop CXX)
 

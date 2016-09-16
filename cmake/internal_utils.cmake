@@ -21,8 +21,8 @@ endmacro()
 
 # Helper function for defining a library target.
 function(cxx_library_with_type name type cxx_flags)
-  add_library(${name} ${type} ${ARGN})
-  set_target_properties(${name} PROPERTIES COMPILE_FLAGS "${cxx_flags}")
+  add_library("${name}" "${type}" ${ARGN})
+  set_target_properties("${name}" PROPERTIES COMPILE_FLAGS "${cxx_flags}")
 endfunction()
 
 # Defines a shared library target.
@@ -30,7 +30,7 @@ endfunction()
 # Usage:
 # cxx_shared_library(library_name "${cxx_default}" src...)
 function(cxx_shared_library name cxx_flags)
-  cxx_library_with_type(${name} SHARED "${cxx_flags}" ${ARGN})
+  cxx_library_with_type("${name}" SHARED "${cxx_flags}" ${ARGN})
 endfunction()
 
 # Defines a static library target.
@@ -38,19 +38,17 @@ endfunction()
 # Usage:
 # cxx_static_library(library_name "${cxx_default}" src...)
 function(cxx_static_library name cxx_flags)
-  cxx_library_with_type(${name} STATIC "${cxx_flags}" ${ARGN})
+  cxx_library_with_type("${name}" STATIC "${cxx_flags}" ${ARGN})
 endfunction()
 
 # Helper function for defining an executable target.
 function(cxx_executable_with_flags name cxx_flags libs)
-  add_executable(${name} ${ARGN})
+  add_executable("${name}" ${ARGN})
   if (cxx_flags)
-    set_target_properties(${name} PROPERTIES COMPILE_FLAGS "${cxx_flags}")
+    set_target_properties("${name}" PROPERTIES COMPILE_FLAGS "${cxx_flags}")
   endif()
-  foreach(lib ${libs})
-    # Ensure all symbols in libcanary_core are exported.
-    target_link_libraries(${name} -Wl,--whole-archive ${lib} -Wl,--no-whole-archive)
-  endforeach()
+  # Ensure all symbols in libcanary_core are exported.
+  target_link_libraries(${name} -Wl,--whole-archive ${libs} -Wl,--no-whole-archive)
 endfunction()
 
 # Defines an executable target.
@@ -59,13 +57,13 @@ endfunction()
 # cxx_executable(name dir "libs" srcs...)
 function(cxx_executable name dir libs)
   cxx_executable_with_flags(
-    ${name} "${cxx_default}" "${libs}" "${dir}/${name}.cc" ${ARGN})
+    "${name}" "${cxx_default}" "${libs}" "${dir}/${name}.cc" ${ARGN})
 endfunction()
 
 # Helper function for defining a test.
 function(cxx_test_with_flags name cxx_flags libs)
-  cxx_executable_with_flags(${name} "${cxx_flags}" "${libs}" ${ARGN})
-  add_test(${name} ${name})
+  cxx_executable_with_flags("${name}" "${cxx_flags}" "${libs}" ${ARGN})
+  add_test("${name}" "${name}")
 endfunction()
 
 # Defines a test target.
