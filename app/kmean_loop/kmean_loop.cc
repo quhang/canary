@@ -13,6 +13,7 @@
 static int FLAG_app_partitions = 1;   // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_samples = 1000;    // Number of total samples.
+static double FLAG_app_rates = -1;    // The task execution rate per worker.
 
 constexpr int DIMENSION = 20;
 constexpr int NUM_CLUSTER = 10;
@@ -76,6 +77,7 @@ class KmeanLoopApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
+    rate_limiter_.Initialize(FLAG_app_rates);
     typedef std::array<double, DIMENSION> Point;
     typedef std::vector<Point> PointVector;
     typedef std::array<std::pair<int, Point>, NUM_CLUSTER> ClusterStat;
@@ -132,6 +134,7 @@ class KmeanLoopApplication : public CanaryApplication {
     ReadAccess(d_local_center);
     WriteAccess(d_local_stat);
     Transform([=](CanaryTaskContext* task_context) {
+      rate_limiter_.Join();
       const auto& points = task_context->ReadVariable(d_point);
       const auto& local_center = task_context->ReadVariable(d_local_center);
       auto local_stat = task_context->WriteVariable(d_local_stat);
@@ -196,8 +199,12 @@ class KmeanLoopApplication : public CanaryApplication {
       LoadFlag("partitions", FLAG_app_partitions, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("samples", FLAG_app_samples, archive);
+      LoadFlag("rates", FLAG_app_rates, archive);
     }
   }
+
+ private:
+  RateLimiter rate_limiter_;
 };
 
 }  // namespace canary

@@ -50,6 +50,51 @@
 namespace canary {
 
 /**
+ * A simple rate limiter for testing.
+ */
+class RateLimiter {
+ public:
+  RateLimiter() {
+    PCHECK(0 == pthread_spin_init(&internal_lock_, PTHREAD_PROCESS_PRIVATE));
+  }
+  virtual ~RateLimiter() {
+    pthread_spin_destroy(&internal_lock_);
+  }
+  // limit_rate in Hz. -1 means non-blocking.
+  void Initialize(double limit_rate) {
+    pthread_spin_lock(&internal_lock_);
+    started_ = false;
+    interval_ = 1. / limit_rate;
+    pthread_spin_unlock(&internal_lock_);
+  }
+  bool Join() {
+    if (interval_ < 0) {
+      return false;
+    }
+    pthread_spin_lock(&internal_lock_);
+    if (started_) {
+      time::Timepoint now_time;
+      do {
+        now_time = time::Clock::now();
+      } while (time::duration_to_double(now_time - last_access_) < interval_);
+      last_access_ = now_time;
+    } else {
+      started_ = true;
+      last_access_ = time::Clock::now();
+    }
+    pthread_spin_unlock(&internal_lock_);
+    return true;
+  }
+
+ private:
+  bool started_ = false;
+  time::Timepoint last_access_;
+  // In seconds.
+  double interval_ = 1;
+  pthread_spinlock_t internal_lock_;
+};
+
+/**
  * Interface for data of a partition.
  */
 class PartitionData {
