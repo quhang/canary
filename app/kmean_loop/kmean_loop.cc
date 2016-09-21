@@ -134,7 +134,7 @@ class KmeanLoopApplication : public CanaryApplication {
     ReadAccess(d_local_center);
     WriteAccess(d_local_stat);
     Transform([=](CanaryTaskContext* task_context) {
-      rate_limiter_.Join();
+      this->rate_limiter_.Join();
       const auto& points = task_context->ReadVariable(d_point);
       const auto& local_center = task_context->ReadVariable(d_local_center);
       auto local_stat = task_context->WriteVariable(d_local_stat);
