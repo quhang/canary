@@ -102,8 +102,8 @@ CanaryApplication* CanaryApplication::LoadApplication(
       dlsym(*handle_ptr, "ApplicationEnterPoint"));
   err = reinterpret_cast<const char*>(dlerror());
   if (err) {
-    dlclose(*handle_ptr);
     LOG(ERROR) << "Cannot load application: " << err;
+    dlclose(*handle_ptr);
     return nullptr;
   }
   auto loaded_application = reinterpret_cast<CanaryApplication*>(entry_point());
@@ -114,10 +114,9 @@ CanaryApplication* CanaryApplication::LoadApplication(
   return loaded_application;
 }
 
-void CanaryApplication::UnloadApplication(void* handle,
+void CanaryApplication::UnloadApplication(void*,
                                           CanaryApplication* application) {
   delete application;
-  dlclose(handle);
 }
 
 // Long function, but stays here to save adding functions to the external
