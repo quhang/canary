@@ -218,6 +218,7 @@ class PagerankApplication : public CanaryApplication {
 
     Loop(FLAG_app_iterations);
 
+    TrackNeeded();
     ReadAccess(d_edge_partition);
     WriteAccess(d_vertex_partition);
     Transform([=](CanaryTaskContext* task_context) {
