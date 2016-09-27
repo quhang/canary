@@ -14,6 +14,7 @@ static int FLAG_app_partitions = 1;  // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_samples = 1000;  // Number of total samples.
 static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
+static double FLAG_app_rates = -1;    // The task execution rate per worker.
 
 constexpr int DIMENSION = 20;
 
@@ -23,6 +24,7 @@ class LogisticLoopApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
+    rate_limiter_.Initialize(FLAG_app_rates);
     typedef std::array<double, DIMENSION> Point;
     typedef std::vector<std::pair<Point, bool>> FeatureVector;
     constexpr Point reference{1.f, -1.f, 1.f, 1.f, -1.f, 2.f,  2.f,
@@ -78,6 +80,7 @@ class LogisticLoopApplication : public CanaryApplication {
     ReadAccess(d_local_w);
     WriteAccess(d_local_gradient);
     Transform([=](CanaryTaskContext* task_context) {
+      this->rate_limiter_.Join();
       const auto& feature = task_context->ReadVariable(d_feature);
       const auto& local_w = task_context->ReadVariable(d_local_w);
       auto local_gradient = task_context->WriteVariable(d_local_gradient);
@@ -167,8 +170,12 @@ class LogisticLoopApplication : public CanaryApplication {
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("samples", FLAG_app_samples, archive);
       LoadFlag("intermediate", FLAG_app_intermediate, archive);
+      LoadFlag("rates", FLAG_app_rates, archive);
     }
   }
+
+ private:
+  RateLimiter rate_limiter_;
 };
 
 }  // namespace canary

@@ -10,15 +10,18 @@
 
 static int FLAG_app_partition_x = 1;          // Number of partitions in x.
 static int FLAG_app_partition_y = 1;          // Number of partitions in y.
-static int FLAG_app_size_per_partition = 3;  // Size per partition.
+static int FLAG_app_size_x = 3;  // Size per partition.
+static int FLAG_app_size_y = 3;  // Size per partition.
 static int FLAG_app_iterations = 10;          // Number of iterations.
+static double FLAG_app_rates = -1;    // The task execution rate per worker.
 
 namespace canary {
 
 class PagerankApplication : public CanaryApplication {
  public:
   const double kAlpha = .15;
-  typedef uint32_t VertexId;
+  typedef int64_t VertexId;
+  typedef int32_t Cord;
 
   /**
    * User defined vertex property.
@@ -39,7 +42,7 @@ class PagerankApplication : public CanaryApplication {
     // The pagerank of a vertex.
     T user_property;
     // The outgoing degree of a vertex.
-    uint32_t out_degree;
+    int out_degree;
     // Edge partitions that need the vertex value, i.e. routing table in
     // GraphX.
     std::vector<int> routing_receivers;
@@ -74,7 +77,7 @@ class PagerankApplication : public CanaryApplication {
     // Row index to vertex id.
     std::vector<VertexId> row_index_to_vertex_id;
     // Row pointer to the first index in the column array.
-    std::vector<uint32_t> row_pointer;
+    std::vector<int> row_pointer;
     // The column index array.
     std::vector<VertexId> column_index;
     template <class Archive>
@@ -91,13 +94,13 @@ class PagerankApplication : public CanaryApplication {
     std::vector<VertexId> result;
     const int partition_id_x = partition_id / FLAG_app_partition_y;
     const int partition_id_y = partition_id % FLAG_app_partition_y;
-    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
-    for (int cell_x = partition_id_x * FLAG_app_size_per_partition;
-         cell_x <= (1 + partition_id_x) * FLAG_app_size_per_partition; ++cell_x)
-      for (int cell_y = partition_id_y * FLAG_app_size_per_partition;
-           cell_y <= (1 + partition_id_y) * FLAG_app_size_per_partition;
-           ++cell_y) {
-        result.push_back(cell_x * (max_y + 1) + cell_y);
+    const Cord max_y = FLAG_app_partition_y * FLAG_app_size_y;
+    for (Cord cell_x = partition_id_x * FLAG_app_size_x;
+         cell_x <= (1 + partition_id_x) * FLAG_app_size_x; ++cell_x)
+      for (Cord cell_y = partition_id_y * FLAG_app_size_y;
+           cell_y <= (1 + partition_id_y) * FLAG_app_size_y; ++cell_y) {
+        result.push_back(VertexId{cell_x} * VertexId{max_y + 1} +
+                         VertexId{cell_y});
       }
     return std::move(result);
   }
@@ -106,15 +109,15 @@ class PagerankApplication : public CanaryApplication {
   std::vector<std::pair<VertexId, VertexId>> GetAllOutgoingEdges(
       VertexId vertex_id) const {
     std::vector<std::pair<VertexId, VertexId>> result;
-    const int max_x = FLAG_app_partition_x * FLAG_app_size_per_partition;
-    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
-    int cell_x = vertex_id / (max_y + 1);
-    int cell_y = vertex_id % (max_y + 1);
+    const Cord max_x = FLAG_app_partition_x * FLAG_app_size_x;
+    const Cord max_y = FLAG_app_partition_y * FLAG_app_size_y;
+    const Cord cell_x = vertex_id / (max_y + 1);
+    const Cord cell_y = vertex_id % (max_y + 1);
     if (cell_x > 0) {
-      result.emplace_back(vertex_id, vertex_id - (max_y + 1));
+      result.emplace_back(vertex_id, vertex_id - VertexId{max_y + 1});
     }
     if (cell_x < max_x) {
-      result.emplace_back(vertex_id, vertex_id + (max_y + 1));
+      result.emplace_back(vertex_id, vertex_id + VertexId{max_y + 1});
     }
     if (cell_y > 0) {
       result.emplace_back(vertex_id, vertex_id - 1);
@@ -130,12 +133,12 @@ class PagerankApplication : public CanaryApplication {
     if (from > to) {
       std::swap(from, to);
     }
-    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
-    const int cell_x = from / (max_y + 1);
-    const int cell_y = from % (max_y + 1);
-    const int partition_id_x = std::min(cell_x / FLAG_app_size_per_partition,
+    const Cord max_y = FLAG_app_partition_y * FLAG_app_size_y;
+    const Cord cell_x = from / VertexId{max_y + 1};
+    const Cord cell_y = from % VertexId{max_y + 1};
+    const int partition_id_x = std::min(cell_x / FLAG_app_size_x,
                                         FLAG_app_partition_x - 1);
-    const int partition_id_y = std::min(cell_y / FLAG_app_size_per_partition,
+    const int partition_id_y = std::min(cell_y / FLAG_app_size_y,
                                         FLAG_app_partition_y - 1);
     return partition_id_y + partition_id_x * FLAG_app_partition_y;
   }
@@ -167,6 +170,7 @@ class PagerankApplication : public CanaryApplication {
 
   // The program.
   void Program() override {
+    rate_limiter_.Initialize(FLAG_app_rates);
     const int FLAG_app_partitions = FLAG_app_partition_x * FLAG_app_partition_y;
     auto d_vertex_partition =
         DeclareVariable<VertexPropertyPartition>(FLAG_app_partitions);
@@ -222,6 +226,7 @@ class PagerankApplication : public CanaryApplication {
     ReadAccess(d_edge_partition);
     WriteAccess(d_vertex_partition);
     Transform([=](CanaryTaskContext* task_context) {
+      this->rate_limiter_.Join();
       const auto& edge_partition = task_context->ReadVariable(d_edge_partition);
       auto vertex_partition = task_context->WriteVariable(d_vertex_partition);
       const auto& row_index_to_vertex_id =
@@ -234,7 +239,7 @@ class PagerankApplication : public CanaryApplication {
         const double contribute =
             vertex_partition->vertices[left_vertex].user_property.rank /
             vertex_partition->vertices[left_vertex].out_degree;
-        for (size_t to_index = row_pointer[index];
+        for (int to_index = row_pointer[index];
              to_index < row_pointer[index + 1]; ++to_index) {
           const VertexId right_vertex = column_index[to_index];
           vertex_partition->vertices[right_vertex].user_property.temp_rank +=
@@ -278,6 +283,7 @@ class PagerankApplication : public CanaryApplication {
 
     WriteAccess(d_vertex_partition);
     Transform([=](CanaryTaskContext* task_context) {
+      this->rate_limiter_.Join();
       auto vertex_partition = task_context->WriteVariable(d_vertex_partition);
       for (auto& key_value : vertex_partition->vertices) {
         auto& vertex_property = key_value.second;
@@ -324,10 +330,15 @@ class PagerankApplication : public CanaryApplication {
       cereal::XMLInputArchive archive(ss);
       LoadFlag("partition_x", FLAG_app_partition_x, archive);
       LoadFlag("partition_y", FLAG_app_partition_y, archive);
-      LoadFlag("size_per_partition", FLAG_app_size_per_partition, archive);
+      LoadFlag("size_x", FLAG_app_size_x, archive);
+      LoadFlag("size_y", FLAG_app_size_y, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
+      LoadFlag("rates", FLAG_app_rates, archive);
     }
   }
+
+ private:
+  RateLimiter rate_limiter_;
 };
 
 }  // namespace canary
