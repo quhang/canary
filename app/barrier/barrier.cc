@@ -15,6 +15,9 @@ static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
 
 namespace canary {
 
+/**
+ * A microbenchmark that iteratively broadcasts a value and sums up the values.
+ */
 class BarrierTestApplication : public CanaryApplication {
  public:
   // The program.
@@ -43,6 +46,7 @@ class BarrierTestApplication : public CanaryApplication {
       return 0;
     });
 
+    // Layered reduction.
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
       task_context->Scatter(

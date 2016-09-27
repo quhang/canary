@@ -25,7 +25,7 @@ class ShuffleTestApplication : public CanaryApplication {
     Transform([=](CanaryTaskContext* task_context) {
       auto input = task_context->WriteVariable(d_component);
       for (int i = 0; i < FLAG_app_partitions; ++i) {
-        input->push_back((i+1) % FLAG_app_partitions);
+        input->push_back(i);
       }
     });
 
