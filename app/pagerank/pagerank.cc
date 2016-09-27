@@ -10,7 +10,7 @@
 
 static int FLAG_app_partition_x = 1;          // Number of partitions in x.
 static int FLAG_app_partition_y = 1;          // Number of partitions in y.
-static int FLAG_app_size_per_partition = 10;  // Size per partition.
+static int FLAG_app_size_per_partition = 3;  // Size per partition.
 static int FLAG_app_iterations = 10;          // Number of iterations.
 
 namespace canary {
@@ -91,7 +91,7 @@ class PagerankApplication : public CanaryApplication {
     std::vector<VertexId> result;
     const int partition_id_x = partition_id / FLAG_app_partition_y;
     const int partition_id_y = partition_id % FLAG_app_partition_y;
-    const int max_y = (1 + FLAG_app_partition_y) * FLAG_app_size_per_partition;
+    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
     for (int cell_x = partition_id_x * FLAG_app_size_per_partition;
          cell_x <= (1 + partition_id_x) * FLAG_app_size_per_partition; ++cell_x)
       for (int cell_y = partition_id_y * FLAG_app_size_per_partition;
@@ -106,8 +106,8 @@ class PagerankApplication : public CanaryApplication {
   std::vector<std::pair<VertexId, VertexId>> GetAllOutgoingEdges(
       VertexId vertex_id) const {
     std::vector<std::pair<VertexId, VertexId>> result;
-    const int max_x = (1 + FLAG_app_partition_x) * FLAG_app_size_per_partition;
-    const int max_y = (1 + FLAG_app_partition_y) * FLAG_app_size_per_partition;
+    const int max_x = FLAG_app_partition_x * FLAG_app_size_per_partition;
+    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
     int cell_x = vertex_id / (max_y + 1);
     int cell_y = vertex_id % (max_y + 1);
     if (cell_x > 0) {
@@ -119,7 +119,7 @@ class PagerankApplication : public CanaryApplication {
     if (cell_y > 0) {
       result.emplace_back(vertex_id, vertex_id - 1);
     }
-    if (cell_x < max_y) {
+    if (cell_y < max_y) {
       result.emplace_back(vertex_id, vertex_id + 1);
     }
     return std::move(result);
@@ -130,12 +130,39 @@ class PagerankApplication : public CanaryApplication {
     if (from > to) {
       std::swap(from, to);
     }
-    const int max_y = (1 + FLAG_app_partition_y) * FLAG_app_size_per_partition;
+    const int max_y = FLAG_app_partition_y * FLAG_app_size_per_partition;
     const int cell_x = from / (max_y + 1);
     const int cell_y = from % (max_y + 1);
-    const int partition_id_x = cell_x / FLAG_app_size_per_partition;
-    const int partition_id_y = cell_y / FLAG_app_size_per_partition;
+    const int partition_id_x = std::min(cell_x / FLAG_app_size_per_partition,
+                                        FLAG_app_partition_x - 1);
+    const int partition_id_y = std::min(cell_y / FLAG_app_size_per_partition,
+                                        FLAG_app_partition_y - 1);
     return partition_id_y + partition_id_x * FLAG_app_partition_y;
+  }
+
+  int GetNumNeighbor(int partition_id) const {
+    const int partition_id_x = partition_id / FLAG_app_partition_y;
+    const int partition_id_y = partition_id % FLAG_app_partition_y;
+    int len_x = 1, len_y = 1;
+    if (partition_id_x > 0) {
+      ++len_x;
+    }
+    if (partition_id_x < FLAG_app_partition_x - 1) {
+      ++len_x;
+    }
+    if (partition_id_y > 0) {
+      ++len_y;
+    }
+    if (partition_id_y < FLAG_app_partition_y - 1) {
+      ++len_y;
+    }
+    if (partition_id_x < FLAG_app_partition_x - 1 &&
+       partition_id_y < FLAG_app_partition_y - 1) {
+      // The bottom right partition does not need to communicate.
+      return len_x * len_y - 2;
+    } else {
+      return len_x * len_y - 1;
+    }
   }
 
   // The program.
@@ -153,20 +180,21 @@ class PagerankApplication : public CanaryApplication {
       for (auto vertex_id : GetAllVertices(task_context->GetPartitionId())) {
         auto& vertex_property = vertex_partition->vertices[vertex_id];
         vertex_property.user_property.temp_rank = 0.;
+        vertex_property.user_property.rank = 1.;
         const auto outgoing_edges = GetAllOutgoingEdges(vertex_id);
         vertex_property.out_degree = outgoing_edges.size();
         std::set<int> buffer;
         for (auto edge : outgoing_edges) {
           buffer.insert(GetPartitionIdOfEdge(edge.first, edge.second));
         }
-        routing_buffer.erase(task_context->GetPartitionId());
-        vertex_property.routing_receivers.insert(routing_buffer.begin(),
-                                                 routing_buffer.end());
-        neighboring_edge_partitions.insert(routing_buffer.begin(),
-                                           routing_buffer.end());
+        buffer.erase(task_context->GetPartitionId());
+        // If another partition owns the edge, then a routing entry is set up.
+        vertex_property.routing_receivers.insert(
+            vertex_property.routing_receivers.end(),
+            buffer.begin(), buffer.end());
       }
       vertex_partition->num_neighboring_edge_partitions =
-          neighboring_edge_partitions.size();
+        GetNumNeighbor(task_context->GetPartitionId());
     });
 
     WriteAccess(d_edge_partition);
@@ -269,7 +297,11 @@ class PagerankApplication : public CanaryApplication {
       double sum = 0;
       for (auto& key_value : vertex_partition.vertices) {
         auto& vertex_property = key_value.second;
-        sum += vertex_property.user_property.rank;
+        int edge_partition_id = GetPartitionIdOfEdge(key_value.first,
+                                                     key_value.first);
+        if (edge_partition_id == task_context->GetPartitionId()) {
+          sum += vertex_property.user_property.rank;
+        }
       }
       task_context->Scatter(0, sum);
     });
