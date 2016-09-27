@@ -13,6 +13,7 @@
 static int FLAG_app_partitions = 1;  // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_samples = 1000;  // Number of total samples.
+static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
 
 constexpr int DIMENSION = 20;
 
@@ -32,6 +33,7 @@ class LogisticLoopApplication : public CanaryApplication {
     auto d_feature = DeclareVariable<FeatureVector>(FLAG_app_partitions);
     auto d_local_gradient = DeclareVariable<Point>();
     auto d_local_w = DeclareVariable<Point>();
+    auto d_inter_gradient = DeclareVariable<Point>(FLAG_app_intermediate);
     auto d_global_gradient = DeclareVariable<Point>();
     auto d_global_w = DeclareVariable<Point>(1);
 
@@ -91,9 +93,31 @@ class LogisticLoopApplication : public CanaryApplication {
       }
     });
 
+    // Layered reduction.
     ReadAccess(d_local_gradient);
     Scatter([=](CanaryTaskContext* task_context) {
-      task_context->Scatter(0, task_context->ReadVariable(d_local_gradient));
+      task_context->Scatter(
+          task_context->GetPartitionId() % task_context->GetGatherParallelism(),
+          task_context->ReadVariable(d_local_gradient));
+    });
+
+    WriteAccess(d_inter_gradient);
+    Gather([=](CanaryTaskContext* task_context) -> int {
+      const int remain = task_context->GetScatterParallelism() %
+                         task_context->GetGatherParallelism();
+      EXPECT_GATHER_SIZE(task_context->GetScatterParallelism() /
+                         task_context->GetGatherParallelism() +
+                         (task_context->GetPartitionId() < remain ? 1 : 0));
+      auto inter_gradient = task_context->WriteVariable(d_inter_gradient);
+      std::fill(inter_gradient->begin(), inter_gradient->end(), 0);
+      task_context->Reduce(inter_gradient,
+                           helper::array_add<double, DIMENSION>);
+      return 0;
+    });
+
+    ReadAccess(d_inter_gradient);
+    Scatter([=](CanaryTaskContext* task_context) {
+      task_context->Scatter(0, task_context->ReadVariable(d_inter_gradient));
     });
 
     WriteAccess(d_global_gradient);
@@ -142,6 +166,7 @@ class LogisticLoopApplication : public CanaryApplication {
       LoadFlag("partitions", FLAG_app_partitions, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("samples", FLAG_app_samples, archive);
+      LoadFlag("intermediate", FLAG_app_intermediate, archive);
     }
   }
 };
