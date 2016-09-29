@@ -31,6 +31,7 @@ class ShuffleTestApplication : public CanaryApplication {
 
     Loop(FLAG_app_iterations);
 
+    TrackNeeded();
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
       std::vector<std::vector<int>> buffer(FLAG_app_partitions);

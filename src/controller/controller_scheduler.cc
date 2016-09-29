@@ -1102,9 +1102,11 @@ void ControllerScheduler::LogApplication(
     ApplicationId application_id, const std::string& binary_location,
     const std::string& application_parameter) {
   InitializeLoggingFile();
-  fprintf(log_file_, "L %d %s %s\n", get_value(application_id),
+  fprintf(log_file_, "L %d %s %s %f\n", get_value(application_id),
           binary_location.c_str(),
-          TransformString(application_parameter).c_str());
+          TransformString(application_parameter).c_str(),
+          (time::timepoint_to_double(time::WallClock::now()) -
+           min_timestamp_) * 1.e3);
   FlushLoggingFile();
 }
 
