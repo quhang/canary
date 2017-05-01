@@ -55,7 +55,6 @@ class BarrierTestApplication : public CanaryApplication {
              < FLAG_app_wait_ms) {
         continue;
       }
-      printf("? %f\n", (time::timepoint_to_double(time::WallClock::now()) - start) * 1000);
       task_context->Scatter(
           task_context->GetPartitionId() % task_context->GetGatherParallelism(),
           task_context->ReadVariable(d_component));
