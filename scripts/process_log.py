@@ -48,9 +48,12 @@ class ApplicationStat(object):
             intervals = [stage_timestamps[sample_stages[i+1]] -
                          stage_timestamps[sample_stages[i]]
                          for i in range(0, len(sample_stages) - 1)]
-            print 'interval (statement {}) min={} max={} mean={}'.format(
+            intervals = sorted(intervals)
+            print 'interval (statement {}) min={} max={} 2min={} 2max={} mean={} medium={}'.format(
                 statement_id, min(intervals), max(intervals),
-                sum(intervals) / len(intervals))
+                intervals[2], intervals[-3],
+                sum(intervals) / len(intervals),
+                intervals[len(intervals)/2])
 
 def analyze_file(filename):
     """Analyzes a log file.
