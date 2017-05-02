@@ -57,9 +57,13 @@ class BarrierTestApplication : public CanaryApplication {
     // Layered reduction.
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
-      float sum = std::accumulate(
-          task_context->ReadVariable(d_component).begin(),
-          task_context->ReadVariable(d_component).end(), 0);
+      const auto& vec = task_context->ReadVariable(d_component);
+      auto size = vec.size();
+      auto ptr = vec.data();
+      float sum = 0;
+      for (auto p = ptr; p < ptr + size; ++p) {
+        sum += *p;
+      }
       task_context->Scatter(
           task_context->GetPartitionId() % task_context->GetGatherParallelism(),
           sum);
