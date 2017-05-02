@@ -12,7 +12,7 @@
 static int FLAG_app_partitions = 2;   // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
-static int FLAG_app_floats = 100; // Number of floats to sum.
+static long long FLAG_app_floats = 100; // Number of floats to sum.
 
 namespace canary {
 
