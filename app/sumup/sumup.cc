@@ -61,8 +61,10 @@ class BarrierTestApplication : public CanaryApplication {
       auto size = vec.size();
       auto ptr = vec.data();
       float sum = 0;
-      for (auto p = ptr; p < ptr + size; ++p) {
-        sum += *p;
+      const auto end = ptr + size;
+      auto p = ptr;
+      while (p < end) {
+        sum += *(p++);
       }
       task_context->Scatter(
           task_context->GetPartitionId() % task_context->GetGatherParallelism(),
