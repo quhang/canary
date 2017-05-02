@@ -53,7 +53,7 @@ class BarrierTestApplication : public CanaryApplication {
     Scatter([=](CanaryTaskContext* task_context) {
       const double start = time::timepoint_to_double(time::WallClock::now());
       while (time::timepoint_to_double(time::WallClock::now()) < start +
-             FLAG_app_wait_us * 1000) {
+             FLAG_app_wait_us / 1000.) {
         continue;
       }
       task_context->Scatter(
