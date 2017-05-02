@@ -41,6 +41,7 @@ class BarrierTestApplication : public CanaryApplication {
 
     Loop(FLAG_app_iterations);
 
+    TrackNeeded();
     ReadAccess(d_sum);
     Scatter([=](CanaryTaskContext* task_context) {
       task_context->Broadcast(task_context->ReadVariable(d_sum));
