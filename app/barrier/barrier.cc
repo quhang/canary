@@ -51,11 +51,7 @@ class BarrierTestApplication : public CanaryApplication {
     // Layered reduction.
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
-      const double start = time::timepoint_to_double(time::WallClock::now());
-      while (time::timepoint_to_double(time::WallClock::now()) < start +
-             FLAG_app_wait_us / 1000.) {
-        continue;
-      }
+      usleep(FLAG_app_wait_us);
       task_context->Scatter(
           task_context->GetPartitionId() % task_context->GetGatherParallelism(),
           task_context->ReadVariable(d_component));
