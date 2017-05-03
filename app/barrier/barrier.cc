@@ -13,6 +13,7 @@ static int FLAG_app_partitions = 2;   // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
 static int FLAG_app_wait_us = 0;  // waiting in us.
+static int FLAG_app_innerp = 1;  // waiting in us.
 
 namespace canary {
 
@@ -48,10 +49,16 @@ class BarrierTestApplication : public CanaryApplication {
       return 0;
     });
 
+    for (int i = 0; i < FLAG_app_innerp; ++i) {
+    WriteAccess(d_component);
+    Transform([=](CanaryTaskContext*) {
+      usleep(FLAG_app_wait_us);
+    });
+    }
+
     // Layered reduction.
     ReadAccess(d_component);
     Scatter([=](CanaryTaskContext* task_context) {
-      usleep(FLAG_app_wait_us);
       task_context->Scatter(
           task_context->GetPartitionId() % task_context->GetGatherParallelism(),
           task_context->ReadVariable(d_component));
@@ -99,6 +106,7 @@ class BarrierTestApplication : public CanaryApplication {
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("intermediate", FLAG_app_intermediate, archive);
       LoadFlag("wait_us", FLAG_app_wait_us, archive);
+      LoadFlag("innerp", FLAG_app_innerp, archive);
     }
   }
 };
