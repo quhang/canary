@@ -46,8 +46,12 @@ namespace canary {
 
 PlacementSchedule* PlacementSchedule::ConstructPlacementSchedule(
     SchedulingInfo* scheduling_info, const std::string& name) {
-  CHECK_EQ(name, "default") << "Placement algorithm is not implemented!";
-  return new EvenlyPlacementSchedule(scheduling_info);
+  // TODO: not working.
+  if (name == "default") {
+    return new OrderedEvenlyPlacementSchedule(scheduling_info);
+  } else {
+    return new EvenlyPlacementSchedule(scheduling_info);
+  }
 }
 
 void EvenlyPlacementSchedule::PlaceApplication(ApplicationId application_id) {
@@ -106,6 +110,38 @@ WorkerId EvenlyPlacementSchedule::NextAssignWorkerId() {
     last_assigned_worker_id_ = iter->first;
   }
   return last_assigned_worker_id_;
+}
+
+
+void OrderedEvenlyPlacementSchedule::PlaceApplication(
+    ApplicationId application_id) {
+  const auto& application_record =
+      scheduling_info_->get_application_map().at(application_id);
+  const auto& variable_group_info_map =
+      *application_record.variable_group_info_map;
+  for (const auto& pair : variable_group_info_map) {
+    std::vector<WorkerId> worker_id_list;
+    next_assigned_worker_id_ = WorkerId::INVALID;
+    for (int index = 0; index < pair.second.parallelism; ++index) {
+      next_assigned_worker_id_ = NextAssignWorkerId();
+      scheduling_info_->DecidePartitionPlacement(
+          FullPartitionId{application_id, pair.first,
+                          static_cast<PartitionId>(index)},
+          next_assigned_worker_id_);
+    }
+  }
+}
+
+WorkerId OrderedEvenlyPlacementSchedule::NextAssignWorkerId() {
+  const auto& worker_map = scheduling_info_->get_worker_map();
+  CHECK(!worker_map.empty());
+  auto iter = worker_map.upper_bound(next_assigned_worker_id_);
+  if (iter == worker_map.end()) {
+    next_assigned_worker_id_ = worker_map.begin()->first;
+  } else {
+    next_assigned_worker_id_ = iter->first;
+  }
+  return next_assigned_worker_id_;
 }
 
 }  // namespace canary

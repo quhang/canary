@@ -100,5 +100,29 @@ class EvenlyPlacementSchedule : public PlacementSchedule {
   int last_assigned_partitions_ = 0;
 };
 
+/**
+ * The default placement algorithm that places partitions evenly on workers.
+ */
+class OrderedEvenlyPlacementSchedule : public PlacementSchedule {
+ public:
+  //! Constructor.
+  explicit OrderedEvenlyPlacementSchedule(SchedulingInfo* scheduling_info)
+      : PlacementSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~OrderedEvenlyPlacementSchedule() {}
+
+ public:
+  //! Invoking the placement algorithm.
+  void PlaceApplication(ApplicationId application_id) override;
+
+ private:
+  //! Gets the next assigned worker id.
+  WorkerId NextAssignWorkerId();
+
+ private:
+  //! The last worker that was assigned a partition.
+  WorkerId next_assigned_worker_id_ = WorkerId::INVALID;
+};
+
 }  // namespace canary
 #endif  // CANARY_SRC_CONTROLLER_PLACEMENT_SCHEDULE_H_
