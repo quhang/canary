@@ -13,6 +13,8 @@ enable_testing()
 # Adds cmake module search path.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+option(build_gpu "Build GPU-related components." OFF)
+
 # Sets up default environment variables.
 include(default_flags)
 

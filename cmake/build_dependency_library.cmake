@@ -78,3 +78,17 @@ set_property(TARGET gtest PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/
 add_library(gtest_main STATIC IMPORTED)
 add_dependencies(gtest_main project_gtest)
 set_property(TARGET gtest_main PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_PATH}/lib/libgtest_main.a)
+
+IF(build_gpu)
+  find_package(CUDA REQUIRED)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -O3 --std=c++11 -Xcompiler -fPIC)
+
+  # Installs header-only Eigen library.
+  ExternalProject_Add(project_eigen
+    URL ${CMAKE_SOURCE_DIR}/packages/eigen_v3.3.3.tar.gz
+    PREFIX ${DEPENDENCY_BUILD_PATH}/eigen
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND mkdir -p ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/Eigen ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/unsupported ${DEPENDENCY_INSTALL_PATH}/include/Eigen/
+  )
+ENDIF(build_gpu)
