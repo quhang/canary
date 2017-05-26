@@ -89,6 +89,6 @@ IF(build_gpu)
     PREFIX ${DEPENDENCY_BUILD_PATH}/eigen
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
-    INSTALL_COMMAND mkdir -p ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/Eigen ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/unsupported ${DEPENDENCY_INSTALL_PATH}/include/Eigen/
+    INSTALL_COMMAND mkdir -p ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/Eigen ${DEPENDENCY_INSTALL_PATH}/include/ && cp -r <SOURCE_DIR>/unsupported ${DEPENDENCY_INSTALL_PATH}/include/
   )
 ENDIF(build_gpu)
