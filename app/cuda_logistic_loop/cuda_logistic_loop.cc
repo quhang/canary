@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "canary/canary.h"
-#include "../helper.h"
 
 #include "cuda_helper.h"
 
@@ -25,19 +24,22 @@ class LogisticLoopApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
-    typedef std::array<double, DIMENSION> Point;
+    typedef std::vector<double> Point;
     typedef std::vector<std::pair<Point, bool>> FeatureVector;
-    constexpr Point reference{1.f, -1.f, 1.f, 1.f, -1.f, 2.f,  2.f,
-                              2.f, 1.f,  1.f, 0.f, 1.f,  -1.f, 1.f,
-                              1.f, 1.f,  2.f, 1.f, 1.f,  1.f};
+    const Point reference{1., -1., 1., 1., -1., 2.,  2.,
+                          2., 1.,  1., 0., 1.,  -1., 1.,
+                          1., 1.,  2., 1., 1.,  1.};
 
     // Declares variables.
+
+    // Placed on a computation node.
     auto d_feature = DeclareVariable<FeatureVector>(FLAG_app_partitions);
-    auto d_local_gradient = DeclareVariable<Point>();
-    auto d_local_w = DeclareVariable<Point>();
+    auto d_local_gradient = DeclareVariable<GpuTensorStore<double, 1>>();
+    auto d_local_w = DeclareVariable<GpuTensorStore<double, 1>>();
+
+    // Placed on a parameter node.
     auto d_global_gradient = DeclareVariable<Point>();
     auto d_global_w = DeclareVariable<Point>(1);
-    auto d_test = DeclareVariable<GpuTensorStore<double, 2>>(1);
 
     WriteAccess(d_feature);
     Transform([=](CanaryTaskContext* task_context) {
@@ -49,16 +51,17 @@ class LogisticLoopApplication : public CanaryApplication {
       auto generator = [&dis, &gen] { return dis(gen); };
       for (auto& pair : *feature) {
         Point& point = pair.first;
+        point.resize(DIMENSION);
         std::generate_n(point.begin(), point.size() - 1, generator);
         point.back() = 1;
-        pair.second = (helper::array_dot(point, reference) > 0);
+        pair.second = (std::inner_product(
+                point.begin(), point.end(), reference.begin(), 0.) > 0.);
       }
     });
 
     WriteAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
-      auto global_w = task_context->WriteVariable(d_global_w);
-      std::fill(global_w->begin(), global_w->end(), 0);
+      task_context->WriteVariable(d_global_w)->assign(DIMENSION, 1.);
     });
 
     Loop(FLAG_app_iterations);
@@ -66,13 +69,17 @@ class LogisticLoopApplication : public CanaryApplication {
     TrackNeeded();
     ReadAccess(d_global_w);
     Scatter([=](CanaryTaskContext* task_context) {
+      // Broadcast the global weight.
       task_context->Broadcast(task_context->ReadVariable(d_global_w));
     });
 
     WriteAccess(d_local_w);
     Gather([=](CanaryTaskContext* task_context) -> int {
       EXPECT_GATHER_SIZE(1);
-      task_context->GatherSingle(task_context->WriteVariable(d_local_w));
+      // Receive the global weight and load it into GPU.
+      std::vector<double> buffer;
+      task_context->GatherSingle(&buffer);
+      task_context->WriteVariable(d_local_w)->ToDevice(buffer);
       return 0;
     });
 
@@ -81,43 +88,51 @@ class LogisticLoopApplication : public CanaryApplication {
     WriteAccess(d_local_gradient);
     Transform([=](CanaryTaskContext* task_context) {
       const auto& feature = task_context->ReadVariable(d_feature);
-      const auto& local_w = task_context->ReadVariable(d_local_w);
-      auto local_gradient = task_context->WriteVariable(d_local_gradient);
-      std::fill(local_gradient->begin(), local_gradient->end(), 0);
+      const auto& local_w = task_context->ReadVariable(d_local_w).ToHost();
+      std::vector<double> local_gradient_buffer(DIMENSION, 0);
       for (const auto& pair : feature) {
         const Point& point = pair.first;
         const bool flag = pair.second;
-        const auto dot = helper::array_dot(local_w, point);
+        const auto dot = std::inner_product(local_w.begin(), local_w.end(),
+                                            point.begin(), 0.);
         const double factor =
             flag ? +(1. / (1. + std::exp(-dot)) - 1.)
                  : -(1. / (1. + std::exp(+dot)) - 1.);
-        helper::array_acc(point, factor, local_gradient);
+        for (int i = 0; i < DIMENSION; ++i) {
+          local_gradient_buffer[i] += factor * point[i];
+        }
       }
+      task_context->WriteVariable(d_local_gradient)->ToDevice(
+          local_gradient_buffer);
     });
 
-    // Layered reduction.
     ReadAccess(d_local_gradient);
     Scatter([=](CanaryTaskContext* task_context) {
-      task_context->Scatter(0, task_context->ReadVariable(d_local_gradient));
+      task_context->Scatter(
+          0, task_context->ReadVariable(d_local_gradient).ToHost());
     });
 
     WriteAccess(d_global_gradient);
     Gather([=](CanaryTaskContext* task_context) -> int {
       EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
       auto global_gradient = task_context->WriteVariable(d_global_gradient);
-      std::fill(global_gradient->begin(), global_gradient->end(), 0);
-      task_context->Reduce(global_gradient,
-                           helper::array_add<double, DIMENSION>);
+      global_gradient->assign(DIMENSION, 0);
+      task_context->Reduce(
+          global_gradient,
+          [=](const std::vector<double>& left, std::vector<double>* right) {
+            for (int i = 0; i < DIMENSION; ++i) { (*right)[i] += left[i]; }
+          });
       return 0;
     });
 
     ReadAccess(d_global_gradient);
     WriteAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
-      const auto& global_gradient =
-          task_context->ReadVariable(d_global_gradient);
+      const auto& global_gradient = task_context->ReadVariable(d_global_gradient);
       auto global_w = task_context->WriteVariable(d_global_w);
-      helper::array_sub(global_gradient, global_w);
+      for (int i = 0; i < DIMENSION; ++i) {
+        (*global_w)[i] -= global_gradient[i];
+      }
       return 0;
     });
 
@@ -126,9 +141,10 @@ class LogisticLoopApplication : public CanaryApplication {
     ReadAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
       const auto& global_w = task_context->ReadVariable(d_global_w);
-      Point output;
-      std::fill(output.begin(), output.end(), 0);
-      helper::array_acc(global_w, 1. / global_w.front(), &output);
+      Point output(DIMENSION);
+      for (int i = 0; i < DIMENSION; ++i) {
+        output[i] = global_w[i] / global_w.front();
+      }
       printf("w=");
       for (auto data : output) {
         printf("%f ", data);

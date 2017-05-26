@@ -11,7 +11,7 @@ namespace canary {
 template<typename T, size_t Dimension> class GpuTensorStore {
  public:
   /// The data type for the tensor rank.
-  typedef std::array<int, Dimension> RankType;
+  typedef std::array<size_t, Dimension> RankType;
   /// Initializes the tensor store as empty.
   GpuTensorStore() {}
   /// Initializes the tensor store given the rank.
@@ -29,13 +29,21 @@ template<typename T, size_t Dimension> class GpuTensorStore {
   GpuTensorStore& operator=(const GpuTensorStore&) = delete;
   GpuTensorStore& operator=(GpuTensorStore&&) = delete;
 
+  void Resize(const RankType& ranks) {
+    Reset();
+    ranks_ = ranks;
+    if (!HasValidRank() || !Allocate(get_num_elements())) {
+      Reset();
+    }
+  }
+
   /// Returns the GPU pointer to the buffer.
   void* get_data() { return data_; }
   // Returns the rank.
   RankType get_ranks() const { return ranks_; }
-  int get_num_elements() const {
-    int result = 1;
-    for (int elem : ranks_) { result *= elem; }
+  size_t get_num_elements() const {
+    size_t result = 1;
+    for (size_t elem : ranks_) { result *= elem; }
     return result;
   }
 
@@ -73,13 +81,25 @@ template<typename T, size_t Dimension> class GpuTensorStore {
     SaveToHostVector(&result);
     return result;
   }
+  void ToDevice(const std::vector<T>& input) {
+    if (Dimension == 1) {
+      ranks_ = {input.size()};
+      if (Allocate(get_num_elements())) {
+        LoadFromHostVector(input);
+      } else {
+        fprintf(stderr, "Error in GpuTensorStore::ToDevice!\n");
+      }
+    } else {
+      fprintf(stderr, "Error in GpuTensorStore::ToDevice!\n");
+    }
+  }
 
  private:
   void Reset();
   bool Allocate(size_t num_elements);
   bool HasValidRank() const {
-    for (int elem : ranks_) {
-      if (elem <= 0) return false;
+    for (size_t elem : ranks_) {
+      if (elem == 0) return false;
     }
     return true;
   };

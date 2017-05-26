@@ -12,7 +12,9 @@ void GpuTensorStore<T, Dimension>::LoadFromHostVector(
     fprintf(stderr,
             "Deserialization for the GpuTensorStore failed internally!\n");
   } else {
-    cudaMemcpy(data_, input.data(), input.size(), cudaMemcpyHostToDevice);
+    cudaMemcpy(data_, input.data(), input.size() * sizeof(T),
+               cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
   }
 }
 
@@ -23,6 +25,7 @@ void GpuTensorStore<T, Dimension>::SaveToHostVector(
     input->resize(get_num_elements(), 0);
     cudaMemcpy(input->data(), data_, input->size() * sizeof(T),
                cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
   }
 }
 
@@ -32,7 +35,7 @@ void GpuTensorStore<T, Dimension>::Reset() {
     cudaFree(data_);
   }
   data_ = nullptr;
-  for (int& elem : ranks_) { elem = 0; }
+  for (auto& elem : ranks_) { elem = 0; }
 }
 
 template<typename T, size_t Dimension>
@@ -40,5 +43,11 @@ bool GpuTensorStore<T, Dimension>::Allocate(size_t num_elements) {
   return cudaMalloc(&data_, num_elements * sizeof(T)) == 0;
 }
 
+template class GpuTensorStore<float, 1>;
+template class GpuTensorStore<float, 2>;
+template class GpuTensorStore<float, 3>;
+template class GpuTensorStore<double, 1>;
+template class GpuTensorStore<double, 2>;
+template class GpuTensorStore<double, 3>;
 
 }  // namespace canary
