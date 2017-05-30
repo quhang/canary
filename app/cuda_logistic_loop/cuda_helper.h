@@ -34,11 +34,12 @@ template<typename T, size_t Dimension> class GpuTensorStore {
     ranks_ = ranks;
     if (!HasValidRank() || !Allocate(get_num_elements())) {
       Reset();
+      for (auto& elem : ranks_) { elem = 0; }
     }
   }
 
   /// Returns the GPU pointer to the buffer.
-  void* get_data() { return data_; }
+  void* get_data() const { return data_; }
   // Returns the rank.
   RankType get_ranks() const { return ranks_; }
   size_t get_num_elements() const {
@@ -95,7 +96,9 @@ template<typename T, size_t Dimension> class GpuTensorStore {
   }
 
  private:
+  // Resets the buffer, including ``data_`` and ``true_size_``.
   void Reset();
+  // Allocates the buffer, including ``data_`` and ``true_size_``.
   bool Allocate(size_t num_elements);
   bool HasValidRank() const {
     for (size_t elem : ranks_) {
@@ -106,7 +109,21 @@ template<typename T, size_t Dimension> class GpuTensorStore {
 
   /// GPU data pointer.
   void* data_ = nullptr;
+  size_t true_size_ = 0;
   RankType ranks_;
 };
+
+namespace app {
+
+void GenerateRandomData(const std::vector<double> reference,
+                        GpuTensorStore<double, 2>* x_data,
+                        GpuTensorStore<double, 1>* y_data);
+
+void UpdateWeight(const GpuTensorStore<double, 2>& x_data,
+                  const GpuTensorStore<double, 1>& y_data,
+                  const GpuTensorStore<double, 1>& w_data,
+                  GpuTensorStore<double, 1>* g_data);
+
+}  // namespace app
 
 }  // namespace canary

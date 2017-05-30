@@ -25,7 +25,6 @@ class LogisticLoopApplication : public CanaryApplication {
   // The program.
   void Program() override {
     typedef std::vector<double> Point;
-    typedef std::vector<std::pair<Point, bool>> FeatureVector;
     const Point reference{1., -1., 1., 1., -1., 2.,  2.,
                           2., 1.,  1., 0., 1.,  -1., 1.,
                           1., 1.,  2., 1., 1.,  1.};
@@ -33,7 +32,8 @@ class LogisticLoopApplication : public CanaryApplication {
     // Declares variables.
 
     // Placed on a computation node.
-    auto d_feature = DeclareVariable<FeatureVector>(FLAG_app_partitions);
+    auto d_x = DeclareVariable<GpuTensorStore<double, 2>>(FLAG_app_partitions);
+    auto d_y = DeclareVariable<GpuTensorStore<double, 1>>();
     auto d_local_gradient = DeclareVariable<GpuTensorStore<double, 1>>();
     auto d_local_w = DeclareVariable<GpuTensorStore<double, 1>>();
 
@@ -41,28 +41,23 @@ class LogisticLoopApplication : public CanaryApplication {
     auto d_global_gradient = DeclareVariable<Point>();
     auto d_global_w = DeclareVariable<Point>(1);
 
-    WriteAccess(d_feature);
+    WriteAccess(d_x);
+    WriteAccess(d_y);
     Transform([=](CanaryTaskContext* task_context) {
-      auto feature = task_context->WriteVariable(d_feature);
-      feature->resize(FLAG_app_samples / FLAG_app_partitions);
-      std::random_device rd;
-      std::default_random_engine gen(rd());
-      std::uniform_real_distribution<> dis(-1, 1);
-      auto generator = [&dis, &gen] { return dis(gen); };
-      for (auto& pair : *feature) {
-        Point& point = pair.first;
-        point.resize(DIMENSION);
-        std::generate_n(point.begin(), point.size() - 1, generator);
-        point.back() = 1;
-        pair.second = (std::inner_product(
-                point.begin(), point.end(), reference.begin(), 0.) > 0.);
-      }
+      auto x_data = task_context->WriteVariable(d_x);
+      size_t samples_per_partition = FLAG_app_samples / FLAG_app_partitions;
+      x_data->Resize({DIMENSION, samples_per_partition});
+      auto y_data = task_context->WriteVariable(d_y);
+      y_data->Resize({samples_per_partition});
+      app::GenerateRandomData(reference, x_data, y_data);
     });
 
     WriteAccess(d_global_w);
     Transform([=](CanaryTaskContext* task_context) {
       task_context->WriteVariable(d_global_w)->assign(DIMENSION, 1.);
     });
+
+
 
     Loop(FLAG_app_iterations);
 
@@ -83,27 +78,15 @@ class LogisticLoopApplication : public CanaryApplication {
       return 0;
     });
 
-    ReadAccess(d_feature);
+    ReadAccess(d_x);
+    ReadAccess(d_y);
     ReadAccess(d_local_w);
     WriteAccess(d_local_gradient);
     Transform([=](CanaryTaskContext* task_context) {
-      const auto& feature = task_context->ReadVariable(d_feature);
-      const auto& local_w = task_context->ReadVariable(d_local_w).ToHost();
-      std::vector<double> local_gradient_buffer(DIMENSION, 0);
-      for (const auto& pair : feature) {
-        const Point& point = pair.first;
-        const bool flag = pair.second;
-        const auto dot = std::inner_product(local_w.begin(), local_w.end(),
-                                            point.begin(), 0.);
-        const double factor =
-            flag ? +(1. / (1. + std::exp(-dot)) - 1.)
-                 : -(1. / (1. + std::exp(+dot)) - 1.);
-        for (int i = 0; i < DIMENSION; ++i) {
-          local_gradient_buffer[i] += factor * point[i];
-        }
-      }
-      task_context->WriteVariable(d_local_gradient)->ToDevice(
-          local_gradient_buffer);
+      app::UpdateWeight(task_context->ReadVariable(d_x),
+                        task_context->ReadVariable(d_y),
+                        task_context->ReadVariable(d_local_w),
+                        task_context->WriteVariable(d_local_gradient));
     });
 
     ReadAccess(d_local_gradient);
