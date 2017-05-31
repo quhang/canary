@@ -24,7 +24,7 @@ class LogisticLoopApplication : public CanaryApplication {
  public:
   // The program.
   void Program() override {
-    typedef std::vector<double> Point;
+    typedef std::vector<float> Point;
     const Point reference{1., -1., 1., 1., -1., 2.,  2.,
                           2., 1.,  1., 0., 1.,  -1., 1.,
                           1., 1.,  2., 1., 1.,  1.};
@@ -32,10 +32,10 @@ class LogisticLoopApplication : public CanaryApplication {
     // Declares variables.
 
     // Placed on a computation node.
-    auto d_x = DeclareVariable<GpuTensorStore<double, 2>>(FLAG_app_partitions);
-    auto d_y = DeclareVariable<GpuTensorStore<double, 1>>();
-    auto d_local_gradient = DeclareVariable<GpuTensorStore<double, 1>>();
-    auto d_local_w = DeclareVariable<GpuTensorStore<double, 1>>();
+    auto d_x = DeclareVariable<GpuTensorStore<float, 2>>(FLAG_app_partitions);
+    auto d_y = DeclareVariable<GpuTensorStore<float, 1>>();
+    auto d_local_gradient = DeclareVariable<GpuTensorStore<float, 1>>();
+    auto d_local_w = DeclareVariable<GpuTensorStore<float, 1>>();
 
     // Placed on a parameter node.
     auto d_global_gradient = DeclareVariable<Point>();
@@ -57,8 +57,6 @@ class LogisticLoopApplication : public CanaryApplication {
       task_context->WriteVariable(d_global_w)->assign(DIMENSION, 1.);
     });
 
-
-
     Loop(FLAG_app_iterations);
 
     TrackNeeded();
@@ -72,7 +70,7 @@ class LogisticLoopApplication : public CanaryApplication {
     Gather([=](CanaryTaskContext* task_context) -> int {
       EXPECT_GATHER_SIZE(1);
       // Receive the global weight and load it into GPU.
-      std::vector<double> buffer;
+      std::vector<float> buffer;
       task_context->GatherSingle(&buffer);
       task_context->WriteVariable(d_local_w)->ToDevice(buffer);
       return 0;
@@ -102,7 +100,7 @@ class LogisticLoopApplication : public CanaryApplication {
       global_gradient->assign(DIMENSION, 0);
       task_context->Reduce(
           global_gradient,
-          [=](const std::vector<double>& left, std::vector<double>* right) {
+          [=](const std::vector<float>& left, std::vector<float>* right) {
             for (int i = 0; i < DIMENSION; ++i) { (*right)[i] += left[i]; }
           });
       return 0;
