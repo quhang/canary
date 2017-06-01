@@ -115,14 +115,14 @@ template<typename T, size_t Dimension> class GpuTensorStore {
 
 namespace app {
 
-void GenerateRandomData(const std::vector<float> reference,
-                        GpuTensorStore<float, 2>* x_data,
-                        GpuTensorStore<float, 1>* y_data);
+void GenerateRandomData(const std::vector<double> reference,
+                        GpuTensorStore<double, 2>* x_data,
+                        GpuTensorStore<double, 1>* y_data);
 
-void UpdateWeight(const GpuTensorStore<float, 2>& x_data,
-                  const GpuTensorStore<float, 1>& y_data,
-                  const GpuTensorStore<float, 1>& w_data,
-                  GpuTensorStore<float, 1>* g_data);
+void UpdateWeight(const GpuTensorStore<double, 2>& x_data,
+                  const GpuTensorStore<double, 1>& y_data,
+                  const GpuTensorStore<double, 1>& w_data,
+                  GpuTensorStore<double, 1>* g_data);
 
 }  // namespace app
 

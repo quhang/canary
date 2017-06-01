@@ -13,5 +13,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 # An application is built as a shared library.
 cuda_add_library(cuda_logistic_loop cuda_logistic_loop.cc cuda_helper.cu SHARED)
 set_target_properties(cuda_logistic_loop PROPERTIES COMPILE_FLAGS "${cxx_default}")
+target_link_libraries(cuda_logistic_loop cublas)
 # canary_core library must be built before.
 add_dependencies(cuda_logistic_loop canary_core)
