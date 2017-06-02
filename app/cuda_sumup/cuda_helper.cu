@@ -94,19 +94,19 @@ namespace cuda_internal {
 cached_allocator alloc;
 std::mutex lock_global;
 
-void Assign(thrust::device_vector<float>* output, long numbers, float value) {
+void Assign(thrust::device_vector<double>* output, long numbers, double value) {
   output->assign(numbers, value);
 }
-float Reduce(const thrust::device_vector<float>& input) {
+double Reduce(const thrust::device_vector<double>& input) {
   std::lock_guard<std::mutex> lock(lock_global);
-  return thrust::reduce(thrust::cuda::par(alloc), input.begin(), input.end(), 0, thrust::plus<float>());
+  return thrust::reduce(thrust::cuda::par(alloc), input.begin(), input.end(), 0, thrust::plus<double>());
 }
-void Load(const std::vector<float>& input,
-          thrust::device_vector<float>* output) {
+void Load(const std::vector<double>& input,
+          thrust::device_vector<double>* output) {
   *output = input;
 }
-void Store(const thrust::device_vector<float>& input,
-           std::vector<float>* output) {
+void Store(const thrust::device_vector<double>& input,
+           std::vector<double>* output) {
   output->assign(input.size(), 0);
   thrust::copy(input.begin(), input.end(), output->begin());
 }

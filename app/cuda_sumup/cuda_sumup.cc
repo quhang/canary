@@ -13,18 +13,18 @@
 static int FLAG_app_partitions = 2;   // Number of partitions.
 static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
-static long long FLAG_app_floats = 100; // Number of floats to sum.
+static long long FLAG_app_doubles = 100; // Number of doubles to sum.
 
 namespace cereal {
 template<class Archive>
-void save(Archive& archive, const thrust::device_vector<float>& data) {
-  std::vector<float> buffer;
+void save(Archive& archive, const thrust::device_vector<double>& data) {
+  std::vector<double> buffer;
   ::cuda_internal::Store(data, &buffer);
   archive(buffer);
 }
 template<class Archive>
-void load(Archive& archive, thrust::device_vector<float>& data) {
-  std::vector<float> buffer;
+void load(Archive& archive, thrust::device_vector<double>& data) {
+  std::vector<double> buffer;
   archive(buffer);
   ::cuda_internal::Load(buffer, &data);
 }
@@ -40,10 +40,10 @@ class BarrierTestApplication : public CanaryApplication {
   // The program.
   void Program() override {
     // Declares variables.
-    auto d_component = DeclareVariable<thrust::device_vector<float>>(
+    auto d_component = DeclareVariable<thrust::device_vector<double>>(
         FLAG_app_partitions);
-    auto d_inter = DeclareVariable<float>(FLAG_app_intermediate);
-    auto d_sum = DeclareVariable<float>(1);
+    auto d_inter = DeclareVariable<double>(FLAG_app_intermediate);
+    auto d_sum = DeclareVariable<double>(1);
 
     WriteAccess(d_sum);
     Transform([=](CanaryTaskContext* task_context) {
@@ -54,7 +54,7 @@ class BarrierTestApplication : public CanaryApplication {
     Transform([=](CanaryTaskContext* task_context) {
       ::cuda_internal::Assign(
           task_context->WriteVariable(d_component),
-          FLAG_app_floats / FLAG_app_partitions, 1);
+          FLAG_app_doubles / FLAG_app_partitions, 1);
     });
 
     Loop(FLAG_app_iterations);
@@ -68,7 +68,7 @@ class BarrierTestApplication : public CanaryApplication {
     WriteAccess(d_component);
     Gather([=](CanaryTaskContext* task_context) -> int {
       EXPECT_GATHER_SIZE(1);
-      float temp = 0;
+      double temp = 0;
       task_context->GatherSingle(&temp);
       return 0;
     });
@@ -89,8 +89,8 @@ class BarrierTestApplication : public CanaryApplication {
       EXPECT_GATHER_SIZE(task_context->GetScatterParallelism() /
                          task_context->GetGatherParallelism() +
                          (task_context->GetPartitionId() < remain ? 1 : 0));
-      float* sum = task_context->WriteVariable(d_inter);
-      *sum = task_context->Reduce(float(0), std::plus<float>());
+      double* sum = task_context->WriteVariable(d_inter);
+      *sum = task_context->Reduce(double(0), std::plus<double>());
       return 0;
     });
 
@@ -102,8 +102,8 @@ class BarrierTestApplication : public CanaryApplication {
     WriteAccess(d_sum);
     Gather([=](CanaryTaskContext* task_context) -> int {
       EXPECT_GATHER_SIZE(task_context->GetScatterParallelism());
-      float* sum = task_context->WriteVariable(d_sum);
-      *sum = task_context->Reduce(float(0), std::plus<float>());
+      double* sum = task_context->WriteVariable(d_sum);
+      *sum = task_context->Reduce(double(0), std::plus<double>());
       printf("%.9f %f\n",
              time::timepoint_to_double(time::WallClock::now()),
              *sum);
@@ -123,7 +123,7 @@ class BarrierTestApplication : public CanaryApplication {
       LoadFlag("partitions", FLAG_app_partitions, archive);
       LoadFlag("iterations", FLAG_app_iterations, archive);
       LoadFlag("intermediate", FLAG_app_intermediate, archive);
-      LoadFlag("floats", FLAG_app_floats, archive);
+      LoadFlag("doubles", FLAG_app_doubles, archive);
     }
   }
 };
