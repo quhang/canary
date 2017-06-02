@@ -81,10 +81,10 @@ class LogisticLoopApplication : public CanaryApplication {
     ReadAccess(d_local_w);
     WriteAccess(d_local_gradient);
     Transform([=](CanaryTaskContext* task_context) {
-      app::UpdateWeight(task_context->ReadVariable(d_x),
-                        task_context->ReadVariable(d_y),
-                        task_context->ReadVariable(d_local_w),
-                        task_context->WriteVariable(d_local_gradient));
+      app::UpdateWeightTuned(task_context->ReadVariable(d_x),
+                             task_context->ReadVariable(d_y),
+                             task_context->ReadVariable(d_local_w),
+                             task_context->WriteVariable(d_local_gradient));
     });
 
     ReadAccess(d_local_gradient);

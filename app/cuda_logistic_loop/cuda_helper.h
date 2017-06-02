@@ -123,6 +123,10 @@ void UpdateWeight(const GpuTensorStore<double, 2>& x_data,
                   const GpuTensorStore<double, 1>& y_data,
                   const GpuTensorStore<double, 1>& w_data,
                   GpuTensorStore<double, 1>* g_data);
+void UpdateWeightTuned(const GpuTensorStore<double, 2>& x_data,
+                       const GpuTensorStore<double, 1>& y_data,
+                       const GpuTensorStore<double, 1>& w_data,
+                       GpuTensorStore<double, 1>* g_data);
 
 }  // namespace app
 

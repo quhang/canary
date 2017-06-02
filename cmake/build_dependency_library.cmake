@@ -81,7 +81,7 @@ set_property(TARGET gtest_main PROPERTY IMPORTED_LOCATION ${DEPENDENCY_INSTALL_P
 
 IF(build_gpu)
   find_package(CUDA REQUIRED)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -O3 --std=c++11 --gpu-architecture=compute_35 -Xcompiler -fPIC)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED --use_fast_math -O3 --std=c++11 --gpu-architecture=compute_35 -Xcompiler -fPIC)
 
   # Installs header-only Eigen library.
   ExternalProject_Add(project_eigen
