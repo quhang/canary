@@ -146,16 +146,16 @@ void GenerateRandomData(const std::vector<double> reference,
 //}
 
 // Simpler version assuming dim <= 32.
-__global__ void ComputeDotProduct(double* w_data, double* x_data, double* factor_data, int dim) {
-  int result = w_data[threadIdx.x] * x_data[blockIdx.x * dim + threadIdx.x];
-  // Synchronous instructions within a warp to reduce the sum.
-  result += __shfl_down(result, 16);
-  result += __shfl_down(result, 8);
-  result += __shfl_down(result, 4);
-  result += __shfl_down(result, 2);
-  result += __shfl_down(result, 1);
-  factor_data[blockIdx.x] = result;
-}
+//__global__ void ComputeDotProduct(double* w_data, double* x_data, double* factor_data, int dim) {
+//  int result = w_data[threadIdx.x] * x_data[blockIdx.x * dim + threadIdx.x];
+//  // Synchronous instructions within a warp to reduce the sum.
+//  result += __shfl_down(result, 16);
+//  result += __shfl_down(result, 8);
+//  result += __shfl_down(result, 4);
+//  result += __shfl_down(result, 2);
+//  result += __shfl_down(result, 1);
+//  factor_data[blockIdx.x] = result;
+//}
 
 __global__ void UpdateFactorKernel(double* factor_data, double* y_data, int samples) {
   int index = blockIdx.x * 32 + threadIdx.x;
@@ -182,18 +182,18 @@ void UpdateWeight(const GpuTensorStore<double, 2>& x_data,
   double alpha = 1;
   double beta = 0;
   cublasStatus_t return_status;
-  ComputeDotProduct<<<samples, dim>>>((double*)w_data.get_data(), (double*)x_data.get_data(), (double*)factor_data.get_data(), dim);
+  //ComputeDotProduct<<<samples, dim>>>((double*)w_data.get_data(), (double*)x_data.get_data(), (double*)factor_data.get_data(), dim);
   // Call into cuBLAS library to compute the matrix multiplication.
   // Result: gemv is 3x slower than the handwritten kernel.
-  //cublasStatus_t return_status =
-  //  cublasDgemv(cublas_handle, CUBLAS_OP_T,
-  //              dim, samples, &alpha,
-  //              (double*)x_data.get_data(), dim,
-  //              (double*)w_data.get_data(), 1,
-  //              &beta,
-  //              (double*)factor_data.get_data(), 1);
+  return_status =
+    cublasDgemv(cublas_handle, CUBLAS_OP_T,
+                dim, samples, &alpha,
+                (double*)x_data.get_data(), dim,
+                (double*)w_data.get_data(), 1,
+                &beta,
+                (double*)factor_data.get_data(), 1);
   // Result: gemm is no faster than gemv.
-  //cublasStatus_t return_status =
+  // return_status =
   //  cublasDgemm(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
   //              1, samples, dim, &alpha,
   //              (double*)w_data.get_data(), 1,
