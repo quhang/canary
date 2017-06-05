@@ -132,26 +132,7 @@ void GenerateRandomData(const std::vector<double> reference,
 }
 
 // Unused kernels.
-// // General version with no assumptiong about dim.
-// #if __CUDA_ARCH__ < 600
-// __device__ double atomicAdd(double* address, double val)
-// {
-//     unsigned long long int* address_as_ull =
-//                               (unsigned long long int*)address;
-//     unsigned long long int old = *address_as_ull, assumed;
-// 
-//     do {
-//         assumed = old;
-//         old = atomicCAS(address_as_ull, assumed,
-//                         __double_as_longlong(val +
-//                                __longlong_as_double(assumed)));
-// 
-//     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-//     } while (assumed != old);
-// 
-//     return __longlong_as_double(old);
-// }
-// #endif
+// General version with no assumptiong about dim.
 // 
 // __global__ void ComputeDotProduct(double* w_data, double* x_data, double* factor_data, int dim) {
 //   if (threadIdx.x == 0) {
@@ -250,32 +231,63 @@ void UpdateWeight(const GpuTensorStore<double, 2>& x_data,
 /*
  * Compute the gradient and reduce by 32x.
  */
-__global__ void ComputeGradientPart(double* x_data, double* y_data, double* w_data, int dim, int samples, int num_warps,
+#define warpSize 32
+
+// Reduce `val` in the warp.
+__inline__ __device__ double WarpReduceSum(double val) {
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) 
+    val += __shfl_down(val, offset);
+  return val;
+}
+
+// Reduce `val` in the block. The block size is smaller than 32*32=1024.
+__inline__ __device__ double BlockReduceSum(double val) {
+  __shared__ double shared[32];
+  int lane = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+  val = WarpReduceSum(val);
+  if (lane == 0) shared[wid] = val;
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0;
+  if (wid == 0) val = WarpReduceSum(val);
+  return val;
+}
+
+// Every thread block computes updates to the gradients and writes the updates to `interg_data`.
+__global__ void ComputeGradientPart(double* x_data, double* y_data, double* w_data,
+                                    int dim, int samples,
                                     double* interg_data) {
-  int base_index = blockIdx.x * 32 + threadIdx.x;
-  double factor = 0;
+  double factor;
   // CAUTION: hard-coded dim.
-  double x_data_buffer[20];
-  if (base_index < samples) {
+  double result[20] = {0};
+  // Grid-stripped loop.
+  for (int index = blockIdx.x * blockDim.x + threadIdx.x;
+       index < samples; index += gridDim.x * blockDim.x) {
+    factor = 0;
     for (int i = 0; i < dim; ++i) {
-      x_data_buffer[i] = x_data[base_index * dim + i];
-      factor += x_data_buffer[i] * w_data[i];
+      factor += x_data[index * dim + i] * w_data[i];
     }
-    const double y_data_buffer = y_data[base_index];
+    const double y_data_buffer = y_data[index];
     factor = y_data_buffer * (1. / (1. + exp(-y_data_buffer * factor)) - 1.);
+    for (int i = 0; i < dim; ++i) {
+      result[i] += factor * x_data[index * dim + i];
+    }
   }
   double temp;
   for (int i = 0; i < dim; ++i) {
-    temp = factor * x_data_buffer[i];
-    // Every wrap of size 32 sums up the gradients sychronously. No synchronizaiton is needed.
-    temp += __shfl_down(temp, 16);
-    temp += __shfl_down(temp, 8);
-    temp += __shfl_down(temp, 4);
-    temp += __shfl_down(temp, 2);
-    temp += __shfl_down(temp, 1);
+    temp = BlockReduceSum(result[i]);
     if (threadIdx.x == 0) {
-      interg_data[i * num_warps + blockIdx.x] = temp;
+      interg_data[gridDim.x * i + blockIdx.x] = temp;
     }
+  }
+}
+
+// Every thread block sums up one dimension of `interg_data`.
+__global__ void SumupKernel(double* interg_data, double* g_data, int len) {
+  double temp = BlockReduceSum(
+    threadIdx.x < len ? interg_data[blockIdx.x * len + threadIdx.x] : 0);
+  if (threadIdx.x == 0) {
+    g_data[blockIdx.x] = temp;
   }
 }
 
@@ -285,23 +297,16 @@ void UpdateWeightTuned(const GpuTensorStore<double, 2>& x_data,
 		GpuTensorStore<double, 1>* g_data) {
   const size_t dim = x_data.get_ranks()[0];
   const size_t samples = x_data.get_ranks()[1];
-  int threads_per_block = 32;
-  int num_blocks = (samples + threads_per_block - 1) / threads_per_block;
-  int num_warps = (samples + 31) / 32;
+  int threads_per_block = 1024;
+  int num_blocks = std::min(int(samples + threads_per_block - 1) / threads_per_block, 1024);
+  g_data->Resize({dim});
   GpuTensorStore<double, 1> interg_data;
-  interg_data.Resize({num_warps * dim});
+  interg_data.Resize({(unsigned long)num_blocks});
   ComputeGradientPart<<<num_blocks, threads_per_block>>>(
       (double*)x_data.get_data(), (double*)y_data.get_data(), (double*)w_data.get_data(),
-      dim, samples, num_warps, (double*)interg_data.get_data());
-  std::vector<double> result(dim);
-  for (int i = 0; i < dim; ++i) {
-    // Thrust reduction is highly optimized, and this kernel is not the dominant computation part.
-    result[i] = thrust::reduce(
-		    thrust::device_ptr<double>((double*)interg_data.get_data() + i * num_warps),
-                    thrust::device_ptr<double>((double*)interg_data.get_data() + (i+1) * num_warps),
-		    0., thrust::plus<double>());
-  }
-  g_data->ToDevice(result);
+      dim, samples, (double*)interg_data.get_data());
+  SumupKernel<<<dim, 1024>>>((double*)interg_data.get_data(),
+                             (double*)g_data->get_data(), num_blocks);
   // Wait for GPU computations to complete.
   cudaDeviceSynchronize();
 }
