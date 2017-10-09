@@ -148,6 +148,7 @@ class KmeanLoopApplication : public CanaryApplication {
         ++(*local_stat)[cluster_id].first;
         helper::array_add(point, &(*local_stat)[cluster_id].second);
       }
+      LOG(INFO) << "end on partition" << task_context->GetPartitionId();
     });
 
     ReadAccess(d_local_stat);
