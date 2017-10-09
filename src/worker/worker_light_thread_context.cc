@@ -343,15 +343,19 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
 
 void WorkerExecutionContext::ProcessMigrateIn(struct evbuffer* command) {
   // MIGRATION, step five: decodes migrated data.
-  VLOG(1) << "Process migrate in " << get_value(get_worker_id()) << "/"
-          << get_value(get_application_id()) << "/"
-          << get_value(get_variable_group_id()) << "/"
-          << get_value(get_partition_id());
+  LOG(INFO) << "Process migrate in " << get_value(get_worker_id()) << "/"
+      << get_value(get_application_id()) << "/"
+      << get_value(get_variable_group_id()) << "/"
+      << get_value(get_partition_id());
   // Deserializes the partition.
   {
     CanaryInputArchive archive(command);
     archive(*this);
   }
+  LOG(INFO) << "Deserialized " << get_value(get_worker_id()) << "/"
+      << get_value(get_application_id()) << "/"
+      << get_value(get_variable_group_id()) << "/"
+      << get_value(get_partition_id());
   // Tells the controller that the partition is migrated in.
   message::ControllerRespondMigrationInDone response;
   response.from_worker_id = get_worker_id();
@@ -364,10 +368,10 @@ void WorkerExecutionContext::ProcessMigrateIn(struct evbuffer* command) {
 
 void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
   // MIGRATION, step three.
-  VLOG(1) << "Process migrate out " << get_value(get_worker_id()) << "/"
-          << get_value(get_application_id()) << "/"
-          << get_value(get_variable_group_id()) << "/"
-          << get_value(get_partition_id());
+  LOG(INFO) << "Process migrate out " << get_value(get_worker_id()) << "/"
+      << get_value(get_application_id()) << "/"
+      << get_value(get_variable_group_id()) << "/"
+      << get_value(get_partition_id());
   // Tells the controller that the partition is migrated out.
   message::ControllerRespondMigrationOutDone response;
   FillInStats(&response);
@@ -387,6 +391,10 @@ void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
     CanaryOutputArchive archive(direct_data_migrate.raw_buffer.buffer);
     archive(*this);
   }
+  LOG(INFO) << "Serielized " << get_value(get_worker_id()) << "/"
+      << get_value(get_application_id()) << "/"
+      << get_value(get_variable_group_id()) << "/"
+      << get_value(get_partition_id());
   struct evbuffer* buffer = SerializeMessage(direct_data_migrate);
   // The length before adding the header.
   const auto length = evbuffer_get_length(buffer);

@@ -51,6 +51,9 @@ LoadSchedule* LoadSchedule::ConstructLoadSchedule(
   if (name == "test") {
     return new TestLoadSchedule(scheduling_info);
   }
+  if (name == "move") {
+    return new TestMoveLoadSchedule(scheduling_info);
+  }
   if (name == "balance") {
     return new BalancedPartitionNumberLoadSchedule(scheduling_info);
   }
@@ -91,6 +94,29 @@ void TestLoadSchedule::BalanceLoad() {
                                              second_iter->first);
   scheduling_info_->DecidePartitionPlacement(second_full_partition_id,
                                              first_iter->first);
+}
+
+void TestMoveLoadSchedule::BalanceLoad() {
+  const auto& worker_map = scheduling_info_->get_worker_map();
+  if (worker_map.size() < 2u) {
+    return;
+  }
+  const auto first_iter = worker_map.cbegin();
+  if (first_iter->second.owned_partitions.empty()) {
+    return;
+  }
+  const auto first_full_partition_id =
+      *first_iter->second.owned_partitions.cbegin()->second.cbegin();
+  const auto second_iter = std::next(first_iter);
+  LOG(INFO) << "Move from worker(" << get_value(first_iter->first)
+            << ") to worker(" << get_value(second_iter->first) << ").";
+  LOG(INFO) << "Move Partition("
+            << get_value(first_full_partition_id.application_id) << "/"
+            << get_value(first_full_partition_id.variable_group_id) << "/"
+            << get_value(first_full_partition_id.partition_id)
+            << ")";
+  scheduling_info_->DecidePartitionPlacement(first_full_partition_id,
+                                             second_iter->first);
 }
 
 void BalancedPartitionNumberLoadSchedule::BalanceLoad() {

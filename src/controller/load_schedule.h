@@ -88,6 +88,20 @@ class TestLoadSchedule : public LoadSchedule {
 };
 
 /**
+ * A test load balancing algorithm, which moves one partition.
+ */
+class TestMoveLoadSchedule : public LoadSchedule {
+ public:
+  //! Constructor.
+  explicit TestMoveLoadSchedule(SchedulingInfo* scheduling_info)
+      : LoadSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~TestMoveLoadSchedule() {}
+  //! Invokes the load balancing algorithm.
+  void BalanceLoad() override;
+};
+
+/**
  * A simple load balancing algorithm, which balances the number of partitions
  * across workers.
  */

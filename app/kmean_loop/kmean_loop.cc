@@ -134,6 +134,7 @@ class KmeanLoopApplication : public CanaryApplication {
     ReadAccess(d_local_center);
     WriteAccess(d_local_stat);
     Transform([=](CanaryTaskContext* task_context) {
+      LOG(INFO) << "start on partition" << task_context->GetPartitionId();
       this->rate_limiter_.Join();
       const auto& points = task_context->ReadVariable(d_point);
       const auto& local_center = task_context->ReadVariable(d_local_center);
