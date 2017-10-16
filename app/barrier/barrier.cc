@@ -14,6 +14,7 @@ static int FLAG_app_iterations = 10;  // Number of iterations.
 static int FLAG_app_intermediate = 4;  // Number of intermediate combiners.
 static int FLAG_app_wait_us = 0;  // waiting in us.
 static int FLAG_app_innerp = 1;  // waiting in us.
+static int FLAG_app_deadlock = 0;
 
 namespace canary {
 
@@ -39,6 +40,11 @@ class BarrierTestApplication : public CanaryApplication {
     TrackNeeded();
     ReadAccess(d_sum);
     Scatter([=](CanaryTaskContext* task_context) {
+      if (FLAG_app_deadlock != 0) {
+        while (true) {
+          continue;
+        }
+      }
       task_context->Broadcast(task_context->ReadVariable(d_sum));
     });
 
@@ -107,6 +113,7 @@ class BarrierTestApplication : public CanaryApplication {
       LoadFlag("intermediate", FLAG_app_intermediate, archive);
       LoadFlag("wait_us", FLAG_app_wait_us, archive);
       LoadFlag("innerp", FLAG_app_innerp, archive);
+      LoadFlag("deadlock", FLAG_app_deadlock, archive);
     }
   }
 };
