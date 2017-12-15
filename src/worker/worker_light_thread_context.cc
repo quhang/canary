@@ -191,7 +191,7 @@ void WorkerLightThreadContext::save(CanaryOutputArchive& archive)  // NOLINT
 }
 
 void WorkerExecutionContext::Initialize() {
-  stage_graph_.set_statement_info_map(
+  stage_graph_->set_statement_info_map(
       get_canary_application()->get_statement_info_map());
 }
 
@@ -249,7 +249,7 @@ bool WorkerExecutionContext::RunOneStage() {
     return true;
   }
   StatementId statement_id;
-  std::tie(stage_id, statement_id) = stage_graph_.GetNextReadyStage();
+  std::tie(stage_id, statement_id) = stage_graph_->GetNextReadyStage();
   if (stage_id == StageId::COMPLETE) {
     message::ControllerRespondPartitionDone report;
     FillInStats(&report);
@@ -304,11 +304,11 @@ void WorkerExecutionContext::Report() {
 
 void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
   running_stats->earliest_unfinished_stage_id =
-      stage_graph_.get_earliest_unfinished_stage_id();
+      stage_graph_->get_earliest_unfinished_stage_id();
   running_stats->last_finished_stage_id =
-      stage_graph_.get_last_finished_stage_id();
-  stage_graph_.retrieve_timestamp_stats(&running_stats->timestamp_stats);
-  stage_graph_.retrieve_cycle_stats(&running_stats->cycle_stats);
+      stage_graph_->get_last_finished_stage_id();
+  stage_graph_->retrieve_timestamp_stats(&running_stats->timestamp_stats);
+  stage_graph_->retrieve_cycle_stats(&running_stats->cycle_stats);
 }
 
 //! Fills in running stats into a command.
@@ -323,11 +323,11 @@ void WorkerExecutionContext::FillInStats(T* report) {
 
 void WorkerExecutionContext::ProcessInitCommand(struct evbuffer* command) {
   // Caution: initialization generates the initial task graph.
-  stage_graph_.Initialize(get_variable_group_id(), get_partition_id());
+  stage_graph_->Initialize(get_variable_group_id(), get_partition_id());
   using internal_message::InitCommand;
   auto struct_message = internal_message::to_command<InitCommand>(command);
   if (struct_message.first_barrier_stage != StageId::INVALID) {
-    stage_graph_.InsertBarrier(struct_message.first_barrier_stage);
+    stage_graph_->InsertBarrier(struct_message.first_barrier_stage);
   }
   AllocatePartitionData();
 }
@@ -337,7 +337,7 @@ void WorkerExecutionContext::ProcessControlFlowDecision(
   using internal_message::ControlDecisionCommand;
   auto struct_message =
       internal_message::to_command<ControlDecisionCommand>(command);
-  stage_graph_.FeedControlFlowDecision(struct_message.stage_id,
+  stage_graph_->FeedControlFlowDecision(struct_message.stage_id,
                                        struct_message.decision);
 }
 
@@ -420,11 +420,11 @@ void WorkerExecutionContext::ProcessInstallBarrier(struct evbuffer* command) {
   auto struct_message =
       internal_message::to_command<InstallBarrierCommand>(command);
   CHECK(struct_message.barrier_stage_id != StageId::INVALID);
-  stage_graph_.InsertBarrier(struct_message.barrier_stage_id);
+  stage_graph_->InsertBarrier(struct_message.barrier_stage_id);
 }
 
 void WorkerExecutionContext::ProcessReleaseBarrier() {
-  stage_graph_.ReleaseBarrier();
+  stage_graph_->ReleaseBarrier();
 }
 
 void WorkerExecutionContext::RunGatherStage(
@@ -444,7 +444,7 @@ void WorkerExecutionContext::RunGatherStage(
   const int needed_message = (statement_info.int_task_function)(&task_context);
   const auto end_time = time::Clock::now();
   CHECK_EQ(needed_message, 0);
-  stage_graph_.CompleteStage(stage_id,
+  stage_graph_->CompleteStage(stage_id,
                              time::duration_to_double(end_time - start_time));
 }
 
@@ -463,7 +463,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const auto start_time = time::Clock::now();
       (statement_info.void_task_function)(&task_context);
       const auto end_time = time::Clock::now();
-      stage_graph_.CompleteStage(
+      stage_graph_->CompleteStage(
           stage_id, time::duration_to_double(end_time - start_time));
       break;
     }
@@ -471,7 +471,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const auto start_time = time::Clock::now();
       (statement_info.void_task_function)(&task_context);
       const auto end_time = time::Clock::now();
-      stage_graph_.CompleteStage(
+      stage_graph_->CompleteStage(
           stage_id, time::duration_to_double(end_time - start_time));
       break;
     }
@@ -482,7 +482,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const auto end_time = time::Clock::now();
       if (needed_message == 0) {
         VLOG(1) << "Gather stage needs no data, and falls throught.";
-        stage_graph_.CompleteStage(
+        stage_graph_->CompleteStage(
             stage_id, time::duration_to_double(end_time - start_time));
       } else {
         VLOG(1) << "Gather stage needs message of " << needed_message;
@@ -495,7 +495,7 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
       const auto start_time = time::Clock::now();
       const bool decision = (statement_info.bool_task_function)(&task_context);
       const auto end_time = time::Clock::now();
-      stage_graph_.CompleteStage(
+      stage_graph_->CompleteStage(
           stage_id, time::duration_to_double(end_time - start_time));
       // Broadcast control flow decision.
       for (const auto& pair :
@@ -583,7 +583,7 @@ void WorkerExecutionContext::DeallocatePartitionData() {
 void WorkerExecutionContext::load(CanaryInputArchive& archive) {  // NOLINT
   WorkerLightThreadContext::load(archive);
   archive(partition_state_);
-  archive(stage_graph_);
+  archive(*stage_graph_);
   archive(pending_gather_stages_);
   AllocatePartitionData();
   for (auto& pair : local_partition_data_) {
@@ -598,7 +598,7 @@ void WorkerExecutionContext::save(CanaryOutputArchive& archive)  // NOLINT
     const {
   WorkerLightThreadContext::save(archive);
   archive(partition_state_);
-  archive(stage_graph_);
+  archive(*stage_graph_);
   archive(pending_gather_stages_);
   for (auto& pair : local_partition_data_) {
     archive(pair.first);

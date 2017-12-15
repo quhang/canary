@@ -47,6 +47,8 @@
 #include "shared/canary_application.h"
 #include "shared/canary_internal.h"
 
+#include "worker/execute_engine.h"
+
 namespace canary {
 
 /**
@@ -54,7 +56,7 @@ namespace canary {
  * to execute. In the current implementation, each partition saves a seperate
  * copy of the stage graph, for simplicity reasons.
  */
-class StageGraph {
+class StageGraph : public ExecuteEngine {
  public:
   //! Record of a stage.
   struct StageRecord {
@@ -81,24 +83,24 @@ class StageGraph {
   //! Constructor.
   StageGraph() {}
   //! Deconstructor.
-  virtual ~StageGraph() {}
+  ~StageGraph() override {}
   //! Sets statement info map.
   void set_statement_info_map(
-      const CanaryApplication::StatementInfoMap* statement_info_map) {
+      const CanaryApplication::StatementInfoMap* statement_info_map) override {
     statement_info_map_ = statement_info_map;
   }
   //! Initializes the stage graph when first launched.
   void Initialize(VariableGroupId self_variable_group_id,
-                  PartitionId self_partition_id);
+                  PartitionId self_partition_id) override;
   //! Reports complete stage.
-  void CompleteStage(StageId complete_stage_id, double cycles);
+  void CompleteStage(StageId complete_stage_id, double cycles) override;
   //! Gets the next ready stage.
-  std::pair<StageId, StatementId> GetNextReadyStage();
+  std::pair<StageId, StatementId> GetNextReadyStage() override;
   //! Feeds a control flow decision.
-  void FeedControlFlowDecision(StageId stage_id, bool control_decision);
+  void FeedControlFlowDecision(StageId stage_id, bool control_decision) override;
 
   //! Gets the earliest stage that is not finished.
-  StageId get_earliest_unfinished_stage_id() {
+  StageId get_earliest_unfinished_stage_id() override {
     if (uncomplete_stage_map_.empty()) {
       return StageId::INVALID;
     } else {
@@ -106,7 +108,7 @@ class StageGraph {
     }
   }
   //! Gets the latest stage that is finished.
-  StageId get_last_finished_stage_id() {
+  StageId get_last_finished_stage_id() override {
     if (no_more_statement_to_spawn_ && uncomplete_stage_map_.empty()) {
       return StageId::COMPLETE;
     } else {
@@ -115,18 +117,18 @@ class StageGraph {
   }
   //! The timestamp of critical stages.
   void retrieve_timestamp_stats(
-      std::map<StageId, std::pair<StatementId, double>>* timestamp_storage) {
+      std::map<StageId, std::pair<StatementId, double>>* timestamp_storage) override {
     timestamp_storage->swap(timestamp_storage_);
   }
   //! The cycles for stages.
   void retrieve_cycle_stats(
-      std::map<StageId, std::pair<StatementId, double>>* cycle_storage_result);
+      std::map<StageId, std::pair<StatementId, double>>* cycle_storage_result) override;
 
   /*
    * Controls barrier bahavior.
    */
-  bool InsertBarrier(StageId stage_id);
-  void ReleaseBarrier();
+  bool InsertBarrier(StageId stage_id) override;
+  void ReleaseBarrier() override;
 
  private:
   //! Whether a stage needs to be blocked.
@@ -140,14 +142,24 @@ class StageGraph {
   // no more statement to execute.
   void SpawnLocalStages();
   //! Examines the next statement, and returns false if no progress can be made.
-  bool ExamineNextStatement();
-  //! Spawns a stage from a statement.
+  bool ExamineNextStatement(); //! Spawns a stage from a statement.
   void SpawnStageFromStatement(
       StageId stage_id, StatementId statement_id,
       const CanaryApplication::StatementInfo& statement_info);
 
  public:
-  //! Serialization/deserialization.
+  //! Deserialization function.
+  void load(CanaryInputArchive& archive) override {  // NOLINT
+    serialize(archive);
+  }
+  //! Serialization function. Data are destroyed after serialization.
+  void save(CanaryOutputArchive& archive) const override {  // NOLINT
+    const_cast<StageGraph*>(this)->serialize(archive);
+  }
+
+ private:
+  //! Serialization/deserialization. Being private prevents it from being seen
+  //! by cereal.
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(self_variable_group_id_, self_partition_id_);
@@ -162,7 +174,6 @@ class StageGraph {
     archive(next_barrier_stage_id_, barrier_ready_stage_queue_);
   }
 
- private:
   //! The statement info map, which describes the program.
   // Caution: TRANSIENT.
   const CanaryApplication::StatementInfoMap* statement_info_map_ = nullptr;

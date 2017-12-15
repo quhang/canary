@@ -212,7 +212,7 @@ class WorkerLightThreadContext {
 
 class WorkerExecutionContext : public WorkerLightThreadContext {
  public:
-  WorkerExecutionContext() {}
+  WorkerExecutionContext() : stage_graph_(std::make_unique<StageGraph>()) {}
   virtual ~WorkerExecutionContext() {}
   //! Initializes the light thread.
   void Initialize() override;
@@ -273,7 +273,7 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void save(CanaryOutputArchive& archive) const override;  // NOLINT
 
  private:
-  StageGraph stage_graph_;
+  std::unique_ptr<ExecuteEngine> stage_graph_;
   std::map<StageId, StatementId> pending_gather_stages_;
   std::map<VariableId, std::unique_ptr<PartitionData>> local_partition_data_;
   enum PartitionState : int32_t {
