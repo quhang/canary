@@ -32,43 +32,12 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @file src/worker/recipe.h
+ * @file src/worker/recipe_block.cc
  * @author Hang Qu (quhang@cs.stanford.edu)
- * @brief Class Recipe.
+ * @brief Class RecipeBlock.
  */
-
-#ifndef CANARY_SRC_WORKER_RECIPE_H_
-#define CANARY_SRC_WORKER_RECIPE_H_
-
-#include <map>
-#include <set>
-#include <utility>
-
-#include "shared/canary_application.h"
-#include "shared/canary_internal.h"
 
 namespace canary {
 
-struct AccessRequirement {
-  VariableId variable_id;
-  enum class AccessType { READ, WRITE } access_type;
-  // The stage id is offset relative to the beginning of its recipe block.
-  StageId last_write_stage_id_offset;
-  int32_t num_reading_stages;
-  // If what are executed before the recipe are data-dependent, the access
-  // record may need dynamic adjustment. This happens when the last write stage
-  // is before the begining of the recipe block and unpredictable.
-  bool need_dynamic_adjustment;
-};
-
-struct Recipe {
-  VariableGroupId variable_group_id;
-  RecipeId recipe_id;
-  // The stage id is offset relative to the beginning of its recipe block.
-  StageId current_stage_id_offset;
-  std::map<VariableId, AccessRequirement> variable_id_to_access_requirement;
-  std::set<RecipeId> recipe_ids_to_fire;
-};
 
 }  // namespace canary
-#endif  // CANARY_SRC_WORKER_RECIPE_H_
