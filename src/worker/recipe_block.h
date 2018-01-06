@@ -40,12 +40,14 @@
 #ifndef CANARY_SRC_WORKER_RECIPE_BLOCK_H_
 #define CANARY_SRC_WORKER_RECIPE_BLOCK_H_
 
+#include "worker/recipe.h"
+
 namespace canary {
 
 /*
- * A recipe block contains a chain of recipes to execute, while only the last
- * recipe in the block may return a boolean value that determines what recipe
- * block to run next.
+ * A recipe block contains recipes to execute, while only the last recipe in
+ * the block may return a boolean value that determines what recipe block to
+ * run next.
  */
 struct RecipeBlock {
   RecipeBlockId recipe_block_id;
@@ -54,7 +56,7 @@ struct RecipeBlock {
     // The next block to run is deterministic.
     NONE_DATA_DEPENDENT,
     // The last recipe in the block determines what block to run next.
-    DATA_DEPENDENT,
+    DATA_DEPENDENT_AND_NONE_ITERATIVE,
     // The last recipe in the block determines what block to run next, and the
     // block is iterative.
     DATA_DEPENDENT_AND_ITERATIVE,
@@ -64,15 +66,16 @@ struct RecipeBlock {
 
   // Valid for NONE_DATA_DEPENDENT and FIXED_ITERATIONS.
   RecipeBlockId next_recipe_block_id;
-  // Valid for DATA_DEPENDENT/DATA_DEPENDENT_AND_ITERATIVE.
+  // Valid for DATA_DEPENDENT_AND_NONE_ITERATIVE/DATA_DEPENDENT_AND_ITERATIVE.
   RecipeBlockId next_recipe_block_id_if_true;
   RecipeBlockId next_recipe_block_id_if_false;
   // Valid for FIXED_ITERATIONS.
   int32_t num_iterations;
-
-  int CountRecipesInVariableGroup(VariableGroupId variable_group_id) const {}
 };
 
+/*
+ * Describe all the recipes in an application.
+ */
 struct ApplicationRecipes {
   std::map<RecipeId, Recipe> recipe_map;
   std::map<RecipeBlockId, RecipeBlock> recipe_block_map;

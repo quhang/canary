@@ -40,10 +40,6 @@
 #ifndef CANARY_SRC_WORKER_RECIPE_H_
 #define CANARY_SRC_WORKER_RECIPE_H_
 
-#include <map>
-#include <set>
-#include <utility>
-
 #include "shared/canary_application.h"
 #include "shared/canary_internal.h"
 
@@ -54,7 +50,7 @@ struct AccessRequirement {
   enum class AccessType { READ, WRITE } access_type;
   // The stage id is offset relative to the beginning of its recipe block.
   StageId last_write_stage_id_offset;
-  int32_t num_reading_stages;
+  int32_t num_read_stages;
   // If what are executed before the recipe are data-dependent, the access
   // record may need dynamic adjustment. This happens when the last write stage
   // is before the begining of the recipe block and unpredictable.
@@ -62,8 +58,8 @@ struct AccessRequirement {
 };
 
 struct Recipe {
-  VariableGroupId variable_group_id;
   RecipeId recipe_id;
+  VariableGroupId variable_group_id;
   // The stage id is offset relative to the beginning of its recipe block.
   StageId current_stage_id_offset;
   std::map<VariableId, AccessRequirement> variable_id_to_access_requirement;
