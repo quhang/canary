@@ -139,7 +139,7 @@ namespace recipe_helper {
  * match.
  */
 bool MatchRecipe(
-    const auto& recipe, StageId begin_stage_id, StageId end_stage_id,
+    const Recipe& recipe, StageId begin_stage_id, StageId end_stage_id,
     int step_size, const PartitionMetadataStorage& partition_metadata_storage,
     const PartitionMetadataStorage& partition_metadata_storage_before_block,
     StageId* result_stage_id);

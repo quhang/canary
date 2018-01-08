@@ -52,6 +52,15 @@ namespace canary {
  */
 class RecipeBlockExecutor {
  public:
+  // Factory method.
+  static std::unique_ptr<RecipeBlockExecutor> Create(
+      const ApplicationRecipes* application_recipes,
+      RecipeBlockId recipe_block_id, VariableGroupId variable_group_id,
+      std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
+      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
+      StageId begin_stage_id);
+  RecipeBlockExecutor() {}
+  virtual ~RecipeBlockExecutor() {}
   // Initialize the executor.
   virtual void Initialize(
       const ApplicationRecipes* application_recipes,
@@ -74,24 +83,18 @@ class RecipeBlockExecutor {
   // Feed a control flow decision.
   virtual void FeedControlFlowDecision(StageId stage_id,
                                        bool control_decision) = 0;
-  // Return the next recipe block id.
-  virtual RecipeBlockId WrapUp() = 0;
-};
+  // Wrap up the state.
+  virtual void WrapUp(RecipeBlockId* next_recipe_block_id,
+              StageId* next_stage_id) = 0;
 
-/*
- * In progress.
- */
-class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
- public:
-  RecipeBlockExecutorNoneDataDependent() {}
-  virtual ~RecipeBlockExecutorNoneDataDependent() {}
-  void Initialize(
+ protected:
+  // Internal common data structures.
+  void InitializeInternal(
       const ApplicationRecipes* application_recipes,
       RecipeBlockId recipe_block_id,
       VariableGroupId variable_group_id,
       std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
-      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
-      StageId begin_stage_id) override {
+      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage) {
     application_recipes_ = application_recipes;
     current_recipe_block_id_ = recipe_block_id;
     current_recipe_block_ =
@@ -101,15 +104,56 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
     partition_metadata_storage_ = partition_metadata_storage;
     partition_metadata_storage_before_block_ =
         partition_metadata_storage->Clone();
+    CountNumRecipeInOneBlock();
+  }
+  const ApplicationRecipes* application_recipes_ = nullptr;
+  RecipeBlockId current_recipe_block_id_;
+  const RecipeBlock* current_recipe_block_ = nullptr;
+  VariableGroupId variable_group_id_;
+  std::shared_ptr<ControlFlowDecisionStorage> decision_storage_;
+  std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage_;
+  std::unique_ptr<PartitionMetadataStorage>
+      partition_metadata_storage_before_block_;
+  int32_t num_recipes_in_one_block_;
 
+ private:
+  void CountNumRecipeInOneBlock() {
+    num_recipes_in_one_block_ = 0;
+    for (auto recipe_id : current_recipe_block_->recipe_ids) {
+      if (application_recipes_->recipe_map.at(recipe_id).variable_group_id ==
+          variable_group_id_) {
+        ++num_recipes_in_one_block_;
+      }
+    }
+  }
+};
+
+/*
+ * The block executor for a non-data-dependent block.
+ */
+class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
+ public:
+  RecipeBlockExecutorNoneDataDependent() {}
+  ~RecipeBlockExecutorNoneDataDependent() override {}
+  void Initialize(
+      const ApplicationRecipes* application_recipes,
+      RecipeBlockId recipe_block_id,
+      VariableGroupId variable_group_id,
+      std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
+      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
+      StageId begin_stage_id) override {
+    InitializeInternal(application_recipes, recipe_block_id, variable_group_id,
+                       decision_storage, partition_metadata_storage);
     begin_stage_id_ = begin_stage_id;
     end_stage_id_ =
         get_next(begin_stage_id, current_recipe_block_->recipe_ids.size());
-    // TODO: num_recipes_to_run_ =
-    // CountRecipesInVariableGroup(variable_group_id);
+    num_recipes_to_run_ = num_recipes_in_one_block_;
     // Fire all recipes.
     for (auto recipe_id : current_recipe_block_->recipe_ids) {
-      fired_recipe_ids_.insert(recipe_id);
+      if (application_recipes_->recipe_map.at(recipe_id).variable_group_id ==
+          variable_group_id_) {
+        fired_recipe_ids_.insert(recipe_id);
+      }
     }
   }
 
@@ -136,6 +180,7 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
     }
     return RetrieveResult::BLOCKED;
   }
+
   void CompleteStage(StageId complete_stage_id, double cycles) override {
     CHECK(begin_stage_id_ <= complete_stage_id);
     CHECK(complete_stage_id < end_stage_id_);
@@ -155,9 +200,11 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
     decision_storage_->Store(stage_id, control_decision);
   }
 
-  RecipeBlockId WrapUp() override {
+  void WrapUp(RecipeBlockId* next_recipe_block_id,
+              StageId* next_stage_id) override {
     CHECK_EQ(num_recipes_to_run_, 0);
-    return current_recipe_block_->next_recipe_block_id;
+    *next_recipe_block_id = current_recipe_block_->next_recipe_block_id;
+    *next_stage_id = end_stage_id_;
   }
 
  protected:
@@ -171,14 +218,6 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
   }
 
  private:
-  const ApplicationRecipes* application_recipes_ = nullptr;
-  RecipeBlockId current_recipe_block_id_;
-  const RecipeBlock* current_recipe_block_ = nullptr;
-  VariableGroupId variable_group_id_;
-  std::shared_ptr<ControlFlowDecisionStorage> decision_storage_;
-  std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage_;
-  std::unique_ptr<PartitionMetadataStorage>
-      partition_metadata_storage_before_block_;
   int32_t num_recipes_to_run_ = 0;
   // Only the stages in [begin_stage_id_, end_stage_id_) can run.
   StageId begin_stage_id_, end_stage_id_;
@@ -217,48 +256,16 @@ class RecipeEngine : public ExecuteEngine {
    */
   //! Sets statement info map.
   void set_statement_info_map(
-      const CanaryApplication::StatementInfoMap* statement_info_map) override {
-    statement_info_map_ = statement_info_map;
-    // TODO: construct application_recipes from statement_info_map.
-  }
+      const CanaryApplication::StatementInfoMap* statement_info_map) override;
   //! Initializes the engine when first launched.
   void Initialize(VariableGroupId self_variable_group_id,
-                  PartitionId self_partition_id) override {
-    // TODO: Initialize the recipe block executor.
-  }
+                  PartitionId self_partition_id) override;
   //! Reports complete stage.
   void CompleteStage(StageId complete_stage_id, double cycles) override {
     ongoing_recipe_block_executor_->CompleteStage(complete_stage_id, cycles);
   }
-
   //! Gets the next ready stage.
-  std::pair<StageId, StatementId> GetNextReadyStage() override {
-    StageId stage_id;
-    RecipeId recipe_id;
-    auto retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(
-        &stage_id, &recipe_id);
-    while (retrieve_result == RecipeBlockExecutor::RetrieveResult::COMPLETE) {
-      auto next_recipe_block_id = ongoing_recipe_block_executor_->WrapUp();
-      if (next_recipe_block_id ==
-          application_recipes_->end_recipe_block_id) {
-        return std::make_pair(StageId::COMPLETE, StatementId::INVALID);
-      }
-      // Initilize the executor with the new block id.
-      retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(
-          &stage_id, &recipe_id);
-    }
-    switch (retrieve_result) {
-      case RecipeBlockExecutor::RetrieveResult::SUCCESS:
-        return std::make_pair(
-            stage_id,
-            application_recipes_->recipe_id_to_statement_id.at(recipe_id));
-      case RecipeBlockExecutor::RetrieveResult::BLOCKED:
-        return std::make_pair(StageId::INVALID, StatementId::INVALID);
-        break;
-      default:
-        LOG(FATAL) << "Internal error!";
-    }
-  }
+  std::pair<StageId, StatementId> GetNextReadyStage() override;
   //! Feeds a control flow decision.
   void FeedControlFlowDecision(StageId stage_id,
                                bool control_decision) override {
@@ -278,9 +285,13 @@ class RecipeEngine : public ExecuteEngine {
    * Debugging and monitoring related.
    */
   //! Gets the earliest stage that is not finished.
-  StageId get_earliest_unfinished_stage_id() override {}
+  StageId get_earliest_unfinished_stage_id() override {
+    return StageId::INVALID;
+  }
   //! Gets the latest stage that is finished.
-  StageId get_last_finished_stage_id() override {}
+  StageId get_last_finished_stage_id() override {
+    return StageId::INVALID;
+  }
   //! The timestamp of critical stages.
   void retrieve_timestamp_stats(
       std::map<StageId, std::pair<StatementId, double>>* timestamp_storage)
@@ -308,6 +319,10 @@ class RecipeEngine : public ExecuteEngine {
   const ApplicationRecipes* application_recipes_;
   // There is only one recipe block executor running at one time.
   std::unique_ptr<RecipeBlockExecutor> ongoing_recipe_block_executor_;
+  VariableGroupId variable_group_id_;
+  PartitionId partition_id_;
+  std::shared_ptr<ControlFlowDecisionStorage> decision_storage_;
+  std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage_;
 };
 
 

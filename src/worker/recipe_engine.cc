@@ -41,5 +41,84 @@
 
 namespace canary {
 
+std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
+    const ApplicationRecipes* application_recipes,
+    RecipeBlockId recipe_block_id, VariableGroupId variable_group_id,
+    std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
+    std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
+    StageId begin_stage_id) {
+  std::unique_ptr<RecipeBlockExecutor> result;
+  switch (application_recipes->recipe_block_map.at(recipe_block_id)
+              .recipe_block_type) {
+    case RecipeBlock::RecipeBlockType::NONE_DATA_DEPENDENT:
+      result = std::make_unique<RecipeBlockExecutorNoneDataDependent>();
+      break;
+    // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_NONE_ITERATIVE:
+    //   break;
+    // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_ITERATIVE:
+    //   break;
+    // case RecipeBlock::RecipeBlockType::FIXED_ITERATIONS:
+    //   break;
+    default:
+      LOG(FATAL) << "Internal error!";
+  }
+  result->Initialize(application_recipes, recipe_block_id, variable_group_id,
+                     decision_storage, partition_metadata_storage,
+                     begin_stage_id);
+  return std::move(result);
+}
+
+void RecipeEngine::set_statement_info_map(
+    const CanaryApplication::StatementInfoMap* statement_info_map) {
+  statement_info_map_ = statement_info_map;
+  // TODO: construct application_recipes from statement_info_map.
+}
+
+void RecipeEngine::Initialize(VariableGroupId self_variable_group_id,
+                              PartitionId self_partition_id) {
+  variable_group_id_ = self_variable_group_id;
+  partition_id_ = self_partition_id;
+  decision_storage_ = std::make_shared<ControlFlowDecisionStorage>();
+  partition_metadata_storage_ = std::make_shared<PartitionMetadataStorage>();
+  // TODO: initialize the partitions.
+  // partition_metadata_storage_before_block_->InitializePartition();
+  ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
+      application_recipes_, application_recipes_->begin_recipe_block_id,
+      variable_group_id_, decision_storage_, partition_metadata_storage_,
+      StageId::FIRST);
+}
+
+std::pair<StageId, StatementId> RecipeEngine::GetNextReadyStage() {
+  StageId stage_id;
+  RecipeId recipe_id;
+  auto retrieve_result =
+      ongoing_recipe_block_executor_->GetNextReadyStage(&stage_id, &recipe_id);
+  while (retrieve_result == RecipeBlockExecutor::RetrieveResult::COMPLETE) {
+    RecipeBlockId next_recipe_block_id;
+    StageId next_stage_id;
+    ongoing_recipe_block_executor_->WrapUp(&next_recipe_block_id,
+                                           &next_stage_id);
+    if (next_recipe_block_id == application_recipes_->end_recipe_block_id) {
+      ongoing_recipe_block_executor_.reset();
+      return std::make_pair(StageId::COMPLETE, StatementId::INVALID);
+    } else {
+      ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
+          application_recipes_, next_recipe_block_id, variable_group_id_,
+          decision_storage_, partition_metadata_storage_, next_stage_id);
+    }
+    retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(
+        &stage_id, &recipe_id);
+  }
+  switch (retrieve_result) {
+    case RecipeBlockExecutor::RetrieveResult::SUCCESS:
+      return std::make_pair(
+          stage_id,
+          application_recipes_->recipe_id_to_statement_id.at(recipe_id));
+    case RecipeBlockExecutor::RetrieveResult::BLOCKED:
+      return std::make_pair(StageId::INVALID, StatementId::INVALID);
+    default:
+      LOG(FATAL) << "Internal error!";
+  }
+}
 
 }  // namespace canary
