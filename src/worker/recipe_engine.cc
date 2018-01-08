@@ -71,7 +71,169 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
 void RecipeEngine::set_statement_info_map(
     const CanaryApplication::StatementInfoMap* statement_info_map) {
   statement_info_map_ = statement_info_map;
-  // TODO: construct application_recipes from statement_info_map.
+  application_recipes_ = ConstructRecipeFromStatementInfo(statement_info_map);
+}
+
+std::unique_ptr<ApplicationRecipes> RecipeEngine::ConstructRecipeFromStatementInfo(
+    const CanaryApplication::StatementInfoMap* statement_info_map) {
+  auto result = std::make_unique<ApplicationRecipes>();
+
+  std::set<StatementId> inner_loop_statements;
+  ComputeInnerLoopStatements(statement_info_map, &inner_loop_statements);
+  std::map<StatementId, RecipeBlockId> statement_id_to_recipe_block_id;
+  result->begin_recipe_block_id = RecipeBlockId::FIRST;
+  result->end_recipe_block_id = ComputeRecipeBlockId(
+      statement_info_map, inner_loop_statements, result->begin_recipe_block_id,
+      &statement_id_to_recipe_block_id);
+
+  std::list<StatementId> temp_statements;
+  int num_iterations = 0;
+  // Caution: nested fixed-iteration looping is not supported.
+  for (const auto& key_value : *statement_info_map) {
+    StatementId statement_id = key_value.first;
+    const auto& statement_info = key_value.second;
+    switch (statement_info.statement_type) {
+      case CanaryApplication::StatementType::LOOP:
+        if (!temp_statements.empty()) {
+          auto current_recipe_block_id = 
+              statement_id_to_recipe_block_id.at(temp_statements.back());
+          ConstructRecipeBlockNoneDataDependent(
+              temp_statements, current_recipe_block_id,
+              get_next(current_recipe_block_id), result.get());
+          temp_statements.clear();
+        }
+        num_iterations = statement_info.num_loop;
+        CHECK(inner_loop_statements.find(statement_id) !=
+              inner_loop_statements.end())
+            << "Outer looping with fixed iterations is not supported";
+        break;
+      case CanaryApplication::StatementType::END_LOOP:
+        if (!temp_statements.empty()) {
+          auto current_recipe_block_id = 
+              statement_id_to_recipe_block_id.at(temp_statements.back());
+          ConstructRecipeBlockFixedItertations(
+              temp_statements, num_iterations, current_recipe_block_id,
+              get_next(current_recipe_block_id, 2), result.get());
+          temp_statements.clear();
+        }
+        break;
+      case CanaryApplication::StatementType::WHILE:
+        temp_statements.push_back(statement_id);
+        ConstructRecipeBlockDataDependent(
+            temp_statements, statement_id_to_recipe_block_id.at(statement_id),
+            get_next(statement_id_to_recipe_block_id.at(statement_id)),
+            statement_id_to_recipe_block_id.at(statement_info.branch_statement),
+            result.get());
+        temp_statements.clear();
+        break;
+      case CanaryApplication::StatementType::END_WHILE:
+        {
+          StatementId while_statement_id = statement_info.branch_statement;
+          const auto& while_statement_info =
+              statement_info_map->at(while_statement_id);
+          temp_statements.push_back(while_statement_id);
+          if (inner_loop_statements.find(statement_id) !=
+              inner_loop_statements.end()) {
+            ConstructRecipeBlockDataDependentAndInnerIterative(
+                temp_statements,
+                statement_id_to_recipe_block_id.at(statement_id),
+                get_next(statement_id_to_recipe_block_id.at(statement_id), 2),
+                result.get());
+          } else {
+            ConstructRecipeBlockDataDependent(
+                temp_statements,
+                statement_id_to_recipe_block_id.at(statement_id),
+                get_next(
+                    statement_id_to_recipe_block_id.at(while_statement_id)),
+                statement_id_to_recipe_block_id.at(
+                    while_statement_info.branch_statement),
+                result.get());
+          }
+          temp_statements.clear();
+        }
+        break;
+      default:
+        temp_statements.push_back(statement_id);
+    }
+  }
+  return std::move(result);
+}
+
+/*
+ * Compute all the statements that are in the inner loop.
+ */
+void RecipeEngine::ComputeInnerLoopStatements(
+    const CanaryApplication::StatementInfoMap* statement_info_map,
+    std::set<StatementId>* inner_loop_statements) {
+  std::list<StatementId> temp_statements;
+  bool is_inner_loop = false;
+  for (const auto& key_value : *statement_info_map) {
+    StatementId statement_id = key_value.first;
+    const auto& statement_info = key_value.second;
+    switch (statement_info.statement_type) {
+      case CanaryApplication::StatementType::LOOP:
+      case CanaryApplication::StatementType::WHILE:
+        temp_statements.clear();
+        is_inner_loop = true;
+        temp_statements.push_back(statement_id);
+        break;
+      case CanaryApplication::StatementType::END_LOOP:
+      case CanaryApplication::StatementType::END_WHILE:
+        temp_statements.push_back(statement_id);
+        if (is_inner_loop) {
+          // Found an inner loop.
+          inner_loop_statements->insert(temp_statements.begin(),
+                                        temp_statements.end());
+        }
+        is_inner_loop = false;
+        temp_statements.clear();
+        break;
+      default:
+        temp_statements.push_back(statement_id);
+    }
+  }
+}
+
+/*
+ * Compute the recipe block id for each statement. Note that a statement can be
+ * in multiple recipe blocks, and only the first recipe block id is given..
+ */
+RecipeBlockId RecipeEngine::ComputeRecipeBlockId(
+    const CanaryApplication::StatementInfoMap* statement_info_map,
+    const std::set<StatementId>& inner_loop_statements,
+    RecipeBlockId begin_recipe_block_id,
+    std::map<StatementId, RecipeBlockId>* statement_id_to_recipe_block_id) {
+  for (const auto& key_value : *statement_info_map) {
+    StatementId statement_id = key_value.first;
+    const auto& statement_info = key_value.second;
+    switch (statement_info.statement_type) {
+      case CanaryApplication::StatementType::LOOP:
+        ++begin_recipe_block_id;
+        (*statement_id_to_recipe_block_id)[statement_id] =
+            begin_recipe_block_id;
+        break;
+      case CanaryApplication::StatementType::WHILE:
+        (*statement_id_to_recipe_block_id)[statement_id] =
+            begin_recipe_block_id++;
+        break;
+      case CanaryApplication::StatementType::END_LOOP:
+      case CanaryApplication::StatementType::END_WHILE:
+        (*statement_id_to_recipe_block_id)[statement_id] =
+            begin_recipe_block_id;
+        if (inner_loop_statements.find(statement_id) !=
+            inner_loop_statements.end()) {
+          // Every inner most loop corresponds to two blocks.
+          begin_recipe_block_id = get_next(begin_recipe_block_id, 2);
+        } else {
+          ++begin_recipe_block_id;
+        }
+        break;
+      default:
+        (*statement_id_to_recipe_block_id)[statement_id] =
+            begin_recipe_block_id;
+    }
+  }
+  return begin_recipe_block_id;
 }
 
 void RecipeEngine::Initialize(VariableGroupId self_variable_group_id,
@@ -83,7 +245,7 @@ void RecipeEngine::Initialize(VariableGroupId self_variable_group_id,
   // TODO: initialize the partitions.
   // partition_metadata_storage_before_block_->InitializePartition();
   ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
-      application_recipes_, application_recipes_->begin_recipe_block_id,
+      application_recipes_.get(), application_recipes_->begin_recipe_block_id,
       variable_group_id_, decision_storage_, partition_metadata_storage_,
       StageId::FIRST);
 }
@@ -103,7 +265,7 @@ std::pair<StageId, StatementId> RecipeEngine::GetNextReadyStage() {
       return std::make_pair(StageId::COMPLETE, StatementId::INVALID);
     } else {
       ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
-          application_recipes_, next_recipe_block_id, variable_group_id_,
+          application_recipes_.get(), next_recipe_block_id, variable_group_id_,
           decision_storage_, partition_metadata_storage_, next_stage_id);
     }
     retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(

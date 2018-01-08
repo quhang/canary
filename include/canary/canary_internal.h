@@ -101,6 +101,7 @@ DECLARE_string(launch_service);
 DECLARE_string(worker_service);
 DECLARE_int32(worker_threads);
 DECLARE_bool(log_placement);
+DECLARE_bool(use_recipe_engine);
 
 namespace canary {
 //! Wrapper for evbuffer, to be serialized/deserialized.

@@ -56,20 +56,20 @@ struct RecipeBlock {
     // The next block to run is deterministic.
     NONE_DATA_DEPENDENT,
     // The last recipe in the block determines what block to run next.
-    DATA_DEPENDENT_AND_NONE_ITERATIVE,
+    DATA_DEPENDENT,
     // The last recipe in the block determines what block to run next, and the
     // block is iterative.
-    DATA_DEPENDENT_AND_ITERATIVE,
+    DATA_DEPENDENT_AND_INNER_ITERATIVE,
     // The block runs a fixed number of iterations.
     FIXED_ITERATIONS
   } recipe_block_type;
 
   // Valid for NONE_DATA_DEPENDENT and FIXED_ITERATIONS.
   RecipeBlockId next_recipe_block_id;
-  // Valid for DATA_DEPENDENT_AND_NONE_ITERATIVE/DATA_DEPENDENT_AND_ITERATIVE.
+  // Valid for DATA_DEPENDENT.
   RecipeBlockId next_recipe_block_id_if_true;
   RecipeBlockId next_recipe_block_id_if_false;
-  // Valid for FIXED_ITERATIONS.
+  // Valid for FIXED_ITERATIONS/DATA_DEPENDENT_AND_INNER_ITERATIVE.
   int32_t num_iterations;
 };
 

@@ -48,6 +48,7 @@
 
 #include "shared/canary_application.h"
 #include "worker/canary_task_context.h"
+#include "worker/recipe_engine.h"
 #include "worker/stage_graph.h"
 #include "worker/worker_communication_interface.h"
 
@@ -212,7 +213,12 @@ class WorkerLightThreadContext {
 
 class WorkerExecutionContext : public WorkerLightThreadContext {
  public:
-  WorkerExecutionContext() : stage_graph_(std::make_unique<StageGraph>()) {}
+  WorkerExecutionContext()
+      : stage_graph_(FLAGS_use_recipe_engine
+                         ? std::unique_ptr<ExecuteEngine>(
+                               std::make_unique<RecipeEngine>())
+                         : std::unique_ptr<ExecuteEngine>(
+                               std::make_unique<StageGraph>())) {}
   virtual ~WorkerExecutionContext() {}
   //! Initializes the light thread.
   void Initialize() override;

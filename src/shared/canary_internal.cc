@@ -49,3 +49,4 @@ DEFINE_string(worker_service, "39993", "The worker port for exchanging data.");
 
 DEFINE_int32(worker_threads, 2, "The number of worker execution threads.");
 DEFINE_bool(log_placement, false, "Whether to log down the placement info.");
+DEFINE_bool(use_recipe_engine, true, "Whether to use the recipe execution engine.");
