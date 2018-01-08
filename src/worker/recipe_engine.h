@@ -39,6 +39,12 @@
 
 #ifndef CANARY_SRC_WORKER_RECIPE_ENGINE_H_
 #define CANARY_SRC_WORKER_RECIPE_ENGINE_H_
+
+#include "worker/execute_engine.h"
+#include "worker/recipe.h"
+#include "worker/recipe_block.h"
+#include "worker/recipe_helper.h"
+
 namespace canary {
 
 /*
@@ -50,9 +56,11 @@ class RecipeBlockExecutor {
   virtual void Initialize(
       const ApplicationRecipes* application_recipes,
       RecipeBlockId recipe_block_id,
+      VariableGroupId variable_group_id,
       std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
       std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
       StageId begin_stage_id) = 0;
+
   enum class RetrieveResult {
     SUCCESS,
     BLOCKED,
@@ -86,17 +94,21 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
       StageId begin_stage_id) override {
     application_recipes_ = application_recipes;
     current_recipe_block_id_ = recipe_block_id;
-    current_recipe_block_ = application_recipes->recipe_block_map.at(recipe_block_id);
+    current_recipe_block_ =
+        &application_recipes->recipe_block_map.at(recipe_block_id);
     variable_group_id_ = variable_group_id;
     decision_storage_ = decision_storage;
     partition_metadata_storage_ = partition_metadata_storage;
-    partition_metadata_storage_before_block = partition_metadata_storage.Clone();
+    partition_metadata_storage_before_block_ =
+        partition_metadata_storage->Clone();
 
     begin_stage_id_ = begin_stage_id;
-    end_stage_id_ = begin_stage_id + current_recipe_block_.recipe_ids.size();
-    // TODO: num_recipes_to_run_ = CountRecipesInVariableGroup(variable_group_id);
+    end_stage_id_ =
+        get_next(begin_stage_id, current_recipe_block_->recipe_ids.size());
+    // TODO: num_recipes_to_run_ =
+    // CountRecipesInVariableGroup(variable_group_id);
     // Fire all recipes.
-    for (auto recipe_id : current_recipe_block_.recipe_ids) {
+    for (auto recipe_id : current_recipe_block_->recipe_ids) {
       fired_recipe_ids_.insert(recipe_id);
     }
   }
@@ -107,16 +119,16 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
       return RetrieveResult::COMPLETE;
     }
     StageId result_stage_id;
-    auto iter = fired_recipes_.begin();
-    while (iter != fired_recipes_.end()) {
+    auto iter = fired_recipe_ids_.begin();
+    while (iter != fired_recipe_ids_.end()) {
       if (
           // a ready recipe will be skipped
-          ready_recipes_.find(*iter) == ready_recipes_.end() &&
+          ready_recipe_ids_.find(*iter) == ready_recipe_ids_.end() &&
           // check the recipe
           CheckRecipe(*iter, &result_stage_id)) {
         *recipe_id = *iter;
         *stage_id = result_stage_id;
-        ready_recipes_.insert(*iter);
+        ready_recipe_ids_.insert(*iter);
         // A ready recipe is still in the fired recipe queue.
         return RetrieveResult::SUCCESS;
       }
@@ -125,11 +137,14 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
     return RetrieveResult::BLOCKED;
   }
   void CompleteStage(StageId complete_stage_id, double cycles) override {
-    CHECK_LE(begin_stage_id_, complete_stage_id);
-    CHECK_LT(complete_stage_id, end_stage_id_);
+    CHECK(begin_stage_id_ <= complete_stage_id);
+    CHECK(complete_stage_id < end_stage_id_);
     RecipeId recipe_id =
-        current_recipe_block_->recipe_ids_[complete_stage_id - begin_stage_id_];
-    // TODO Update the partition storage.
+        current_recipe_block_
+            ->recipe_ids[get_distance(complete_stage_id, begin_stage_id_)];
+    const auto& recipe = application_recipes_->recipe_map.at(recipe_id);
+    recipe_helper::ApplyRecipe(recipe, complete_stage_id,
+                               partition_metadata_storage_.get());
     ready_recipe_ids_.erase(recipe_id);
     fired_recipe_ids_.insert(recipe_id);
     --num_recipes_to_run_;
@@ -148,25 +163,11 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
  protected:
   bool CheckRecipe(RecipeId recipe_id, StageId* stage_id) {
     const auto& recipe = application_recipes_->recipe_map.at(recipe_id);
-    CHECK_EQ(recipe->recipe_id, recipe_id);
-    if (recipe->variable_group_id != variable_group_id_) {
-      return false;
-    }
     int recipe_block_size = current_recipe_block_->recipe_ids.size();
-    StageId candidate_stage_id = begin_stage_id_ + recipe->current_stage_id_offset;
-    for (const auto& key_value : variable_id_to_access_requirement) {
-      const auto& access_requirement = key_value.second;
-      StageId temp_stage_id;
-      bool matched = MatchAccessRequirement(
-          access_requirement, begin_stage_id_, end_stage_id, recipe_block_size,
-          partition_metadata_storage_, partition_metadata_storage_before_block,
-          &temp_stage_id);
-      if (!matched || candidate_stage_id != temp_stage_id) {
-        return false;
-      }
-    }
-    *stage_id = candidate_stage_id;
-    return true;
+    return recipe_helper::MatchRecipe(
+        recipe, begin_stage_id_, end_stage_id_, recipe_block_size,
+        *partition_metadata_storage_, *partition_metadata_storage_before_block_,
+        stage_id);
   }
 
  private:
@@ -176,14 +177,15 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
   VariableGroupId variable_group_id_;
   std::shared_ptr<ControlFlowDecisionStorage> decision_storage_;
   std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage_;
-  std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage_before_block_;
+  std::unique_ptr<PartitionMetadataStorage>
+      partition_metadata_storage_before_block_;
   int32_t num_recipes_to_run_ = 0;
   // Only the stages in [begin_stage_id_, end_stage_id_) can run.
   StageId begin_stage_id_, end_stage_id_;
   // Recipes that are fired, and may be ready to run.
-  std::set<RecipeId> fired_recipes_;
+  std::set<RecipeId> fired_recipe_ids_;
   // Recipes that are ready to run, but might not receive all its messages.
-  std::set<RecipeId> ready_recipes_;
+  std::set<RecipeId> ready_recipe_ids_;
 };
 
 /* TODO
@@ -203,12 +205,12 @@ class RecipeBlockExecutorNoneDataDependentFixIterations
  * A recipe engine manages the execution state of tasks reading or writing a set
  * of collocated partitions.
  */
-class RecipeEngine : public ExecutionEngine {
+class RecipeEngine : public ExecuteEngine {
  public:
   //! Constructor.
   RecipeEngine() {}
   //! Deconstructor.
-  ~RecipeEngine() override {}
+  virtual ~RecipeEngine() {}
 
   /*
    * Core functionalities.
@@ -228,6 +230,7 @@ class RecipeEngine : public ExecutionEngine {
   void CompleteStage(StageId complete_stage_id, double cycles) override {
     ongoing_recipe_block_executor_->CompleteStage(complete_stage_id, cycles);
   }
+
   //! Gets the next ready stage.
   std::pair<StageId, StatementId> GetNextReadyStage() override {
     StageId stage_id;
@@ -238,7 +241,7 @@ class RecipeEngine : public ExecutionEngine {
       auto next_recipe_block_id = ongoing_recipe_block_executor_->WrapUp();
       if (next_recipe_block_id ==
           application_recipes_->end_recipe_block_id) {
-        // TODO: return complete.
+        return std::make_pair(StageId::COMPLETE, StatementId::INVALID);
       }
       // Initilize the executor with the new block id.
       retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(
@@ -248,9 +251,9 @@ class RecipeEngine : public ExecutionEngine {
       case RecipeBlockExecutor::RetrieveResult::SUCCESS:
         return std::make_pair(
             stage_id,
-            application_recipes->recipe_id_to_statement_id.at(recipe_id));
+            application_recipes_->recipe_id_to_statement_id.at(recipe_id));
       case RecipeBlockExecutor::RetrieveResult::BLOCKED:
-        // TODO: return none.
+        return std::make_pair(StageId::INVALID, StatementId::INVALID);
         break;
       default:
         LOG(FATAL) << "Internal error!";
@@ -305,7 +308,6 @@ class RecipeEngine : public ExecutionEngine {
   const ApplicationRecipes* application_recipes_;
   // There is only one recipe block executor running at one time.
   std::unique_ptr<RecipeBlockExecutor> ongoing_recipe_block_executor_;
-  const ApplicationRecipes* application_recipes_;
 };
 
 

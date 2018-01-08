@@ -30,6 +30,8 @@ cxx_static_library(canary_core "${cxx_default}"
     worker/worker_data_router.cc
     worker/worker_light_thread_context.cc
     worker/worker_scheduler.cc
+    worker/recipe_helper.cc
+    worker/recipe_engine.cc
     )
 add_dependencies(canary_core project_cereal)
 # Library linking order matters. Dependency libraries are public so that built

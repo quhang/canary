@@ -98,40 +98,35 @@ class PartitionMetadataStorage {
   PartitionMetadataStorage() {}
   virtual ~PartitionMetadataStorage() {}
   NON_COPYABLE_AND_NON_MOVABLE(PartitionMetadataStorage);
-  PartitionMetadataStorage* Clone() const {
-    // The memory needs to be released later.
-    auto result = new PartitionMetadataStorage;
+
+  std::unique_ptr<PartitionMetadataStorage> Clone() const {
+    auto result = std::make_unique<PartitionMetadataStorage>();
     result->variable_id_to_access_metadata_ = variable_id_to_access_metadata_;
-    return result;
+    return std::move(result);
   }
 
   struct AccessMetadata {
     StageId last_write_stage_id;
     int32_t num_read_stages;
   };
-  AccessMetadata GetPartitionAccessMetadata(VariableId variable_id) {
+  AccessMetadata GetPartitionAccessMetadata(VariableId variable_id) const {
+    // Throw exception if the access metadata is not available.
     return variable_id_to_access_metadata_.at(variable_id);
   }
-  void InitializePartition(VariableId variable_id) {
+  void InitializePartition(VariableId variable_id, StageId last_write_stage_id,
+                           int num_read_stages) {
     auto& access = variable_id_to_access_metadata_[variable_id];
-    // access.last_write_stage_id = TODO
+    access.last_write_stage_id = last_write_stage_id;
+    access.num_read_stages = num_read_stages;
+  }
+  void WritePartition(VariableId variable_id, StageId last_write_stage_id) {
+    auto& access = variable_id_to_access_metadata_.at(variable_id);
+    access.last_write_stage_id = last_write_stage_id;
     access.num_read_stages = 0;
   }
-  void ApplyRecipe(const Recipe& recipe, StageId stage_id) {
-    for (const auto& key_value : recipe.variable_id_to_access_requirement) {
-      const auto variable_id = key_value.first;
-      const auto& access_requirement = key_value.second;
-      if (access_requirement.access_type ==
-          AccessRequirement::AccessType::READ) {
-        ++variable_id_to_access_metadata_[variable_id].num_read_stages;
-      } else {
-        // access_requirement.access_type ==
-        // AccessRequirement::AccessType::WRITE
-        variable_id_to_access_metadata_[variable_id].last_write_stage_id =
-            stage_id;
-        variable_id_to_access_metadata_[variable_id].num_read_stages = 0;
-      }
-    }
+  void ReadPartition(VariableId variable_id) {
+    auto& access = variable_id_to_access_metadata_.at(variable_id);
+    ++access.num_read_stages;
   }
 
  private:
@@ -140,15 +135,19 @@ class PartitionMetadataStorage {
 
 namespace recipe_helper {
 /*
- * Match the access requirement. Return whether there
- * is a match, and the stage id of the match.
+ * Match the recipe. Return whether there is a match, and the stage id of the
+ * match.
  */
-bool MatchAccessRequirement(
-    const AccessRequirement& access_requirement, StageId begin_stage_id,
-    StageId end_stage_id, int step_size,
-    const PartitionMetadataStorage& partition_metadata_storage,
+bool MatchRecipe(
+    const auto& recipe, StageId begin_stage_id, StageId end_stage_id,
+    int step_size, const PartitionMetadataStorage& partition_metadata_storage,
     const PartitionMetadataStorage& partition_metadata_storage_before_block,
-    StageId* result_stage_id) {}
+    StageId* result_stage_id);
+
+// Apply the recipe, whose stage id is "stage_id", to edit the partition
+// metadata.
+void ApplyRecipe(const Recipe& recipe, StageId stage_id,
+                 PartitionMetadataStorage* partition_metadata_storage);
 
 }  // namespace recipe_helper
 

@@ -37,6 +37,8 @@
  * @brief Class RecipeEngine.
  */
 
+#include "worker/recipe_engine.h"
+
 namespace canary {
 
 

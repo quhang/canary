@@ -48,8 +48,8 @@ namespace canary {
 struct AccessRequirement {
   VariableId variable_id;
   enum class AccessType { READ, WRITE } access_type;
-  // The stage id is offset relative to the beginning of its recipe block.
-  StageId last_write_stage_id_offset;
+  // The stage id offset relative to the beginning of its recipe block.
+  int32_t last_write_stage_id_offset;
   int32_t num_read_stages;
   // If what are executed before the recipe are data-dependent, the access
   // record may need dynamic adjustment. This happens when the last write stage
@@ -57,13 +57,16 @@ struct AccessRequirement {
   bool need_dynamic_adjustment;
 };
 
+/*
+ * A recipe that specifies a task that runs when the preconditions are matched.
+ */
 struct Recipe {
   RecipeId recipe_id;
   VariableGroupId variable_group_id;
-  // The stage id is offset relative to the beginning of its recipe block.
-  StageId current_stage_id_offset;
+  // The stage id offset relative to the beginning of its recipe block.
+  int32_t current_stage_id_offset;
   std::map<VariableId, AccessRequirement> variable_id_to_access_requirement;
-  std::set<RecipeId> recipe_ids_to_fire;
+  std::vector<RecipeId> recipe_ids_to_fire;
 };
 
 }  // namespace canary

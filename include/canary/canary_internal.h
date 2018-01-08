@@ -268,8 +268,8 @@ using cereal::CanaryOutputArchive;
   inline constexpr T get_next(const T& t, int inc = 1) {                    \
     return static_cast<T>(get_value(t) + inc);                              \
   }                                                                         \
-  inline constexpr T get_prev(const T& t) {                                 \
-    return static_cast<T>(get_value(t) - 1);                                \
+  inline constexpr T get_prev(const T& t, int dec = 1) {                    \
+    return static_cast<T>(get_value(t) - dec);                              \
   }                                                                         \
   inline T operator++(T& t) {                                               \
     t = get_next(t);                                                        \
@@ -344,6 +344,18 @@ COUNTABLE_ENUM(VariableId);
  */
 enum class PartitionId : int32_t { INVALID = -1, FIRST = 0 };
 COUNTABLE_ENUM(PartitionId);
+
+/*
+ * The id of a recipe.
+ */
+enum class RecipeId : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(RecipeId);
+
+/*
+ * The id of a recipe block.
+ */
+enum class RecipeBlockId : int32_t { INVALID = -1, FIRST = 0 };
+COUNTABLE_ENUM(RecipeBlockId);
 
 /**
  * The id of a stage.
