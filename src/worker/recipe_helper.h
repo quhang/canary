@@ -110,26 +110,40 @@ class PartitionMetadataStorage {
     int32_t num_read_stages;
   };
   AccessMetadata GetPartitionAccessMetadata(VariableId variable_id) const {
-    // Throw exception if the access metadata is not available.
-    return variable_id_to_access_metadata_.at(variable_id);
-  }
-  void InitializePartition(VariableId variable_id, StageId last_write_stage_id,
-                           int num_read_stages) {
-    auto& access = variable_id_to_access_metadata_[variable_id];
-    access.last_write_stage_id = last_write_stage_id;
-    access.num_read_stages = num_read_stages;
+    auto iter = variable_id_to_access_metadata_.find(variable_id);
+    if (iter == variable_id_to_access_metadata_.end()) {
+      AccessMetadata result;
+      result.last_write_stage_id = StageId::INITIALIZED_AND_UNKNOWN;
+      result.num_read_stages = 0;
+      return result;
+    } else {
+      return iter->second;
+    }
   }
   void WritePartition(VariableId variable_id, StageId last_write_stage_id) {
+    InitializeIfNeeded(variable_id);
     auto& access = variable_id_to_access_metadata_.at(variable_id);
     access.last_write_stage_id = last_write_stage_id;
     access.num_read_stages = 0;
   }
   void ReadPartition(VariableId variable_id) {
+    InitializeIfNeeded(variable_id);
     auto& access = variable_id_to_access_metadata_.at(variable_id);
     ++access.num_read_stages;
   }
 
  private:
+  bool InitializeIfNeeded(VariableId variable_id) {
+    if (variable_id_to_access_metadata_.find(variable_id) ==
+        variable_id_to_access_metadata_.end()) {
+      auto access_metadata = variable_id_to_access_metadata_[variable_id];
+      access_metadata.last_write_stage_id = StageId::INITIALIZED_AND_UNKNOWN;
+      access_metadata.num_read_stages = 0;
+      return true;
+    } else {
+      return false;
+    }
+  }
   std::map<VariableId, AccessMetadata> variable_id_to_access_metadata_;
 };
 

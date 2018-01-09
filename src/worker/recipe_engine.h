@@ -315,21 +315,6 @@ class RecipeEngine : public ExecuteEngine {
   }
 
  private:
-  static std::unique_ptr<ApplicationRecipes> ConstructRecipeFromStatementInfo(
-      const CanaryApplication::StatementInfoMap* statement_info_map);
-  static void ComputeInnerLoopStatements(
-      const CanaryApplication::StatementInfoMap* statement_info_map,
-      std::set<StatementId>* inner_loop_statements);
-  static RecipeBlockId ComputeRecipeBlockId(
-      const CanaryApplication::StatementInfoMap* statement_info_map,
-      const std::set<StatementId>& inner_loop_statements,
-      RecipeBlockId begin_recipe_block_id,
-      std::map<StatementId, RecipeBlockId>* statement_id_to_recipe_block_id);
-  static void ConstructRecipeBlockNoneDataDependent();
-  static void ConstructRecipeBlockDataDependent();
-  static void ConstructRecipeBlockDataDependentAndInnerIterative();
-  static void ConstructRecipeBlockFixedIterations();
-
   const CanaryApplication::StatementInfoMap* statement_info_map_;
   std::unique_ptr<ApplicationRecipes> application_recipes_;
   // There is only one recipe block executor running at one time.

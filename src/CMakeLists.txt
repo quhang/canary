@@ -30,6 +30,7 @@ cxx_static_library(canary_core "${cxx_default}"
     worker/worker_data_router.cc
     worker/worker_light_thread_context.cc
     worker/worker_scheduler.cc
+    worker/recipe_constructor.cc
     worker/recipe_helper.cc
     worker/recipe_engine.cc
     )

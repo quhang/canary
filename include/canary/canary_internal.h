@@ -374,6 +374,7 @@ enum class StageId : int32_t {
   CONTROL_FLOW_DECISION,
   INIT,
   // Normal stages.
+  INITIALIZED_AND_UNKNOWN = -2,
   INVALID = -1,
   FIRST = 0
 };
