@@ -73,9 +73,7 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
 void RecipeEngine::set_statement_info_map(
     const CanaryApplication::StatementInfoMap* statement_info_map) {
   statement_info_map_ = statement_info_map;
-  RecipeConstructor constructor(statement_info_map);
-  constructor.Construct();
-  application_recipes_ = constructor.RetrieveResult();
+  application_recipes_ = RecipeConstructor(statement_info_map).RetrieveResult();
 }
 
 void RecipeEngine::Initialize(VariableGroupId self_variable_group_id,

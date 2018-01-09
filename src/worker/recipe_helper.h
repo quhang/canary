@@ -136,7 +136,7 @@ class PartitionMetadataStorage {
   bool InitializeIfNeeded(VariableId variable_id) {
     if (variable_id_to_access_metadata_.find(variable_id) ==
         variable_id_to_access_metadata_.end()) {
-      auto access_metadata = variable_id_to_access_metadata_[variable_id];
+      auto& access_metadata = variable_id_to_access_metadata_[variable_id];
       access_metadata.last_write_stage_id = StageId::INITIALIZED_AND_UNKNOWN;
       access_metadata.num_read_stages = 0;
       return true;
@@ -162,6 +162,10 @@ bool MatchRecipe(
 // metadata.
 void ApplyRecipe(const Recipe& recipe, StageId stage_id,
                  PartitionMetadataStorage* partition_metadata_storage);
+
+// Return whether two recipes are dependent.
+bool IsDependentRecipes(const Recipe& first_recipe,
+                        const Recipe& second_recipe);
 
 }  // namespace recipe_helper
 

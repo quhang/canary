@@ -46,6 +46,9 @@
 
 namespace canary {
 
+/*
+ * A helper class that constructs recipes for a job.
+ */
 class RecipeConstructor {
  public:
   explicit RecipeConstructor(
@@ -53,35 +56,44 @@ class RecipeConstructor {
       : statement_info_map_(statement_info_map) {}
   virtual ~RecipeConstructor() {}
 
-  void Construct();
-
+  // Return the constructed recipes.
   std::unique_ptr<ApplicationRecipes> RetrieveResult() {
+    if (!result_) {
+      Construct();
+    }
     return std::move(result_);
   }
 
  private:
+  // Start constructing the recipes.
+  void Construct();
+
+  // Compute which statement is in the inner most loop.
   void ComputeInnerLoopStatements();
+  // COmpute the recipe block id fo each recipe.
   void ComputeRecipeBlockId();
 
   void ConstructRecipeBlockNoneDataDependent(
       const std::list<StatementId>& statement_ids,
-      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id,
-      ApplicationRecipes* result);
+      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id);
   void ConstructRecipeBlockDataDependent(
       const std::list<StatementId>& statement_ids,
       RecipeBlockId recipe_block_id, RecipeBlockId true_next_recipe_block_id,
-      RecipeBlockId false_next_recipe_block_id, ApplicationRecipes* result) {}
+      RecipeBlockId false_next_recipe_block_id);
   void ConstructRecipeBlockDataDependentAndInnerIterative(
       const std::list<StatementId>& statement_ids,
-      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id,
-      ApplicationRecipes* result) {}
+      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id) {}
   void ConstructRecipeBlockFixedItertations(
       const std::list<StatementId>& statement_ids, int num_iterations,
-      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id,
-      ApplicationRecipes* result) {}
+      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id) {}
+
+  void ComputeRecipesInBlock(
+    const std::list<StatementId>& statement_ids,
+    RecipeBlock* recipe_block,
+    PartitionMetadataStorage* partition_metadata);
+  void FillInFireRelation(RecipeBlock* recipe_block);
 
   const CanaryApplication::StatementInfoMap* statement_info_map_;
-
   std::unique_ptr<ApplicationRecipes> result_;
   std::set<StatementId> inner_loop_statements_;
   std::map<StatementId, RecipeBlockId> statement_id_to_recipe_block_id_;

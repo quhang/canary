@@ -51,7 +51,7 @@ void RecipeConstructor::Construct() {
 
   std::list<StatementId> temp_statements;
   int num_iterations = 0;
-  // Caution: nested fixed-iteration looping is not supported.
+  // Split the statements into blocks.
   for (const auto& key_value : *statement_info_map_) {
     StatementId statement_id = key_value.first;
     const auto& statement_info = key_value.second;
@@ -62,13 +62,13 @@ void RecipeConstructor::Construct() {
               statement_id_to_recipe_block_id_.at(temp_statements.back());
           ConstructRecipeBlockNoneDataDependent(
               temp_statements, current_recipe_block_id,
-              get_next(current_recipe_block_id), result_.get());
+              get_next(current_recipe_block_id));
           temp_statements.clear();
         }
         num_iterations = statement_info.num_loop;
         CHECK(inner_loop_statements_.find(statement_id) !=
               inner_loop_statements_.end())
-            << "Outer looping with fixed iterations is not supported";
+            << "Nested fixed-iteration loops are not supported";
         break;
       case CanaryApplication::StatementType::END_LOOP:
         if (!temp_statements.empty()) {
@@ -76,7 +76,7 @@ void RecipeConstructor::Construct() {
               statement_id_to_recipe_block_id_.at(temp_statements.back());
           ConstructRecipeBlockFixedItertations(
               temp_statements, num_iterations, current_recipe_block_id,
-              get_next(current_recipe_block_id, 2), result_.get());
+              get_next(current_recipe_block_id, 2));
           temp_statements.clear();
         }
         break;
@@ -86,8 +86,7 @@ void RecipeConstructor::Construct() {
             temp_statements, statement_id_to_recipe_block_id_.at(statement_id),
             get_next(statement_id_to_recipe_block_id_.at(statement_id)),
             statement_id_to_recipe_block_id_.at(
-                statement_info.branch_statement),
-            result_.get());
+                statement_info.branch_statement));
         temp_statements.clear();
         break;
       case CanaryApplication::StatementType::END_WHILE:
@@ -101,8 +100,7 @@ void RecipeConstructor::Construct() {
             ConstructRecipeBlockDataDependentAndInnerIterative(
                 temp_statements,
                 statement_id_to_recipe_block_id_.at(statement_id),
-                get_next(statement_id_to_recipe_block_id_.at(statement_id), 2),
-                result_.get());
+                get_next(statement_id_to_recipe_block_id_.at(statement_id), 2));
           } else {
             ConstructRecipeBlockDataDependent(
                 temp_statements,
@@ -110,8 +108,7 @@ void RecipeConstructor::Construct() {
                 get_next(
                     statement_id_to_recipe_block_id_.at(while_statement_id)),
                 statement_id_to_recipe_block_id_.at(
-                    while_statement_info.branch_statement),
-                result_.get());
+                    while_statement_info.branch_statement));
           }
           temp_statements.clear();
         }
@@ -198,24 +195,100 @@ void RecipeConstructor::ComputeRecipeBlockId() {
 void RecipeConstructor::ConstructRecipeBlockNoneDataDependent(
     const std::list<StatementId>& statement_ids,
     RecipeBlockId recipe_block_id,
-    RecipeBlockId next_recipe_block_id,
-    ApplicationRecipes* result) {
-  auto& recipe_block = result->recipe_block_map[recipe_block_id];
+    RecipeBlockId next_recipe_block_id) {
+  auto& recipe_block = result_->recipe_block_map[recipe_block_id];
   recipe_block.recipe_block_id = recipe_block_id;
   recipe_block.recipe_block_type =
       RecipeBlock::RecipeBlockType::NONE_DATA_DEPENDENT;
   recipe_block.next_recipe_block_id = next_recipe_block_id;
+
+  PartitionMetadataStorage partition_metadata;
+  ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
+  FillInFireRelation(&recipe_block);
+}
+
+void RecipeConstructor::ConstructRecipeBlockDataDependent(
+    const std::list<StatementId>& statement_ids, RecipeBlockId recipe_block_id,
+    RecipeBlockId true_next_recipe_block_id,
+    RecipeBlockId false_next_recipe_block_id) {
+  auto& recipe_block = result_->recipe_block_map[recipe_block_id];
+  recipe_block.recipe_block_id = recipe_block_id;
+  recipe_block.recipe_block_type =
+      RecipeBlock::RecipeBlockType::DATA_DEPENDENT;
+  recipe_block.next_recipe_block_id_if_true = true_next_recipe_block_id;
+  recipe_block.next_recipe_block_id_if_false = false_next_recipe_block_id;
+
+  PartitionMetadataStorage partition_metadata;
+  ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
+  FillInFireRelation(&recipe_block);
+}
+
+void RecipeConstructor::ComputeRecipesInBlock(
+    const std::list<StatementId>& statement_ids, RecipeBlock* recipe_block,
+    PartitionMetadataStorage* partition_metadata) {
   int stage_id_offset = 0;
   for (auto statement_id : statement_ids) {
-    auto& recipe = result->recipe_map[recipe_id_counter_];
-    recipe.recipe_id = recipe_id_counter_;
-    result_->recipe_id_to_statement_id[recipe_id_counter_] = statement_id;
-    recipe_block.recipe_ids.push_back(recipe_id_counter_);
-    ++recipe_id_counter_;
-    recipe.current_stage_id_offset = stage_id_offset++;
     const auto& statement_info = statement_info_map_->at(statement_id);
+    // Construct the recipe.
+    auto& recipe = result_->recipe_map[recipe_id_counter_];
+    recipe.recipe_id = recipe_id_counter_++;
+    // Initialize recipe metadata.
+    result_->recipe_id_to_statement_id[recipe.recipe_id] = statement_id;
+    recipe_block->recipe_ids.push_back(recipe.recipe_id);
+    recipe.current_stage_id_offset = stage_id_offset++;
     recipe.variable_group_id = statement_info.variable_group_id;
-    // TODO: Compute to_fire and access_requirements.
+    // Compute preconditions.
+    for (const auto& key_value : statement_info.variable_access_map) {
+      VariableId variable_id = key_value.first;
+      CanaryApplication::VariableAccess access_type = key_value.second;
+      const auto& access_data =
+          partition_metadata->GetPartitionAccessMetadata(variable_id);
+      auto& access_requirement =
+          recipe.variable_id_to_access_requirement[variable_id];
+      access_requirement.variable_id = variable_id;
+      access_requirement.access_type =
+          (access_type == CanaryApplication::VariableAccess::WRITE
+               ? AccessRequirement::AccessType::WRITE
+               : AccessRequirement::AccessType::READ);
+      if (access_data.last_write_stage_id == StageId::INITIALIZED_AND_UNKNOWN) {
+        access_requirement.need_dynamic_adjustment = true;
+      } else {
+        access_requirement.last_write_stage_id_offset =
+            get_value(access_data.last_write_stage_id);
+        access_requirement.need_dynamic_adjustment = false;
+      }
+      if (access_type == CanaryApplication::VariableAccess::WRITE) {
+        access_requirement.num_read_stages = access_data.num_read_stages;
+      } else {
+        access_requirement.num_read_stages = 0;
+      }
+    }
+    // Update the partition metadata storage.
+    for (const auto& key_value : statement_info.variable_access_map) {
+      VariableId variable_id = key_value.first;
+      CanaryApplication::VariableAccess access_type = key_value.second;
+      if (access_type == CanaryApplication::VariableAccess::WRITE) {
+        partition_metadata->WritePartition(
+            variable_id, static_cast<StageId>(recipe.current_stage_id_offset));
+      } else {
+        partition_metadata->ReadPartition(variable_id);
+      }
+    }
+  }
+}
+
+void RecipeConstructor::FillInFireRelation(RecipeBlock* recipe_block) {
+  auto& recipe_ids = recipe_block->recipe_ids;
+  for (auto front_iter = recipe_ids.begin(); front_iter != recipe_ids.end();
+       ++front_iter) {
+    auto& front_recipe = result_->recipe_map.at(*front_iter);
+    for (auto back_iter = std::next(front_iter); back_iter != recipe_ids.end();
+         ++back_iter) {
+      const auto& back_recipe = result_->recipe_map.at(*back_iter);
+      if (recipe_helper::IsDependentRecipes(front_recipe, back_recipe)) {
+        front_recipe.recipe_ids_to_fire.push_back(*back_iter);
+      }
+    }
   }
 }
 

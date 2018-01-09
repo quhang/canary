@@ -151,5 +151,20 @@ void ApplyRecipe(const Recipe& recipe, StageId stage_id,
   }
 }
 
+bool IsDependentRecipes(const Recipe& first_recipe,
+                        const Recipe& second_recipe) {
+  for (const auto& key_value : first_recipe.variable_id_to_access_requirement) {
+    if (second_recipe.variable_id_to_access_requirement.count(
+            key_value.first) != 0 &&
+        (second_recipe.variable_id_to_access_requirement.at(key_value.first)
+                 .access_type == AccessRequirement::AccessType::WRITE ||
+         key_value.second.access_type ==
+             AccessRequirement::AccessType::WRITE)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace recipe_helper
 }  // namespace canary
