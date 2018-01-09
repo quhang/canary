@@ -74,8 +74,12 @@ void RecipeConstructor::Construct() {
         if (!temp_statements.empty()) {
           auto current_recipe_block_id = 
               statement_id_to_recipe_block_id_.at(temp_statements.back());
+          ConstructRecipeBlockNoneDataDependent(
+              temp_statements, current_recipe_block_id,
+              get_next(current_recipe_block_id));
           ConstructRecipeBlockFixedItertations(
-              temp_statements, num_iterations, current_recipe_block_id,
+              temp_statements, num_iterations - 1,
+              get_next(current_recipe_block_id),
               get_next(current_recipe_block_id, 2));
           temp_statements.clear();
         }
@@ -97,9 +101,15 @@ void RecipeConstructor::Construct() {
           temp_statements.push_back(while_statement_id);
           if (inner_loop_statements_.find(statement_id) !=
               inner_loop_statements_.end()) {
-            ConstructRecipeBlockDataDependentAndInnerIterative(
+            ConstructRecipeBlockDataDependent(
                 temp_statements,
                 statement_id_to_recipe_block_id_.at(statement_id),
+                get_next(statement_id_to_recipe_block_id_.at(statement_id)),
+                statement_id_to_recipe_block_id_.at(
+                    while_statement_info.branch_statement));
+            ConstructRecipeBlockDataDependentAndInnerIterative(
+                temp_statements,
+                get_next(statement_id_to_recipe_block_id_.at(statement_id)),
                 get_next(statement_id_to_recipe_block_id_.at(statement_id), 2));
           } else {
             ConstructRecipeBlockDataDependent(
@@ -116,6 +126,13 @@ void RecipeConstructor::Construct() {
       default:
         temp_statements.push_back(statement_id);
     }
+  }
+  if (!temp_statements.empty()) {
+    auto current_recipe_block_id =
+        statement_id_to_recipe_block_id_.at(temp_statements.back());
+    ConstructRecipeBlockNoneDataDependent(temp_statements,
+                                          current_recipe_block_id,
+                                          get_next(current_recipe_block_id));
   }
 }
 
@@ -189,6 +206,12 @@ void RecipeConstructor::ComputeRecipeBlockId() {
             recipe_block_id_counter_;
     }
   }
+  if (std::prev(statement_info_map_->end())->second.statement_type !=
+          CanaryApplication::StatementType::END_LOOP &&
+      std::prev(statement_info_map_->end())->second.statement_type !=
+          CanaryApplication::StatementType::END_WHILE) {
+    ++recipe_block_id_counter_;
+  }
   result_->end_recipe_block_id = recipe_block_id_counter_;
 }
 
@@ -204,7 +227,7 @@ void RecipeConstructor::ConstructRecipeBlockNoneDataDependent(
 
   PartitionMetadataStorage partition_metadata;
   ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
-  FillInFireRelation(&recipe_block);
+  FillInFireRelation(&recipe_block, false);
 }
 
 void RecipeConstructor::ConstructRecipeBlockDataDependent(
@@ -220,7 +243,38 @@ void RecipeConstructor::ConstructRecipeBlockDataDependent(
 
   PartitionMetadataStorage partition_metadata;
   ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
-  FillInFireRelation(&recipe_block);
+  FillInFireRelation(&recipe_block, false);
+}
+
+void RecipeConstructor::ConstructRecipeBlockDataDependentAndInnerIterative(
+    const std::list<StatementId>& statement_ids, RecipeBlockId recipe_block_id,
+    RecipeBlockId next_recipe_block_id) {
+  auto& recipe_block = result_->recipe_block_map[recipe_block_id];
+  recipe_block.recipe_block_id = recipe_block_id;
+  recipe_block.recipe_block_type =
+      RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_INNER_ITERATIVE;
+  recipe_block.next_recipe_block_id = next_recipe_block_id;
+
+  PartitionMetadataStorage partition_metadata;
+  PreapplyAccess(statement_ids, &partition_metadata);
+  ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
+  FillInFireRelation(&recipe_block, true);
+}
+
+void RecipeConstructor::ConstructRecipeBlockFixedItertations(
+    const std::list<StatementId>& statement_ids, int num_iterations,
+    RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id) {
+  auto& recipe_block = result_->recipe_block_map[recipe_block_id];
+  recipe_block.recipe_block_id = recipe_block_id;
+  recipe_block.recipe_block_type =
+      RecipeBlock::RecipeBlockType::FIXED_ITERATIONS;
+  recipe_block.next_recipe_block_id = next_recipe_block_id;
+  recipe_block.num_iterations = num_iterations;
+
+  PartitionMetadataStorage partition_metadata;
+  PreapplyAccess(statement_ids, &partition_metadata);
+  ComputeRecipesInBlock(statement_ids, &recipe_block, &partition_metadata);
+  FillInFireRelation(&recipe_block, true);
 }
 
 void RecipeConstructor::ComputeRecipesInBlock(
@@ -277,18 +331,54 @@ void RecipeConstructor::ComputeRecipesInBlock(
   }
 }
 
-void RecipeConstructor::FillInFireRelation(RecipeBlock* recipe_block) {
+void RecipeConstructor::FillInFireRelation(RecipeBlock* recipe_block,
+                                           bool iterative) {
   auto& recipe_ids = recipe_block->recipe_ids;
-  for (auto front_iter = recipe_ids.begin(); front_iter != recipe_ids.end();
-       ++front_iter) {
-    auto& front_recipe = result_->recipe_map.at(*front_iter);
-    for (auto back_iter = std::next(front_iter); back_iter != recipe_ids.end();
-         ++back_iter) {
-      const auto& back_recipe = result_->recipe_map.at(*back_iter);
-      if (recipe_helper::IsDependentRecipes(front_recipe, back_recipe)) {
-        front_recipe.recipe_ids_to_fire.push_back(*back_iter);
+  if (iterative) {
+    for (auto front_iter = recipe_ids.begin(); front_iter != recipe_ids.end();
+         ++front_iter) {
+      auto& front_recipe = result_->recipe_map.at(*front_iter);
+      for (auto back_iter = recipe_ids.begin(); back_iter != recipe_ids.end();
+           ++back_iter) {
+        const auto& back_recipe = result_->recipe_map.at(*back_iter);
+        if (recipe_helper::IsDependentRecipes(front_recipe, back_recipe)) {
+          front_recipe.recipe_ids_to_fire.push_back(*back_iter);
+        }
       }
     }
+  } else {
+    for (auto front_iter = recipe_ids.begin(); front_iter != recipe_ids.end();
+         ++front_iter) {
+      auto& front_recipe = result_->recipe_map.at(*front_iter);
+      for (auto back_iter = std::next(front_iter);
+           back_iter != recipe_ids.end(); ++back_iter) {
+        const auto& back_recipe = result_->recipe_map.at(*back_iter);
+        if (recipe_helper::IsDependentRecipes(front_recipe, back_recipe)) {
+          front_recipe.recipe_ids_to_fire.push_back(*back_iter);
+        }
+      }
+    }
+  }
+}
+
+void RecipeConstructor::PreapplyAccess(
+    const std::list<StatementId>& statement_ids,
+    PartitionMetadataStorage* partition_metadata) {
+  int stage_id_offset = -static_cast<int>(statement_ids.size());
+  for (auto statement_id : statement_ids) {
+    const auto& statement_info = statement_info_map_->at(statement_id);
+    // Update the partition metadata storage.
+    for (const auto& key_value : statement_info.variable_access_map) {
+      VariableId variable_id = key_value.first;
+      CanaryApplication::VariableAccess access_type = key_value.second;
+      if (access_type == CanaryApplication::VariableAccess::WRITE) {
+        partition_metadata->WritePartition(
+            variable_id, static_cast<StageId>(stage_id_offset));
+      } else {
+        partition_metadata->ReadPartition(variable_id);
+      }
+    }
+    ++stage_id_offset;
   }
 }
 

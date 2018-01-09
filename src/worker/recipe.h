@@ -54,7 +54,30 @@ struct AccessRequirement {
   // If what are executed before the recipe are data-dependent, the access
   // record may need dynamic adjustment. This happens when the last write stage
   // is before the begining of the recipe block and unpredictable.
+  //
   bool need_dynamic_adjustment;
+  std::string Print() const {
+    std::stringstream ss;
+    if (access_type == AccessType::READ) {
+      ss << "read, ";
+      ss << "variable #" << get_value(variable_id) << ", ";
+      if (need_dynamic_adjustment) {
+        ss << "last write = dynamic, " ;
+      } else {
+        ss << "last write = " << last_write_stage_id_offset << ", " ;
+      }
+    } else {
+      ss << "write, ";
+      ss << "variable #" << get_value(variable_id) << ", ";
+      if (need_dynamic_adjustment) {
+        ss << "last write = dynamic, ";
+      } else {
+        ss << "last write = " << last_write_stage_id_offset << ", " ;
+      }
+      ss << "num read = " << num_read_stages << ", " ;
+    }
+    return ss.str();
+  }
 };
 
 /*
@@ -67,6 +90,21 @@ struct Recipe {
   int32_t current_stage_id_offset;
   std::map<VariableId, AccessRequirement> variable_id_to_access_requirement;
   std::vector<RecipeId> recipe_ids_to_fire;
+  std::string Print() const {
+    std::stringstream ss;
+    ss << "recipe #" << get_value(recipe_id) << ", ";
+    ss << "variable group #" << get_value(variable_group_id)<< ", ";
+    ss << "stage id offset = " << current_stage_id_offset << ", ";
+    for (const auto& key_value : variable_id_to_access_requirement) {
+      ss << "preconditions = {" << key_value.second.Print() << "}, ";
+    }
+    ss << "fire recipes = {";
+    for (auto recipe_id_to_fire : recipe_ids_to_fire) {
+      ss << get_value(recipe_id_to_fire) << ", ";
+    }
+    ss << "}";
+    return ss.str();
+  }
 };
 
 }  // namespace canary

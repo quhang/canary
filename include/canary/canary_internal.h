@@ -362,6 +362,8 @@ COUNTABLE_ENUM(RecipeBlockId);
  * The id of a stage.
  */
 enum class StageId : int32_t {
+  // This is a hack...
+  INITIALIZED_AND_UNKNOWN = -100001,
   // Represents special states.
   REACH_BARRIER = -32,
   COMPLETE,
@@ -374,7 +376,6 @@ enum class StageId : int32_t {
   CONTROL_FLOW_DECISION,
   INIT,
   // Normal stages.
-  INITIALIZED_AND_UNKNOWN = -2,
   INVALID = -1,
   FIRST = 0
 };

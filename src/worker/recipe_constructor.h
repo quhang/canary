@@ -82,16 +82,18 @@ class RecipeConstructor {
       RecipeBlockId false_next_recipe_block_id);
   void ConstructRecipeBlockDataDependentAndInnerIterative(
       const std::list<StatementId>& statement_ids,
-      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id) {}
+      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id);
   void ConstructRecipeBlockFixedItertations(
       const std::list<StatementId>& statement_ids, int num_iterations,
-      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id) {}
+      RecipeBlockId recipe_block_id, RecipeBlockId next_recipe_block_id);
 
   void ComputeRecipesInBlock(
     const std::list<StatementId>& statement_ids,
     RecipeBlock* recipe_block,
     PartitionMetadataStorage* partition_metadata);
-  void FillInFireRelation(RecipeBlock* recipe_block);
+  void FillInFireRelation(RecipeBlock* recipe_block, bool iterative);
+  void PreapplyAccess(const std::list<StatementId>& statement_ids,
+                      PartitionMetadataStorage* partition_metadata);
 
   const CanaryApplication::StatementInfoMap* statement_info_map_;
   std::unique_ptr<ApplicationRecipes> result_;

@@ -64,13 +64,38 @@ struct RecipeBlock {
     FIXED_ITERATIONS
   } recipe_block_type;
 
-  // Valid for NONE_DATA_DEPENDENT and FIXED_ITERATIONS.
+  // Valid for NONE_DATA_DEPENDENT, FIXED_ITERATIONS and
+  // DATA_DEPENDENT_AND_INNER_ITERATIVE.
   RecipeBlockId next_recipe_block_id;
   // Valid for DATA_DEPENDENT.
   RecipeBlockId next_recipe_block_id_if_true;
   RecipeBlockId next_recipe_block_id_if_false;
-  // Valid for FIXED_ITERATIONS/DATA_DEPENDENT_AND_INNER_ITERATIVE.
+  // Valid for FIXED_ITERATIONS.
   int32_t num_iterations;
+  std::string Print() const {
+    std::stringstream ss;
+    ss << "recipe block #" << get_value(recipe_block_id) << ", ";
+    switch (recipe_block_type) {
+      case RecipeBlockType::NONE_DATA_DEPENDENT:
+        ss << " next block = " << get_value(next_recipe_block_id) << ", ";
+        break;
+      case RecipeBlockType::DATA_DEPENDENT:
+        ss << " next block = " << get_value(next_recipe_block_id_if_true) << "/"
+           << get_value(next_recipe_block_id_if_false) << ", ";
+        break;
+      case RecipeBlockType::DATA_DEPENDENT_AND_INNER_ITERATIVE:
+        ss << " iterative, next block = " << get_value(next_recipe_block_id)
+           << ", ";
+        break;
+      case RecipeBlockType::FIXED_ITERATIONS:
+        ss << num_iterations
+           << " loops, next block = " << get_value(next_recipe_block_id)
+           << ", ";
+        break;
+    }
+
+    return ss.str();
+  }
 };
 
 /*
@@ -81,6 +106,20 @@ struct ApplicationRecipes {
   std::map<RecipeBlockId, RecipeBlock> recipe_block_map;
   RecipeBlockId begin_recipe_block_id, end_recipe_block_id;
   std::map<RecipeId, StatementId> recipe_id_to_statement_id;
+  std::string Print() const {
+    std::stringstream ss;
+    for (const auto& block_key_value : recipe_block_map) {
+      ss << block_key_value.second.Print() << std::endl;
+      for (auto recipe_id : block_key_value.second.recipe_ids) {
+        ss << "  statement #"
+           << get_value(recipe_id_to_statement_id.at(recipe_id)) << ", "
+           << recipe_map.at(recipe_id).Print() << std::endl;
+      }
+    }
+    ss << "start block #" << get_value(begin_recipe_block_id) << std::endl;
+    ss << "end block #" << get_value(end_recipe_block_id) << std::endl;
+    return ss.str();
+  }
 };
 
 }  // namespace canary

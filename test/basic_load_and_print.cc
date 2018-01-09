@@ -7,6 +7,7 @@
 #include "shared/initialize.h"
 #include "shared/canary_application.h"
 #include "message/launch_message.h"
+#include "worker/recipe_constructor.h"
 
 DEFINE_string(launch_binary, "", "Binary location.");
 
@@ -30,6 +31,11 @@ int main(int argc, char** argv) {
       launch_application.binary_location,
       launch_application.application_parameter, &handle);
   LOG(INFO) << "Application:\n" << application->Print();
+  LOG(INFO) << "Recipes:\n"
+            << RecipeConstructor(application->get_statement_info_map())
+                   .RetrieveResult()
+                   ->Print();
+
   CanaryApplication::UnloadApplication(handle, application);
   return 0;
 }
