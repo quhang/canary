@@ -60,6 +60,11 @@ class RecipeBlockExecutor {
       std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
       std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
       StageId begin_stage_id);
+  static std::unique_ptr<RecipeBlockExecutor> Create(
+      RecipeBlock::RecipeBlockType recipe_block_type);
+  RecipeBlock::RecipeBlockType get_recipe_block_type() const {
+    return current_recipe_block_->recipe_block_type;
+  }
 
   RecipeBlockExecutor() {}
   virtual ~RecipeBlockExecutor() {}
@@ -106,6 +111,37 @@ class RecipeBlockExecutor {
   StageId get_last_finished_stage_id() const {
     return end_stage_id_;
   }
+
+  void load(CanaryInputArchive& archive) {
+    archive(current_recipe_block_id_);
+    archive(variable_group_id_, partition_id_);
+    partition_metadata_storage_before_block_ =
+        std::make_unique<PartitionMetadataStorage>();
+    archive(*partition_metadata_storage_before_block_);
+    archive(num_recipes_in_one_block_, num_recipes_to_run_);
+    archive(begin_stage_id_, end_stage_id_);
+    archive(fired_recipe_ids_, ready_recipe_ids_);
+  }  // NOLINT
+  void post_load(
+      const ApplicationRecipes* application_recipes,
+      std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
+      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage) {
+    application_recipes_ = application_recipes;
+    current_recipe_block_ =
+        &application_recipes->recipe_block_map.at(current_recipe_block_id_);
+    decision_storage_ = decision_storage;
+    partition_metadata_storage_ = partition_metadata_storage;
+  }
+  //! Serialization function. Data are destroyed after serialization.
+  void save(CanaryOutputArchive& archive) const {
+    archive(current_recipe_block_id_);
+    archive(variable_group_id_, partition_id_);
+    archive(*partition_metadata_storage_before_block_);
+    archive(num_recipes_in_one_block_, num_recipes_to_run_);
+    archive(begin_stage_id_, end_stage_id_);
+    archive(fired_recipe_ids_, ready_recipe_ids_);
+  }
+
 
  protected:
   /*
@@ -172,8 +208,7 @@ class RecipeBlockExecutorNoneDataDependent : public RecipeBlockExecutor {
   ~RecipeBlockExecutorNoneDataDependent() override {}
   void Initialize(
       const ApplicationRecipes* application_recipes,
-      RecipeBlockId recipe_block_id,
-      VariableGroupId variable_group_id,
+      RecipeBlockId recipe_block_id, VariableGroupId variable_group_id,
       PartitionId partition_id,
       std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
       std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
@@ -455,9 +490,38 @@ class RecipeEngine : public ExecuteEngine {
    * Migration related.
    */
   //! Deserialization function.
-  void load(CanaryInputArchive& archive) override {}  // NOLINT
+  void load(CanaryInputArchive& archive) override {
+    archive(variable_group_id_, partition_id_);
+    decision_storage_ = std::make_shared<ControlFlowDecisionStorage>();
+    archive(*decision_storage_);
+    partition_metadata_storage_ = std::make_shared<PartitionMetadataStorage>();
+    archive(*partition_metadata_storage_);
+    bool has_ongoing_recipe_block_executor = false;
+    archive(has_ongoing_recipe_block_executor);
+    if (has_ongoing_recipe_block_executor) {
+      RecipeBlock::RecipeBlockType recipe_block_type;
+      archive(recipe_block_type);
+      ongoing_recipe_block_executor_ =
+          RecipeBlockExecutor::Create(recipe_block_type);
+      archive(*ongoing_recipe_block_executor_);
+      ongoing_recipe_block_executor_->post_load(application_recipes_.get(),
+                                                decision_storage_,
+                                                partition_metadata_storage_);
+    }
+  }  // NOLINT
   //! Serialization function. Data are destroyed after serialization.
-  void save(CanaryOutputArchive& archive) const override {}  // NOLINT
+  void save(CanaryOutputArchive& archive) const override {
+    archive(variable_group_id_, partition_id_);
+    archive(*decision_storage_);
+    archive(*partition_metadata_storage_);
+    if (ongoing_recipe_block_executor_) {
+      archive(true);
+      archive(ongoing_recipe_block_executor_->get_recipe_block_type());
+      archive(*ongoing_recipe_block_executor_);
+    } else {
+      archive(false);
+    }
+  }  // NOLINT
 
   /*
    * Debugging and monitoring related.

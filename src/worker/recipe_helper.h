@@ -71,6 +71,14 @@ class ControlFlowDecisionStorage {
     return internal_storage_.find(stage_id) != internal_storage_.end();
   }
 
+  template<typename Archive> void serialize(Archive& archive) {
+    archive(internal_storage_);
+  }
+
+  template<typename Archive> void serialize(Archive& archive) const {
+    archive(internal_storage_);
+  }
+
  private:
   FetchResult FetchInternal(StageId* stage_id, bool* decision,
                             bool remove_next_entry) {
@@ -111,6 +119,10 @@ class PartitionMetadataStorage {
   struct AccessMetadata {
     StageId last_write_stage_id;
     int32_t num_read_stages;
+    template <typename Archive>
+    void serialize(Archive& archive) {
+      archive(last_write_stage_id, num_read_stages);
+    }
   };
   AccessMetadata GetPartitionAccessMetadata(VariableId variable_id) const {
     auto iter = variable_id_to_access_metadata_.find(variable_id);
@@ -133,6 +145,14 @@ class PartitionMetadataStorage {
     InitializeIfNeeded(variable_id);
     auto& access = variable_id_to_access_metadata_.at(variable_id);
     ++access.num_read_stages;
+  }
+
+  template<typename Archive> void serialize(Archive& archive) {
+    archive(variable_id_to_access_metadata_);
+  }
+
+  template<typename Archive> void serialize(Archive& archive) const {
+    archive(variable_id_to_access_metadata_);
   }
 
  private:

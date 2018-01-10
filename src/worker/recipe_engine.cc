@@ -50,9 +50,20 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
     std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
     std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
     StageId begin_stage_id) {
+  std::unique_ptr<RecipeBlockExecutor> result =
+      Create(application_recipes->recipe_block_map.at(recipe_block_id)
+                 .recipe_block_type);
+  result->Initialize(application_recipes, recipe_block_id, variable_group_id,
+                     partition_id, decision_storage, partition_metadata_storage,
+                     begin_stage_id);
+  VLOG(1) << "Created: " << result->Print();
+  return std::move(result);
+}
+
+std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
+    RecipeBlock::RecipeBlockType recipe_block_type) {
   std::unique_ptr<RecipeBlockExecutor> result;
-  switch (application_recipes->recipe_block_map.at(recipe_block_id)
-              .recipe_block_type) {
+  switch (recipe_block_type) {
     case RecipeBlock::RecipeBlockType::NONE_DATA_DEPENDENT:
       result = std::make_unique<RecipeBlockExecutorNoneDataDependent>();
       break;
@@ -68,10 +79,6 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
     default:
       LOG(FATAL) << "Internal error!";
   }
-  result->Initialize(application_recipes, recipe_block_id, variable_group_id,
-                     partition_id, decision_storage, partition_metadata_storage,
-                     begin_stage_id);
-  VLOG(1) << "Created: " << result->Print();
   return std::move(result);
 }
 
