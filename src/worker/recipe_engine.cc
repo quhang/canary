@@ -55,11 +55,12 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
     case RecipeBlock::RecipeBlockType::NONE_DATA_DEPENDENT:
       result = std::make_unique<RecipeBlockExecutorNoneDataDependent>();
       break;
+    case RecipeBlock::RecipeBlockType::FIXED_ITERATIONS:
+      result = std::make_unique<RecipeBlockExecutorFixedIterations>();
+      break;
     // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_NONE_ITERATIVE:
     //   break;
     // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_ITERATIVE:
-    //   break;
-    // case RecipeBlock::RecipeBlockType::FIXED_ITERATIONS:
     //   break;
     default:
       LOG(FATAL) << "Internal error!";
@@ -69,6 +70,80 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
                      begin_stage_id);
   return std::move(result);
 }
+
+void RecipeBlockExecutor::InitializeInternal(
+      const ApplicationRecipes* application_recipes,
+      RecipeBlockId recipe_block_id,
+      VariableGroupId variable_group_id,
+      std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
+      std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage) {
+    application_recipes_ = application_recipes;
+    current_recipe_block_id_ = recipe_block_id;
+    current_recipe_block_ =
+        &application_recipes->recipe_block_map.at(recipe_block_id);
+    variable_group_id_ = variable_group_id;
+    decision_storage_ = decision_storage;
+    partition_metadata_storage_ = partition_metadata_storage;
+    partition_metadata_storage_before_block_ =
+        partition_metadata_storage->Clone();
+    // Count the number of recipes in one block.
+    {
+    num_recipes_in_one_block_ = 0;
+    for (auto recipe_id : current_recipe_block_->recipe_ids) {
+      if (application_recipes_->recipe_map.at(recipe_id).variable_group_id ==
+          variable_group_id_) {
+        ++num_recipes_in_one_block_;
+      }
+    }
+    // Fire all recipes.
+    for (auto recipe_id : current_recipe_block_->recipe_ids) {
+      if (application_recipes_->recipe_map.at(recipe_id).variable_group_id ==
+          variable_group_id_) {
+        fired_recipe_ids_.insert(recipe_id);
+      }
+    }
+  }
+}
+
+bool RecipeBlockExecutor::CheckRecipe(RecipeId recipe_id, StageId* stage_id) {
+  const auto& recipe = application_recipes_->recipe_map.at(recipe_id);
+  int recipe_block_size = current_recipe_block_->recipe_ids.size();
+  return recipe_helper::MatchRecipe(
+      recipe, begin_stage_id_, end_stage_id_, recipe_block_size,
+      *partition_metadata_storage_, *partition_metadata_storage_before_block_,
+      stage_id);
+}
+
+bool RecipeBlockExecutor::RetrieveReadyStageIfPossible(StageId* stage_id,
+                                                       RecipeId* recipe_id) {
+  StageId result_stage_id;
+  auto iter = fired_recipe_ids_.begin();
+  while (iter != fired_recipe_ids_.end()) {
+    if (ready_recipe_ids_.find(*iter) == ready_recipe_ids_.end() &&
+        CheckRecipe(*iter, &result_stage_id)) {
+      *recipe_id = *iter;
+      *stage_id = result_stage_id;
+      ready_recipe_ids_.insert(*iter);
+      fired_recipe_ids_.erase(iter);
+      return true;
+    }
+    iter = fired_recipe_ids_.erase(iter);
+  }
+  return false;
+}
+
+void RecipeBlockExecutor::CompleteRecipe(RecipeId recipe_id,
+                                         StageId complete_stage_id) {
+  --num_recipes_to_run_;
+  const auto& recipe = application_recipes_->recipe_map.at(recipe_id);
+  recipe_helper::ApplyRecipe(recipe, complete_stage_id,
+                             partition_metadata_storage_.get());
+  ready_recipe_ids_.erase(recipe_id);
+  for (auto recipe_id_to_fire : fired_recipe_ids_) {
+    fired_recipe_ids_.insert(recipe_id_to_fire);
+  }
+}
+
 
 void RecipeEngine::set_statement_info_map(
     const CanaryApplication::StatementInfoMap* statement_info_map) {

@@ -67,6 +67,9 @@ class ControlFlowDecisionStorage {
   FetchResult PeekNext(StageId* stage_id, bool* decision) {
     return FetchInternal(stage_id, decision, false);
   }
+  bool Query(StageId stage_id) const {
+    return internal_storage_.find(stage_id) != internal_storage_.end();
+  }
 
  private:
   FetchResult FetchInternal(StageId* stage_id, bool* decision,

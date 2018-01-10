@@ -66,8 +66,8 @@ void RecipeConstructor::Construct() {
           temp_statements.clear();
         }
         num_iterations = statement_info.num_loop;
-        CHECK(inner_loop_statements_.find(statement_id) !=
-              inner_loop_statements_.end())
+        CHECK_GE(num_iterations, 2);
+        CHECK(inner_loop_statements_.count(statement_id) != 0)
             << "Nested fixed-iteration loops are not supported";
         break;
       case CanaryApplication::StatementType::END_LOOP:
@@ -99,14 +99,12 @@ void RecipeConstructor::Construct() {
           const auto& while_statement_info =
               statement_info_map_->at(while_statement_id);
           temp_statements.push_back(while_statement_id);
-          if (inner_loop_statements_.find(statement_id) !=
-              inner_loop_statements_.end()) {
+          if (inner_loop_statements_.count(statement_id) != 0) {
             ConstructRecipeBlockDataDependent(
                 temp_statements,
                 statement_id_to_recipe_block_id_.at(statement_id),
                 get_next(statement_id_to_recipe_block_id_.at(statement_id)),
-                statement_id_to_recipe_block_id_.at(
-                    while_statement_info.branch_statement));
+                get_next(statement_id_to_recipe_block_id_.at(statement_id), 2));
             ConstructRecipeBlockDataDependentAndInnerIterative(
                 temp_statements,
                 get_next(statement_id_to_recipe_block_id_.at(statement_id)),

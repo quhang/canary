@@ -55,7 +55,7 @@ AccessRequirement AdjustDynamicAccessRequirement(
       partition_metadata_storage_before_block.GetPartitionAccessMetadata(
           access_requirement.variable_id);
   result.last_write_stage_id_offset =
-      get_distance(access_metadata.last_write_stage_id, begin_stage_id);
+      get_distance(begin_stage_id, access_metadata.last_write_stage_id);
   if (access_requirement.access_type == AccessRequirement::AccessType::WRITE) {
     result.num_read_stages += access_metadata.num_read_stages;
   }
@@ -87,9 +87,9 @@ bool MatchAccessRequirement(
     return false;
   }
   int32_t difference = get_distance(
-      access_metadata.last_write_stage_id,
       get_next(begin_stage_id,
-               access_requirement_adjusted.last_write_stage_id_offset));
+               access_requirement_adjusted.last_write_stage_id_offset),
+      access_metadata.last_write_stage_id);
   if (difference % step_size != 0) {
     return false;
   }
