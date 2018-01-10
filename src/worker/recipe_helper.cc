@@ -122,6 +122,11 @@ bool MatchRecipe(
     if (!matched) {
       return false;
     }
+    if (access_requirement.access_type == AccessRequirement::AccessType::READ &&
+        access_requirement.need_dynamic_adjustment) {
+      // Cannot determine the stage id, so skip.
+      continue;
+    }
     if (first_entry) {
       first_entry = false;
       candidate_stage_id = temp_stage_id;
@@ -131,7 +136,8 @@ bool MatchRecipe(
       }
     }
   }
-  *result_stage_id = candidate_stage_id;
+  *result_stage_id =
+      get_next(candidate_stage_id, recipe.current_stage_id_offset);
   return true;
 }
 

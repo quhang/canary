@@ -46,6 +46,7 @@ namespace canary {
 std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
     const ApplicationRecipes* application_recipes,
     RecipeBlockId recipe_block_id, VariableGroupId variable_group_id,
+    PartitionId partition_id,
     std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
     std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage,
     StageId begin_stage_id) {
@@ -58,16 +59,19 @@ std::unique_ptr<RecipeBlockExecutor> RecipeBlockExecutor::Create(
     case RecipeBlock::RecipeBlockType::FIXED_ITERATIONS:
       result = std::make_unique<RecipeBlockExecutorFixedIterations>();
       break;
-    // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_NONE_ITERATIVE:
-    //   break;
-    // case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_ITERATIVE:
-    //   break;
+    case RecipeBlock::RecipeBlockType::DATA_DEPENDENT:
+      result = std::make_unique<RecipeBlockExecutorDataDependent>();
+      break;
+    case RecipeBlock::RecipeBlockType::DATA_DEPENDENT_AND_INNER_ITERATIVE:
+      result = std::make_unique<RecipeBlockExecutorDataDependentAndIterative>();
+      break;
     default:
       LOG(FATAL) << "Internal error!";
   }
   result->Initialize(application_recipes, recipe_block_id, variable_group_id,
-                     decision_storage, partition_metadata_storage,
+                     partition_id, decision_storage, partition_metadata_storage,
                      begin_stage_id);
+  VLOG(1) << "Created: " << result->Print();
   return std::move(result);
 }
 
@@ -75,6 +79,7 @@ void RecipeBlockExecutor::InitializeInternal(
       const ApplicationRecipes* application_recipes,
       RecipeBlockId recipe_block_id,
       VariableGroupId variable_group_id,
+      PartitionId partition_id,
       std::shared_ptr<ControlFlowDecisionStorage> decision_storage,
       std::shared_ptr<PartitionMetadataStorage> partition_metadata_storage) {
     application_recipes_ = application_recipes;
@@ -82,6 +87,7 @@ void RecipeBlockExecutor::InitializeInternal(
     current_recipe_block_ =
         &application_recipes->recipe_block_map.at(recipe_block_id);
     variable_group_id_ = variable_group_id;
+    partition_id_ = partition_id;
     decision_storage_ = decision_storage;
     partition_metadata_storage_ = partition_metadata_storage;
     partition_metadata_storage_before_block_ =
@@ -95,13 +101,7 @@ void RecipeBlockExecutor::InitializeInternal(
         ++num_recipes_in_one_block_;
       }
     }
-    // Fire all recipes.
-    for (auto recipe_id : current_recipe_block_->recipe_ids) {
-      if (application_recipes_->recipe_map.at(recipe_id).variable_group_id ==
-          variable_group_id_) {
-        fired_recipe_ids_.insert(recipe_id);
-      }
-    }
+    FireAllRecipes();
   }
 }
 
@@ -139,7 +139,7 @@ void RecipeBlockExecutor::CompleteRecipe(RecipeId recipe_id,
   recipe_helper::ApplyRecipe(recipe, complete_stage_id,
                              partition_metadata_storage_.get());
   ready_recipe_ids_.erase(recipe_id);
-  for (auto recipe_id_to_fire : fired_recipe_ids_) {
+  for (auto recipe_id_to_fire : recipe.recipe_ids_to_fire) {
     fired_recipe_ids_.insert(recipe_id_to_fire);
   }
 }
@@ -159,8 +159,8 @@ void RecipeEngine::Initialize(VariableGroupId self_variable_group_id,
   partition_metadata_storage_ = std::make_shared<PartitionMetadataStorage>();
   ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
       application_recipes_.get(), application_recipes_->begin_recipe_block_id,
-      variable_group_id_, decision_storage_, partition_metadata_storage_,
-      StageId::FIRST);
+      variable_group_id_, partition_id_, decision_storage_,
+      partition_metadata_storage_, StageId::FIRST);
 }
 
 std::pair<StageId, StatementId> RecipeEngine::GetNextReadyStage() {
@@ -179,7 +179,8 @@ std::pair<StageId, StatementId> RecipeEngine::GetNextReadyStage() {
     } else {
       ongoing_recipe_block_executor_ = RecipeBlockExecutor::Create(
           application_recipes_.get(), next_recipe_block_id, variable_group_id_,
-          decision_storage_, partition_metadata_storage_, next_stage_id);
+          partition_id_, decision_storage_, partition_metadata_storage_,
+          next_stage_id);
     }
     retrieve_result = ongoing_recipe_block_executor_->GetNextReadyStage(
         &stage_id, &recipe_id);
