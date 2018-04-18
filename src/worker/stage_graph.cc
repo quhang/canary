@@ -55,12 +55,14 @@ void StageGraph::Initialize(VariableGroupId self_variable_group_id,
 void StageGraph::CompleteStage(StageId complete_stage_id, double cycles) {
   CHECK(!IsBlockedStage(complete_stage_id))
       << "Internal error when implementing a barrier!";
-  VLOG(1) << "Complete stage " << get_value(complete_stage_id);
   auto iter = uncomplete_stage_map_.find(complete_stage_id);
   CHECK(iter != uncomplete_stage_map_.end());
   auto& stage_record = iter->second;
   const auto& statement_info =
       statement_info_map_->at(stage_record.statement_id);
+  VLOG(1) << "Completed stage=" << get_value(complete_stage_id)
+          << " statement=" << get_value(stage_record.statement_id)
+          << " partition=" << get_value(self_partition_id_);
   // Updates the last finished stage.
   if (last_finished_stage_id_ == StageId::INVALID) {
     last_finished_stage_id_ = complete_stage_id;
@@ -68,13 +70,45 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double cycles) {
     last_finished_stage_id_ =
         std::max(last_finished_stage_id_, complete_stage_id);
   }
+
+  // Update statement stats.
+  if (statement_stats_.find(stage_record.statement_id) == statement_stats_.end()) {
+    statement_stats_[stage_record.statement_id] = std::make_pair(0, 0);
+  }
+  {
+    std::pair<double, int> &stat = statement_stats_[stage_record.statement_id];
+    stat.first += cycles;
+    stat.second += 1;
+  }
+
   // Updates running stats.
-  if (self_partition_id_ == PartitionId::FIRST && statement_info.track_needed) {
+  if (statement_info.track_needed) {
     timestamp_storage_[complete_stage_id] =
         std::make_pair(stage_record.statement_id,
                        time::timepoint_to_double(time::WallClock::now()));
   }
+
+  // Update busy cycles since previous track.
+  cycles_from_previous_track_ += cycles;
+  if (statement_info.track_needed) {
+    cycles_track_storage_[complete_stage_id] =
+      std::make_pair(stage_record.statement_id, cycles_from_previous_track_);
+    cycles_from_previous_track_ = 0;
+  }
+
+  // Update compute time.
+  if (statement_info.compute_timer_active) {
+    compute_time_ += cycles;
+    if (statement_info.statement_type ==
+          CanaryApplication::StatementType::SCATTER ||
+        statement_info.statement_type ==
+          CanaryApplication::StatementType::GATHER) {
+      scatter_gather_time_ += cycles;
+    }
+  }
+
   UpdateCycleStats(complete_stage_id, stage_record.statement_id, cycles);
+
   // Updates variable access map, so that later spawned stages do not depend on
   // this complete stage.
   for (const auto& pair : statement_info.variable_access_map) {
@@ -100,6 +134,15 @@ void StageGraph::CompleteStage(StageId complete_stage_id, double cycles) {
   }
   // Removes the stage.
   uncomplete_stage_map_.erase(iter);
+  // Handle barriers.
+  if (statement_info.statement_type ==
+      CanaryApplication::StatementType::BARRIER) {
+    if (complete_stage_id == last_barrier_stage_id_) {
+      last_barrier_valid_ = false;
+      last_barrier_stage_id_ = StageId::INVALID;
+    }
+  }
+  // Spawn next stages.
   SpawnLocalStages();
 }
 
@@ -130,6 +173,14 @@ void StageGraph::FeedControlFlowDecision(StageId stage_id,
   received_control_flow_decisions_[stage_id] = control_decision;
   SpawnLocalStages();
 }
+
+void StageGraph::UpdatePlacementDone() {
+  is_blocked_update_placement_ = false;
+  LOG(INFO) << "UpdatePlacement unblocks for "
+    << get_value(self_variable_group_id_)
+    << ":" << get_value(self_partition_id_);
+  SpawnLocalStages();
+}  // UpdatePlacementDone
 
 void StageGraph::retrieve_cycle_stats(
     std::map<StageId, std::pair<StatementId, double>>* cycle_storage_result) {
@@ -240,7 +291,7 @@ void StageGraph::UpdateCycleStats(StageId stage_id, StatementId statement_id,
   auto iter = cycle_storage_.rbegin();
   // Finds the record whose stage id is exactly before the given stage id.
   while (iter != cycle_storage_.rend() && iter->first > stage_id) {
-    --iter;
+    ++iter;
   }
   if (iter != cycle_storage_.rend() &&
       get_distance(iter->first, stage_id) ==
@@ -251,7 +302,7 @@ void StageGraph::UpdateCycleStats(StageId stage_id, StatementId statement_id,
     cycle_storage_[stage_id] = std::make_pair(statement_id, cycles);
     // The first element s.t. next_iter->first > stage_id.
     auto next_iter = cycle_storage_.upper_bound(stage_id);
-    if (next_iter != cycle_storage_.end() &&
+    if (next_iter != cycle_storage_.end()  &&
         get_distance(stage_id, next_iter->first) ==
             get_distance(statement_id, next_iter->second.first)) {
       // Merge the cycles with the next stage.
@@ -280,9 +331,12 @@ bool StageGraph::ExamineNextStatement() {
     return false;
   }
   if (is_blocked_by_control_flow_decision_) {
+    CHECK(!is_blocked_update_placement_) << "Internal error";
     auto iter = received_control_flow_decisions_.find(next_stage_to_spawn_);
     if (iter == received_control_flow_decisions_.end()) {
       // If the control flow is blocked, returns false.
+      VLOG(1) << "*** Blocked by control flow " << blocking_control_loop_ <<
+                 ", cannot spawn";
       return false;
     }
     const auto& statement_info =
@@ -299,7 +353,16 @@ bool StageGraph::ExamineNextStatement() {
     ++next_stage_to_spawn_;
     received_control_flow_decisions_.erase(iter);
     is_blocked_by_control_flow_decision_ = false;
+    VLOG(1) << "*** Unblocked " << blocking_control_loop_;
     return true;
+  }
+  if (is_blocked_update_placement_) {
+    CHECK(!is_blocked_by_control_flow_decision_) << "Internal error";
+    // TODO(3):
+    VLOG(1) << "Cannot spawn any more statements for partition " <<
+               get_value(self_partition_id_) << ", " <<
+               " waiting for OK to Proceed from controller";
+    return false;
   }
 
   const auto& statement_info =
@@ -308,6 +371,8 @@ bool StageGraph::ExamineNextStatement() {
     case CanaryApplication::StatementType::TRANSFORM:
     case CanaryApplication::StatementType::SCATTER:
     case CanaryApplication::StatementType::GATHER:
+    case CanaryApplication::StatementType::FLUSH_BARRIER:
+    case CanaryApplication::StatementType::BARRIER:
       if (self_variable_group_id_ == statement_info.variable_group_id) {
         SpawnStageFromStatement(next_stage_to_spawn_, next_statement_to_spawn_,
                                 statement_info);
@@ -317,16 +382,16 @@ bool StageGraph::ExamineNextStatement() {
       break;
     case CanaryApplication::StatementType::LOOP:
       // Moves the program pointer only.
-      if (is_inside_loop_) {
-        ++spawned_loops_;
+      if (spawned_loops_.find(next_statement_to_spawn_) !=
+          spawned_loops_.end()) {
+        ++spawned_loops_[next_statement_to_spawn_];
       } else {
-        is_inside_loop_ = true;
-        spawned_loops_ = 0;
+        spawned_loops_[next_statement_to_spawn_] = 0;
       }
-      if (spawned_loops_ >= statement_info.num_loop) {
+      if (spawned_loops_[next_statement_to_spawn_] >= statement_info.num_loop) {
         // Looping completes.
+        spawned_loops_.erase(next_statement_to_spawn_);
         next_statement_to_spawn_ = statement_info.branch_statement;
-        is_inside_loop_ = false;
       } else {
         // More loop is needed.
         ++next_statement_to_spawn_;
@@ -339,6 +404,22 @@ bool StageGraph::ExamineNextStatement() {
                                 statement_info);
       }
       is_blocked_by_control_flow_decision_ = true;
+      VLOG(1) << "*** Blocked by " << statement_info.name;
+      blocking_control_loop_ = statement_info.name;
+      break;
+    case CanaryApplication::StatementType::UPDATE_PLACEMENT:
+      // No more statements will be spawned till is_blocked_update_placement_
+      // is set to false on receiving ok to proceed from controller. 
+      if (self_variable_group_id_ == statement_info.variable_group_id) {
+        SpawnStageFromStatement(next_stage_to_spawn_, next_statement_to_spawn_,
+                                statement_info);
+        is_blocked_update_placement_ = true;
+        LOG(INFO) << "UpdatePlacement blocks for "
+          << get_value(self_variable_group_id_)
+          << ":" << get_value(self_partition_id_);
+      }
+      ++next_statement_to_spawn_;
+      ++next_stage_to_spawn_;
       break;
     case CanaryApplication::StatementType::END_LOOP:
     case CanaryApplication::StatementType::END_WHILE:
@@ -354,7 +435,8 @@ void StageGraph::SpawnStageFromStatement(
     StageId stage_id, StatementId statement_id,
     const CanaryApplication::StatementInfo& statement_info) {
   VLOG(1) << "Spawn stage " << get_value(stage_id) << " statement "
-          << get_value(statement_id);
+          << get_value(statement_id) << " over "
+          << get_value(self_partition_id_);
   std::set<StageId> before_set;
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
@@ -372,6 +454,28 @@ void StageGraph::SpawnStageFromStatement(
         before_set.insert(read_stage);
       }
       variable_access_map_[pair.first].read_stages.clear();
+    }
+  }
+  // Add last barrier to before set.
+  if (last_barrier_valid_) {
+    before_set.insert(last_barrier_stage_id_);
+  }
+  // Add all incomplete stages to before set.
+  if (statement_info.statement_type ==
+      CanaryApplication::StatementType::FLUSH_BARRIER ||
+      statement_info.statement_type ==
+      CanaryApplication::StatementType::UPDATE_PLACEMENT) {
+    for (const auto& pair : uncomplete_stage_map_) {
+      before_set.insert(pair.first);
+    }
+  }
+  // Add all incomplete stages to before set.
+  if (statement_info.statement_type ==
+      CanaryApplication::StatementType::BARRIER) {
+    last_barrier_valid_ = true;
+    last_barrier_stage_id_ = stage_id;
+    for (const auto& pair : uncomplete_stage_map_) {
+      before_set.insert(pair.first);
     }
   }
   auto& stage_record = uncomplete_stage_map_[stage_id];

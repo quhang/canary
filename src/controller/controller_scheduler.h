@@ -130,6 +130,9 @@ class ControllerScheduler : public ControllerSchedulerBase,
   }
   virtual ~ControllerScheduler() {}
 
+  typedef CanaryApplication::VariableInfoMap VariableInfoMap;
+  typedef CanaryApplication::VariableGroupInfoMap VariableGroupInfoMap;
+
  private:
   //! Called when receiving commands from a launcher.
   void InternalReceiveLaunchCommand(LaunchCommandId launch_command_id,
@@ -228,6 +231,27 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! A worker responds that a barrier has been reached.
   void ProcessReachBarrier(
       const message::ControllerRespondReachBarrier& respond_message);
+  //! Worker computing partition placement sends updates to controller.
+  void ProcessPartitionHistory(
+      const message::ControllerSendPartitionHistory& history_message);
+  //! Worker sends UpdatePlacement to controller.
+  void ProcessUpdatePlacementForTime(
+      const message::ControllerUpdatePlacementForTime& update_message);
+
+  /*
+   *  Handling application computed placement.
+   */
+  //! Actiavate new partition placement.
+  void ActivateNewPartitionPlacement(
+    ApplicationId application_id, PartitionHistory *history);
+  //! Send update placement done to all workers.
+  void SendUpdatePlacementDone(ApplicationId application_id);
+  //! Populate/initialize active_partition.
+  void InitializeActivePlacement(
+    ApplicationId application_id, int num_partitions,
+    PartitionPlacement *active_placement,
+    std::vector<VariableGroupId> *update_variable_groups);
+
   /*
    * Handling the state of an application.
    */
@@ -236,12 +260,21 @@ class ControllerScheduler : public ControllerSchedulerBase,
       ApplicationId application_id,
       const message::LaunchApplication& launch_message,
       CanaryApplication* loaded_application, void* loading_handle);
+
   //! Gets an application record.
   ApplicationRecord& GetApplicationRecord(ApplicationId application_id) {
     auto iter = application_map_.find(application_id);
     CHECK(iter != application_map_.end());
     return iter->second;
   }
+
+  //! Get history for an application.
+  PartitionHistory& GetApplicationPartitionHistory(ApplicationId application_id) {
+    auto iter = history_map_.find(application_id);
+    CHECK(iter != history_map_.end());
+    return iter->second;
+  }
+
   //! Processes running stats.
   void UpdateRunningStats(WorkerId worker_id, ApplicationId application_id,
                           VariableGroupId variable_group_id,
@@ -259,6 +292,8 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! Updates the partitions each workers own, and initializes the partition
   // record.
   void InitializePartitionsInApplication(ApplicationId application_id);
+  //! Initialize partition history in application.
+  void InitializePartitionHistoryInApplication(ApplicationId application_id);
   //! Loads partitions and applications.
   void LaunchApplicationAndPartitions(ApplicationId application_id);
   /*
@@ -360,6 +395,12 @@ class ControllerScheduler : public ControllerSchedulerBase,
   //! Scheduling algorithms.
   std::map<std::string, PlacementSchedule*> placement_schedule_algorithms_;
   std::map<std::string, LoadSchedule*> load_schedule_algorithms_;
+  //! Partition placement compute by application.
+  std::map<ApplicationId, PartitionHistory> history_map_;
+
+  // Parameters to control how frequently controller gets stats from workers.
+  int num_iterations_ = 0;
+  int stats_dump_freq_ = 20;
 };
 
 }  // namespace canary

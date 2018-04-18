@@ -72,7 +72,8 @@ class PlacementSchedule {
 };
 
 /**
- * The default placement algorithm that places partitions evenly on workers.
+ * The default placement algorithm that places partitions evenly on workers,
+ * and randomizes the placement.
  */
 class EvenlyPlacementSchedule : public PlacementSchedule {
  public:
@@ -101,7 +102,7 @@ class EvenlyPlacementSchedule : public PlacementSchedule {
 };
 
 /**
- * The default placement algorithm that places partitions evenly on workers.
+ * The default placement algorithm that places partitions using round robin.
  */
 class OrderedEvenlyPlacementSchedule : public PlacementSchedule {
  public:
@@ -118,6 +119,59 @@ class OrderedEvenlyPlacementSchedule : public PlacementSchedule {
  private:
   //! Gets the next assigned worker id.
   WorkerId NextAssignWorkerId();
+
+ private:
+  //! The last worker that was assigned a partition.
+  WorkerId next_assigned_worker_id_ = WorkerId::INVALID;
+};
+
+/**
+ * A placement algorithm that places consecutive ranks on the same worker,
+ * and evenly across workers.
+ */
+class ConsecutiveEvenPlacementSchedule : public PlacementSchedule {
+ public:
+  //! Constructor.
+  explicit ConsecutiveEvenPlacementSchedule(SchedulingInfo* scheduling_info)
+      : PlacementSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~ConsecutiveEvenPlacementSchedule() {}
+
+ public:
+  //! Invoking the placement algorithm.
+  void PlaceApplication(ApplicationId application_id) override;
+
+ private:
+  //! Returns NUM_SLOT worker id, by assigning consecutive ranks to same worker,
+  //and distributing partitions evenly across workers.
+  void GetWorkerAssignment(int num_slot, std::vector<WorkerId>* assignment);
+
+ private:
+  //! The last worker that was assigned a partition.
+  WorkerId next_assigned_worker_id_ = WorkerId::INVALID;
+};
+
+/**
+ * A placement algorithm that uses partitioning computed by application to
+ * determine initial partition placement.
+ */
+class ApplicationPlacementSchedule : public PlacementSchedule {
+ public:
+  //! Constructor.
+  explicit ApplicationPlacementSchedule(SchedulingInfo* scheduling_info)
+      : PlacementSchedule(scheduling_info) {}
+  //! Destructor.
+  virtual ~ApplicationPlacementSchedule() {}
+
+ public:
+  //! Invoking the placement algorithm.
+  void PlaceApplication(ApplicationId application_id) override;
+
+ private:
+  //! Returns NUM_SLOT worker id, by assigning consecutive ranks to same worker,
+  void GetWorkerAssignment(const std::vector<WorkerId> &running_workers,
+                           const std::vector<int> &initial_placement,
+                           std::vector<WorkerId> *assigned_workers);
 
  private:
   //! The last worker that was assigned a partition.

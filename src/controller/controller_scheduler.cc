@@ -40,6 +40,7 @@
 #include "controller/controller_scheduler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -47,6 +48,8 @@
 #include "controller/placement_schedule.h"
 
 namespace canary {
+
+static const float kThresh = 1e-2;
 
 void ControllerSchedulerBase::Initialize(
     network::EventMainThread* event_main_thread,
@@ -156,6 +159,11 @@ void ControllerScheduler::InternalReceiveCommand(struct evbuffer* buffer) {
                     ProcessRespondPauseExecution);
     // A worker responds that a barrier has been reached.
     PROCESS_MESSAGE(CONTROLLER_RESPOND_REACH_BARRIER, ProcessReachBarrier);
+    // Partition updates.
+    PROCESS_MESSAGE(CONTROLLER_SEND_PARTITION_HISTORY, ProcessPartitionHistory);
+    // Update placement.
+    PROCESS_MESSAGE(CONTROLLER_UPDATE_PLACEMENT_FOR_TIME,
+                    ProcessUpdatePlacementForTime);
     default:
       LOG(FATAL) << "Unexpected message type!";
   }  // switch category.
@@ -225,10 +233,14 @@ void ControllerScheduler::ProcessLaunchApplication(
         message::SerializeMessageWithControlHeader(response));
     return;
   }
+  loaded_application->ComputeInitialPartitionPlacement(num_running_worker_);
+  loaded_application->SetMigratableVariablesInternal();
   // Assigns an application id.
   const ApplicationId assigned_application_id = (next_application_id_++);
   InitializeApplicationRecord(assigned_application_id, launch_message,
                               loaded_application, loading_handle);
+  // Initializes partition history.
+  InitializePartitionHistoryInApplication(assigned_application_id);
   // Gets the placement schedule.
   auto placement_schedule =
       GetPlacementSchedule(launch_message.placement_algorithm);
@@ -243,7 +255,7 @@ void ControllerScheduler::ProcessLaunchApplication(
   }
   // Clears partition placement decisions.
   ClearPartitionPlacement();
-  // Invokes the user-defined placement algorithm.
+  // Invokes the user-defined initial placement algorithm.
   placement_schedule->PlaceApplication(assigned_application_id);
   // Fills in the partition map.
   CHECK(CheckSchedulingAlgorithmOutputAndFillInPartitionMap(
@@ -613,7 +625,16 @@ void ControllerScheduler::ProcessMigrationInDone(
                                      respond_message.from_worker_id);
   // Caution: ownership is transferred.
   send_command_interface_->UpdatePartitionMap(partition_map_update);
-}
+  // If application_record.migrating_partition == 0 and
+  // update placement is in progress, invoke SendUpdatePlacementDone to
+  // inform workers that placement update is done.
+  if (application_record.migrating_partition == 0) {
+    PartitionHistory &history = GetApplicationPartitionHistory(application_id);
+    if (history.UpdatePlacementInProgress()) {
+      SendUpdatePlacementDone(application_id);
+    }  // if update placement is in progress
+  }  // if migrating_partition == 0
+}  // ProcessMigrationInDone
 
 void ControllerScheduler::ProcessPartitionDone(
     const message::ControllerRespondPartitionDone& respond_message) {
@@ -724,6 +745,238 @@ void ControllerScheduler::ProcessReachBarrier(
   }
 }
 
+// NOTE: By chinmayee
+void ControllerScheduler::ProcessPartitionHistory(
+    const message::ControllerSendPartitionHistory& history_message) {
+  PartitionHistory &history = GetApplicationPartitionHistory(
+    history_message.application_id);
+  VLOG(1) << "** Controller received partition history, current length = " <<
+              history.GetHistoryLen() << ", received length " <<
+              history_message.history_len << 
+              " last time " << history_message.last_time << " ...";
+  int num_partitions = history_message.num_partitions;
+  int append_start = 0;
+  // Intiialize currently active partition if it is uninitialized.
+  if (history.GetHistoryLen() == 0) {
+    if (history.GetNumPartitions() == 0) {
+      history.SetNumPartitions(num_partitions);
+      PartitionPlacement active_placement(num_partitions);
+      std::vector<VariableGroupId> update_variable_groups;
+      InitializeActivePlacement(
+        history_message.application_id, history_message.num_partitions,
+        &active_placement, &update_variable_groups);
+      history.SetUpdateVariableGroups(update_variable_groups);
+      history.AddPartitionPlacement(-1.f, active_placement);
+      history.SetActivePlacement(0);
+    } else {
+      CHECK_EQ(history.GetNumPartitions(), num_partitions) <<
+        "Mismatch in number of partitions in existing history and received message";
+    }
+  }
+  // Add all updates to history.
+  for (int i = append_start; i < history_message.history_len; ++i) {
+    history.AddPartitionPlacement(
+      history_message.times[i], history_message.history[i]);
+  }
+  history.SetLastTime(history_message.last_time);
+  VLOG(1) << "Controller finished adding new partition history, new length = " <<
+             history.GetHistoryLen();
+  if (history.UpdatePlacementReceivingRequests()) {
+    VLOG(1) << "Received " << history.UpdatePlacementRequestsReceived() <<
+               " requests ...";
+    if (history.UpdatePlacementRequestsReceived() ==
+        history.UpdatePlacementRequestsExpected()) {
+      //if (history.UpdatePlacementTime() <
+      //    history.GetLastTime() + kThresh) {
+      //  ActivateNewPartitionPlacement(history_message.application_id, &history);
+      //}  // time < ...
+      ActivateNewPartitionPlacement(history_message.application_id, &history);
+    }  // requests received == requests expected
+  }  // receiving requests
+}  // ProcessPartitionHistory
+
+// NOTE: By chinmayee
+void ControllerScheduler::ProcessUpdatePlacementForTime(
+    const message::ControllerUpdatePlacementForTime& update_message) {
+  VLOG(1) << "Received UpdatePlacementTime for variable group " <<
+             get_value(update_message.variable_group_id) << " partition " <<
+             update_message.partition_id << " of " <<
+             update_message.num_partitions << " partitions for time " <<
+             update_message.time << " from worker " <<
+             get_value(update_message.from_worker_id);
+  PartitionHistory &history = GetApplicationPartitionHistory(
+    update_message.application_id);
+  // Record update.
+  if (!history.UpdatePlacementReceivingRequests()) {
+    // This is the first update request (request from the first worker) --
+    // transition to receiving requests.
+    CHECK(!history.UpdatePlacementInProgress());
+    LOG(INFO) << "Start UpdatePlacement for " << update_message.time;
+    history.SetUpdatePlacementInProgress(true);
+    history.SetUpdatePlacementReceivingRequests(true);
+    history.SetUpdatePlacementRequestsExpected(update_message.num_partitions);
+    history.SetUpdatePlacementRequestsReceived(1);
+    history.SetUpdatePlacementTime(update_message.time);
+    history.ClearPendingResponse();
+  } else {
+    // Receive subsequent requests.
+    CHECK_EQ(history.UpdatePlacementRequestsExpected(),
+             update_message.num_partitions);
+    history.AddUpdatePlacementRequestReceived();
+    CHECK(abs(history.UpdatePlacementTime() - update_message.time) < kThresh);
+  }
+  // Record worker_id.
+  history.AddToPendingResponse(FullPartitionId {
+    update_message.application_id, update_message.variable_group_id,
+    PartitionId(update_message.partition_id) });
+  // If number of requests equals expected number of requests, transition to
+  // done processing requests, and activate the new placement.
+  if (history.UpdatePlacementRequestsReceived() ==
+      history.UpdatePlacementRequestsExpected()) {
+    int history_len = history.GetHistoryLen();
+    //if (history_len == 0 ||
+    //    history.UpdatePlacementTime() > history.GetLastTime() + kThresh) {
+    if (history_len == 0) {
+      VLOG(1) << "Not activating new placement yet, " <<
+                 "requests received = " << history.UpdatePlacementRequestsReceived() <<
+                 " time requested = " << history.UpdatePlacementTime() <<
+                 " time received placement for = " << history.GetLastTime();
+      return;
+    }
+    // Activate new partition placement, trigger partition migration now.
+    ActivateNewPartitionPlacement(
+      update_message.application_id, &history);
+  }
+}  // ProcessUpdatePlacementForTime
+
+// NOTE: By chinmayee
+// Initialize currently active placement in placement_history for the app.
+void ControllerScheduler::InitializeActivePlacement(
+  ApplicationId application_id, int num_partitions,
+  PartitionPlacement *active_placement,
+  std::vector<VariableGroupId> *update_variable_groups) {
+  LOG(INFO) << "Initializing active placement in placement history";
+  ApplicationRecord &application_record = GetApplicationRecord(application_id);
+  CHECK_EQ(application_record.migrating_partition, 0);
+  // Go over variable groups and figure out which groups need to be migrated.
+  // Make a list of all variable groups whose partition needs to be updated.
+  const VariableGroupInfoMap &variable_group_info_map =
+    *(application_record.loaded_application->get_variable_group_info_map());
+  update_variable_groups->clear();
+  for (auto &pair : variable_group_info_map) {
+    // Check whether to update placement for this variable.
+    if (pair.second.update_placement) {
+      CHECK_EQ(num_partitions, pair.second.parallelism);
+      // If yes, add it to list of variables.
+      update_variable_groups->push_back(pair.first);
+    }
+  }  // for variable_info_pair
+  CHECK(update_variable_groups->size() > 0);
+  // Read partition record to initialize active_placement.
+  VariableGroupId v0 = update_variable_groups->at(0);
+  for (int p = 0; p < num_partitions; ++p) {
+    const FullPartitionId full_partition_id = {
+      application_id, v0, PartitionId(p) };
+    WorkerId worker_id = GetPartitionRecord(full_partition_id).owned_worker_id;
+    active_placement->PlacePartitionOnWorker(p, get_value(worker_id));
+  }  // for i < num_partitions
+  // Check that all variables are placed in the same way.
+  for (auto group_id : *update_variable_groups) {
+    for (int p = 0; p < num_partitions; ++p) {
+      const FullPartitionId full_partition_id = {
+        application_id, group_id, PartitionId(p) };
+      WorkerId worker_id = GetPartitionRecord(full_partition_id).owned_worker_id;
+      int expected_worker_id = active_placement->GetPartitionPlacement(p);
+      CHECK_EQ(get_value(worker_id), expected_worker_id);
+    }  // for i < num_partitions
+  }  // variable_id
+  // Initialized active placement.
+  VLOG(1) << "Active partition placement: ";
+  VLOG(1) << active_placement->Print();
+}  // InitializeActivePlacement
+
+// NOTE: By chinmayee
+// Activate new partition placement.
+void ControllerScheduler::ActivateNewPartitionPlacement(
+  ApplicationId application_id, PartitionHistory *history) {
+  LOG(INFO) << "In activate new partition placement";
+  history->SetUpdatePlacementReceivingRequests(false);
+  // Retrieve placement for requested time.
+  int active_placement_idx = history->ActivePlacement();
+  int next_placement_idx = history->DetermineNextPlacement();
+  CHECK(active_placement_idx >= 0);
+  CHECK(next_placement_idx >= 0);
+  CHECK(active_placement_idx < history->GetHistoryLen());
+  CHECK(next_placement_idx < history->GetHistoryLen());
+  LOG(INFO) << "Current active placement = " << active_placement_idx;
+  LOG(INFO) << "Next active placement = " << next_placement_idx;
+  if (history->AreEquivalentPlacements(next_placement_idx, active_placement_idx)) {
+    // If placement is same, send SendUpdatePlacementDone to all workers,
+    // and return.
+    LOG(INFO) << "No change in placement";
+    SendUpdatePlacementDone(application_id);
+  } else {
+    LOG(INFO) << "Computing placement update";
+    const PartitionPlacement &next_placement = history->GetPlacement(
+      next_placement_idx);
+    VLOG(1) << "New partition placement: ";
+    VLOG(1) << next_placement.Print();
+    // If the placement is not already active, build placement_decision.
+    ClearPartitionPlacement();
+    int num_partitions = history->GetNumPartitions();
+    for (const auto gid : history->UpdateVariableGroups()) {
+      for (int p = 0; p < num_partitions; ++p) {
+        FullPartitionId pid = { application_id, gid, PartitionId(p) };
+        DecidePartitionPlacement(
+          pid, WorkerId(next_placement.GetPartitionPlacement(p)));
+      }  // for p
+    }  // for gid
+    // Set next_placement_idx as active partition.
+    history->SetActivePlacement(next_placement_idx);
+    // Go over placement decision and migrate each partition that is moved.
+    // Invoke SendUpdatePlacementDone when last ProcessMigrationInDone is
+    // received.
+    bool migrating = false;
+    for (const auto& pair : RetrievePartitionPlacement()) {
+      migrating |= MigratePartition(pair.first, pair.second);
+    }
+    CHECK(migrating);
+  }
+}  // ActivateNewPartitionPlacement
+
+
+// NOTE: By chinmayee
+// Send update placement done to all workers.
+void ControllerScheduler::SendUpdatePlacementDone(ApplicationId application_id) {
+  PartitionHistory &history = GetApplicationPartitionHistory(application_id);
+  LOG(INFO) << "End UpdatePlacement for " << history.UpdatePlacementTime();
+  num_iterations_ += 1;
+  if (num_iterations_ % stats_dump_freq_ == 0) {
+    auto& application_record = GetApplicationRecord(application_id);
+    application_record.report_partition_set.clear();
+    application_record.report_command_list.push_back(LaunchCommandId::IGNORE);
+    message::WorkerReportStatusOfPartitions report_partitions_command;
+    SendCommandToPartitionInApplication(application_id,
+                                        &report_partitions_command);
+  }
+  for (const FullPartitionId partition_id : history.PendingResponse()) {
+    CHECK_EQ(get_value(application_id),
+             get_value(partition_id.application_id));
+    const PartitionRecord &partition_record = GetPartitionRecord(partition_id);
+    VLOG(1) << "Sending update placement done to " <<
+               get_value(partition_record.owned_worker_id);
+    message::WorkerUpdatePlacementDone done_message;
+    done_message.application_id = application_id;
+    done_message.variable_group_id = partition_id.variable_group_id;
+    done_message.partition_id = get_value(partition_id.partition_id);
+    send_command_interface_->SendCommandToWorker(
+      partition_record.owned_worker_id,
+      message::SerializeMessageWithControlHeader(done_message));
+  }
+  history.SetUpdatePlacementInProgress(false);
+  history.ClearPendingResponse();
+}  // SendUpdatePlacementDone
+
 /*
  * Handling the state of an application.
  */
@@ -739,6 +992,8 @@ void ControllerScheduler::InitializeApplicationRecord(
   application_record.loading_handle = CHECK_NOTNULL(loading_handle);
   application_record.variable_group_info_map =
       application_record.loaded_application->get_variable_group_info_map();
+  application_record.initial_variable_group_placement =
+      application_record.loaded_application->initial_variable_group_placement();
   application_record.binary_location = launch_message.binary_location;
   application_record.application_parameter =
       launch_message.application_parameter;
@@ -788,6 +1043,9 @@ void ControllerScheduler::UpdateRunningStats(
     response.furthest_complete_stage_id =
         get_value(application_record.furthest_complete_stage_id);
     for (auto launch_command_id : application_record.report_command_list) {
+      if (launch_command_id == LaunchCommandId::IGNORE) {
+        continue;
+      }
       launch_send_command_interface_->SendLaunchResponseCommand(
           launch_command_id,
           message::SerializeMessageWithControlHeader(response));
@@ -908,6 +1166,12 @@ void ControllerScheduler::InitializePartitionsInApplication(
     }
   }
 }
+
+void ControllerScheduler::InitializePartitionHistoryInApplication(
+    ApplicationId application_id) {
+  CHECK(history_map_.find(application_id) == history_map_.end());
+  history_map_[application_id] = PartitionHistory();
+}  // InitializePartitionHistoryInApplication
 
 void ControllerScheduler::LaunchApplicationAndPartitions(
     ApplicationId application_id) {
@@ -1036,24 +1300,33 @@ bool ControllerScheduler::MigratePartition(
   VLOG(1) << "Migrating partition(" << full_partition_id.GetString()
           << ") to worker(" << get_value(to_worker_id) << ").";
   if (worker_map_.find(to_worker_id) == worker_map_.end()) {
+    VLOG(1) << "Worker not found!";
     return false;
   }
   auto& worker_record = GetWorkerRecord(to_worker_id);
   if (worker_record.worker_state != WorkerRecord::WorkerState::RUNNING) {
+    VLOG(1) << "Worker not running!";
     return false;
   }
   if (partition_record_map_.find(full_partition_id) ==
       partition_record_map_.end()) {
+    VLOG(1) << "Invalid partition -- partition not found!";
     return false;
   }
   auto& partition_record = GetPartitionRecord(full_partition_id);
   if (partition_record.partition_state !=
       PartitionRecord::PartitionState::RUNNING) {
+    VLOG(1) << "Partition is not in running state!";
     return false;
   }
   if (partition_record.owned_worker_id == to_worker_id) {
+    VLOG(1) << "Partition(" << full_partition_id.GetString()
+            << ") does not need to be migrated.";
     return false;
   }
+  VLOG(1) << "Migrating partition(" << full_partition_id.GetString()
+          << ") from worker(" << get_value(partition_record.owned_worker_id)
+          << ") to worker(" << get_value(to_worker_id) << ").";
   partition_record.partition_state =
       PartitionRecord::PartitionState::MIGRATE_INITIATED;
   partition_record.next_worker_id = to_worker_id;
@@ -1126,17 +1399,31 @@ void ControllerScheduler::LogRunningStats(
   fprintf(log_file_, "P %d %d %d W %d\n", get_value(application_id),
           get_value(variable_group_id), get_value(partition_id),
           get_value(worker_id));
+  fprintf(log_file_, "L %f\n", running_stats.migration_time);
+  const auto& statement_stats = running_stats.statement_stats;
+  for (const auto& pair : statement_stats) {
+    fprintf(log_file_, "S %d %d %f\n", get_value(pair.first),
+           pair.second.second, pair.second.first);
+  }
   const auto& timestamp_stats = running_stats.timestamp_stats;
   for (const auto& pair : timestamp_stats) {
     fprintf(log_file_, "T %d %d %f\n", get_value(pair.first),
             get_value(pair.second.first),
             (pair.second.second - min_timestamp_) * 1.e3);
   }
+  const auto& cycles_track_stats = running_stats.cycles_track_stats;
+  for (const auto& pair : cycles_track_stats) {
+    fprintf(log_file_, "W %d %d %f\n", get_value(pair.first),
+            get_value(pair.second.first),
+            (pair.second.second) * 1.e3);
+  }
   const auto& cycle_stats = running_stats.cycle_stats;
+  /*
   for (const auto& pair : cycle_stats) {
     fprintf(log_file_, "C %d %d %f\n", get_value(pair.first),
             get_value(pair.second.first), pair.second.second * 1.e3);
   }
+  */
   FlushLoggingFile();
 }
 

@@ -40,6 +40,8 @@
 #ifndef CANARY_SRC_MESSAGE_MESSAGE_H_
 #define CANARY_SRC_MESSAGE_MESSAGE_H_
 
+#include <climits>
+#include <cstdint>
 #include <string>
 
 #include "shared/canary_internal.h"
@@ -51,8 +53,10 @@ namespace message {
  * Basic types related to messages.
  */
 
+const int kMagicNumber = 47474747;
+
 //! The length of a message in bytes, excluding the message header.
-typedef uint32_t MessageLength;
+typedef uint64_t MessageLength;
 
 //! The category group of a message.
 enum class MessageCategoryGroup : int16_t {
@@ -111,6 +115,7 @@ enum class MessageCategory : int16_t {
   WORKER_PAUSE_EXECUTION,
   WORKER_INSTALL_BARRIER,
   WORKER_RELEASE_BARRIER,
+  WORKER_UPDATE_PLACEMENT_DONE,
   // Controller commands (from a worker).
   TEST_CONTROLLER_COMMAND = 500,
   CONTROLLER_RESPOND_MIGRATION_IN_PREPARED,
@@ -121,6 +126,8 @@ enum class MessageCategory : int16_t {
   CONTROLLER_RESPOND_STATUS_OF_WORKER,
   CONTROLLER_RESPOND_PAUSE_EXECUTION,
   CONTROLLER_RESPOND_REACH_BARRIER,
+  CONTROLLER_SEND_PARTITION_HISTORY,
+  CONTROLLER_UPDATE_PLACEMENT_FOR_TIME,
   // Application data.
   ROUTE_DATA_UNICAST = 600,
   ROUTE_DATA_MULTICAST,
@@ -202,6 +209,7 @@ class HeaderTrait {};
  * The header data structure for control messages.
  */
 struct ControlHeader {
+  int magic_number;
   //! The message length.
   MessageLength length;
   //! The message category group.
@@ -331,6 +339,8 @@ inline struct evbuffer* SerializeMessageWithControlHeader(
   // The length before adding the header.
   const auto length = evbuffer_get_length(buffer);
   auto header = AddHeader<ControlHeader>(buffer);
+  header->magic_number = kMagicNumber;
+  CHECK_GE((size_t)UINT64_MAX, length) << "Message is too large!!";
   header->length = length;
   header->FillInMessageType(message);
   return buffer;
@@ -355,14 +365,28 @@ inline struct evbuffer* SegmentMessage(struct evbuffer* buffer) {
   if (header == nullptr) {
     return nullptr;
   }
-  const auto total_length = header->length + sizeof(T);
+  const size_t total_length = header->length + sizeof(T);
   if (total_length > evbuffer_get_length(buffer)) {
+    CHECK_GE((size_t)INT64_MAX, total_length) << "Message is too large!!";
     return nullptr;
   }
   struct evbuffer* result = evbuffer_new();
-  const int bytes = evbuffer_remove_buffer(buffer, result, total_length);
-  CHECK_GE(bytes, 0);
-  CHECK_EQ(static_cast<size_t>(bytes), total_length);
+  //const int bytes = evbuffer_remove_buffer(buffer, result, total_length);
+  //CHECK_GE(bytes, (int)0);
+  //CHECK_EQ(bytes, (int)total_length);
+  int64_t length_removed = 0;
+  int64_t length_left = total_length;
+  while (length_left > 0) {
+    int remove_length = std::min((int64_t)INT_MAX, length_left);
+    int bytes = evbuffer_remove_buffer(buffer, result, remove_length);
+    CHECK_GE(bytes, (int64_t)0);
+    CHECK_EQ(bytes, remove_length);
+    length_removed += bytes;
+    length_left    -= bytes;
+    CHECK_GE(length_left, 0);
+  }
+  CHECK_EQ(length_removed, (int64_t)total_length);
+  CHECK_EQ(total_length, evbuffer_get_length(result));
   return result;
 }
 

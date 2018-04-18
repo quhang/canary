@@ -231,6 +231,7 @@ void WorkerDataRouter::CallbackReadEvent(PeerRecord* peer_record) {
     }
   }
   if (status == 0 || (status == -1 && !network::is_blocked())) {
+    VLOG(1) << "Cleanup peer record";
     CleanUpPeerRecord(peer_record);
   }
 }
@@ -596,8 +597,12 @@ void WorkerDataRouter::ProcessIncomingMessage(struct evbuffer* buffer) {
   auto header = CHECK_NOTNULL(message::ExamineDataHeader(buffer));
   using message::MessageCategoryGroup;
   using message::MessageCategory;
+  std::stringstream ss;
   switch (header->category_group) {
     case MessageCategoryGroup::APPLICATION_DATA_ROUTE:
+      ss << static_cast<int>(header->category_group) <<
+            " " << static_cast<int>(header->category);
+      VLOG(1) << "Processing data message " << ss.str();
       switch (header->category) {
         case MessageCategory::ROUTE_DATA_UNICAST:
           ProcessUnicastMessage(buffer);
@@ -610,6 +615,9 @@ void WorkerDataRouter::ProcessIncomingMessage(struct evbuffer* buffer) {
       }
       break;
     case MessageCategoryGroup::APPLICATION_DATA_DIRECT:
+      ss << static_cast<int>(header->category_group) <<
+            " " << static_cast<int>(header->category);
+      LOG(INFO) << "Processing data message " << ss.str();
       ProcessDirectMessage(buffer);
       break;
     default:

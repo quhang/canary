@@ -43,6 +43,7 @@
 #include <list>
 #include <map>
 #include <string>
+#include <vector>
 #include <utility>
 
 #include "shared/canary_internal.h"
@@ -235,6 +236,20 @@ struct WorkerReleaseBarrier {
 };
 REGISTER_MESSAGE(WORKER_COMMAND, WORKER_RELEASE_BARRIER, WorkerReleaseBarrier);
 
+// NOTE: By chinmayee
+//! Asks worker to proceed, update partitions done.
+struct WorkerUpdatePlacementDone {
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  int partition_id;
+  template <typename Archive>
+  void serialize(Archive &archive) {  // NOLINT
+    archive(application_id, variable_group_id, partition_id);
+  }
+};
+REGISTER_MESSAGE(WORKER_COMMAND, WORKER_UPDATE_PLACEMENT_DONE,
+                 WorkerUpdatePlacementDone);
+
 /*
  * Worker to controller commands.
  */
@@ -247,14 +262,21 @@ struct RunningStats {
   StageId earliest_unfinished_stage_id;
   //! Last finished stage may be COMPLETE.
   StageId last_finished_stage_id;
+  //! double is total time.
+  double migration_time;
+  //! double is a timestamp.
+  std::map<StatementId, std::pair<double, int>> statement_stats;
   //! double is a timestamp.
   std::map<StageId, std::pair<StatementId, double>> timestamp_stats;
+  //! double is cycles since last track statement.
+  std::map<StageId, std::pair<StatementId, double>> cycles_track_stats;
   //! double is the cycle spent on the following stages in the same loop.
   std::map<StageId, std::pair<StatementId, double>> cycle_stats;
   template <typename Archive>
   void serialize(Archive& archive) {  // NOLINT
     archive(earliest_unfinished_stage_id, last_finished_stage_id);
-    archive(timestamp_stats, cycle_stats);
+    archive(migration_time);
+    archive(statement_stats, timestamp_stats, cycles_track_stats, cycle_stats);
   }
 };
 
@@ -396,6 +418,46 @@ struct ControllerRespondReachBarrier {
 };
 REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_RESPOND_REACH_BARRIER,
                  ControllerRespondReachBarrier);
+
+// NOTE: By chinmayee
+//! Send new set of partitions and times when they should become active.
+struct ControllerSendPartitionHistory {
+  WorkerId from_worker_id;
+  ApplicationId application_id;
+  int num_partitions;
+  int history_len;
+  float last_time;
+  std::vector<float> times;
+  std::vector< std::vector<int> > history;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id, application_id);
+    archive(num_partitions, history_len, last_time);
+    archive(times);
+    archive(history);
+  }
+};  // struct ControllerSendPartitionHistory
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_SEND_PARTITION_HISTORY,
+                 ControllerSendPartitionHistory);
+
+// NOTE: By chinmayee
+//! Send update partition message to controller.
+struct ControllerUpdatePlacementForTime {
+  WorkerId from_worker_id;
+  int num_partitions;
+  ApplicationId application_id;
+  VariableGroupId variable_group_id;
+  int partition_id;
+  float time;
+  template <typename Archive>
+  void serialize(Archive& archive) {  // NOLINT
+    archive(from_worker_id, num_partitions);
+    archive(application_id, variable_group_id, partition_id);
+    archive(time);
+  }
+};  // struct ControllerUpdatePlacementForTime
+REGISTER_MESSAGE(CONTROLLER_COMMAND, CONTROLLER_UPDATE_PLACEMENT_FOR_TIME,
+                 ControllerUpdatePlacementForTime);
 
 }  // namespace message
 }  // namespace canary

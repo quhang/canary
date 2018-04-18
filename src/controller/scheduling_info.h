@@ -115,6 +115,12 @@ class SchedulingInfo {
     const CanaryApplication::VariableGroupInfoMap* variable_group_info_map =
         nullptr;
     /*
+     * Filled in by application.
+     */
+    //! Describing how variables are mapped.
+    const CanaryApplication::VariableGroupPlacementMap*
+      initial_variable_group_placement;
+    /*
      * Maintained by the controller.
      */
     //! The application's partition map.

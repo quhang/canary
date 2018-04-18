@@ -1,3 +1,9 @@
 build
 Build
 .*.swp
+CMakeFiles
+
+controller.txt
+tags
+*result*
+*out*

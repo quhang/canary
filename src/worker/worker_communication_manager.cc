@@ -197,13 +197,18 @@ void WorkerCommunicationManager::CallbackWriteEvent() {
 void WorkerCommunicationManager::ProcessIncomingMessage(
     struct evbuffer* buffer) {
   auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+  CHECK_EQ(header->magic_number, message::kMagicNumber) << "Error reading message header";
   using message::MessageCategoryGroup;
   using message::MessageCategory;
   // If assigned worker_id.
   // Differentiante between control messages and command messages.
+  std::stringstream ss;
   switch (header->category_group) {
     case MessageCategoryGroup::DATA_PLANE_CONTROL:
       switch (header->category) {
+        ss << static_cast<int>(header->category_group) <<
+              " " << static_cast<int>(header->category);
+        VLOG(1) << "Processing message " << ss.str();
         PROCESS_MESSAGE(ASSIGN_WORKER_ID, ProcessAssignWorkerIdMessage);
         PROCESS_MESSAGE(UPDATE_PARTITION_MAP_AND_WORKER,
                         ProcessUpdatePartitionMapAndWorkerMessage);

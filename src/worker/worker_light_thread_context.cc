@@ -37,6 +37,7 @@
  * @brief Class WorkerLightThreadContext.
  */
 
+#include <cstdint>
 #include "worker/worker_light_thread_context.h"
 
 #include "message/message_include.h"
@@ -234,6 +235,9 @@ void WorkerExecutionContext::RunCommands() {
         CHECK(command == nullptr);
         ProcessReleaseBarrier();
         break;
+      case StageId::UPDATE_PLACEMENT_DONE:
+        ProcessUpdatePlacementDone();
+        break;
       default:
         LOG(FATAL) << "Unknown command stage id!";
     }
@@ -307,7 +311,10 @@ void WorkerExecutionContext::BuildStats(message::RunningStats* running_stats) {
       stage_graph_.get_earliest_unfinished_stage_id();
   running_stats->last_finished_stage_id =
       stage_graph_.get_last_finished_stage_id();
+  running_stats->migration_time = stage_graph_.migration_time();
+  stage_graph_.retrieve_statement_stats(&running_stats->statement_stats);
   stage_graph_.retrieve_timestamp_stats(&running_stats->timestamp_stats);
+  stage_graph_.retrieve_cycles_track_stats(&running_stats->cycles_track_stats);
   stage_graph_.retrieve_cycle_stats(&running_stats->cycle_stats);
 }
 
@@ -391,16 +398,18 @@ void WorkerExecutionContext::ProcessMigrateOut(struct evbuffer* command) {
     CanaryOutputArchive archive(direct_data_migrate.raw_buffer.buffer);
     archive(*this);
   }
-  LOG(INFO) << "Serielized " << get_value(get_worker_id()) << "/"
+  LOG(INFO) << "Serialized " << get_value(get_worker_id()) << "/"
       << get_value(get_application_id()) << "/"
       << get_value(get_variable_group_id()) << "/"
       << get_value(get_partition_id());
   struct evbuffer* buffer = SerializeMessage(direct_data_migrate);
   // The length before adding the header.
   const auto length = evbuffer_get_length(buffer);
+  CHECK_GE(UINT64_MAX, length);
   auto header = message::AddHeader<message::DataHeader>(buffer);
   header->length = length;
   header->FillInMessageType(direct_data_migrate);
+  LOG(INFO) << "Serialized data length " << length;
   get_send_data_interface()->SendDataToWorker(struct_message.to_worker_id,
                                               buffer);
   // Kills the context.
@@ -426,6 +435,14 @@ void WorkerExecutionContext::ProcessInstallBarrier(struct evbuffer* command) {
 void WorkerExecutionContext::ProcessReleaseBarrier() {
   stage_graph_.ReleaseBarrier();
 }
+
+void WorkerExecutionContext::ProcessUpdatePlacementDone() {
+  VLOG(1) << "Process update placement for " <<
+    get_value(get_application_id()) << ":" <<
+    get_value(get_variable_group_id()) << "," <<
+    get_value(get_partition_id());
+  stage_graph_.UpdatePlacementDone();
+}  // ProcessUpdatePlacementDone
 
 void WorkerExecutionContext::RunGatherStage(
     StageId stage_id, StatementId statement_id,
@@ -459,7 +476,10 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
   CanaryTaskContext task_context;
   PrepareTaskContext(stage_id, statement_id, statement_info, &task_context);
   switch (statement_info.statement_type) {
-    case CanaryApplication::StatementType::TRANSFORM: {
+    case CanaryApplication::StatementType::TRANSFORM:
+    case CanaryApplication::StatementType::FLUSH_BARRIER:
+    case CanaryApplication::StatementType::BARRIER:
+    case CanaryApplication::StatementType::UPDATE_PLACEMENT: {
       const auto start_time = time::Clock::now();
       (statement_info.void_task_function)(&task_context);
       const auto end_time = time::Clock::now();
@@ -485,7 +505,9 @@ void WorkerExecutionContext::RunStage(StageId stage_id,
         stage_graph_.CompleteStage(
             stage_id, time::duration_to_double(end_time - start_time));
       } else {
-        VLOG(1) << "Gather stage needs message of " << needed_message;
+        VLOG(1) << "Gather stage " << get_value(statement_id)
+                << " " << statement_info.name
+                << " needs message of " << needed_message;
         pending_gather_stages_[stage_id] = statement_id;
         RegisterReceivingData(stage_id, needed_message);
       }
@@ -521,7 +543,9 @@ void WorkerExecutionContext::PrepareTaskContext(
     StageId stage_id, StatementId statement_id,
     const CanaryApplication::StatementInfo& statement_info,
     CanaryTaskContext* task_context) {
+  task_context->stage_graph_ = get_stage_graph();
   task_context->send_data_interface_ = get_send_data_interface();
+  task_context->send_command_interface_ = get_send_command_interface();
   for (const auto& pair : statement_info.variable_access_map) {
     if (pair.second == CanaryApplication::VariableAccess::READ) {
       task_context->read_partition_data_map_[pair.first] =
@@ -534,6 +558,9 @@ void WorkerExecutionContext::PrepareTaskContext(
   }
   task_context->self_partition_id_ = get_value(get_partition_id());
   task_context->application_id_ = get_application_id();
+  task_context->parallelism_ = statement_info.parallelism;
+  task_context->worker_id_ = get_worker_id();
+  task_context->variable_group_id_ = get_variable_group_id();
   if (statement_info.statement_type ==
       CanaryApplication::StatementType::SCATTER) {
     task_context->scatter_partitioning_ = statement_info.parallelism;
@@ -580,7 +607,9 @@ void WorkerExecutionContext::DeallocatePartitionData() {
   }
 }
 
+// NOTE: edited by chinmayee
 void WorkerExecutionContext::load(CanaryInputArchive& archive) {  // NOLINT
+  const auto start_time = time::Clock::now();
   WorkerLightThreadContext::load(archive);
   archive(partition_state_);
   archive(stage_graph_);
@@ -590,21 +619,39 @@ void WorkerExecutionContext::load(CanaryInputArchive& archive) {  // NOLINT
     VariableId variable_id;
     archive(variable_id);
     CHECK(pair.first == variable_id);
+    VLOG(1) << "Deserializing " << get_value(pair.first) << " from " << get_value(get_partition_id());
     pair.second->Deserialize(archive);
+    VLOG(1) << "Deserialized " << get_value(pair.first) << " from " << get_value(get_partition_id());
   }
+  const auto end_time = time::Clock::now();
+  double load_time = time::duration_to_double(end_time - start_time);
+  LOG(INFO) << "Time to load partition " << get_value(get_partition_id()) <<
+               " = " << load_time;
+  double save_time;
+  archive(save_time);
+  stage_graph_.set_migration_time(load_time + save_time);
 }
 
+// NOTE: edited by chinmayee
 void WorkerExecutionContext::save(CanaryOutputArchive& archive)  // NOLINT
     const {
+  const auto start_time = time::Clock::now();
   WorkerLightThreadContext::save(archive);
   archive(partition_state_);
   archive(stage_graph_);
   archive(pending_gather_stages_);
   for (auto& pair : local_partition_data_) {
+    VLOG(1) << "Serializing " << get_value(pair.first) << " from " << get_value(get_partition_id());
     archive(pair.first);
     pair.second->Serialize(archive);
     pair.second->Finalize();
+    VLOG(1) << "Serialized " << get_value(pair.first) << " from " << get_value(get_partition_id());
   }
+  const auto end_time = time::Clock::now();
+  double save_time = time::duration_to_double(end_time - start_time);
+  LOG(INFO) << "Time to save partition " << get_value(get_partition_id()) <<
+               " = " << save_time;
+  archive(save_time);
 }
 
 }  // namespace canary

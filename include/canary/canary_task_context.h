@@ -50,7 +50,9 @@
 
 namespace canary {
 
+class StageGraph;
 class WorkerSendDataInterface;
+class WorkerSendCommandInterface;
 
 /**
  * The context of a task.
@@ -189,6 +191,18 @@ class CanaryTaskContext {
   int GetGatherParallelism() const { return gather_partitioning_; }
   int GetPartitionId() const { return self_partition_id_; }
 
+  //! Get compute time since timer was last started.
+  double GetComputeTime() const;
+  void SetComputeTime(double ct);
+  double GetScatterGatherTime() const;
+  void SetScatterGatherTime(double sgt);
+
+  //! Send computed partition history to controller.
+  void SendComputedPartitionHistory(const PartitionHistory& history) const;
+
+  //! Ask controller to update partition placement.
+  void UpdatePlacement(float t);
+
  private:
   void BroadcastInternal(struct evbuffer* buffer);
   void ScatterInternal(int partition_id, struct evbuffer* buffer);
@@ -203,16 +217,21 @@ class CanaryTaskContext {
     return iter->second->get_data();
   }
 
+  StageGraph* stage_graph_ = nullptr;
   WorkerSendDataInterface* send_data_interface_ = nullptr;
+  WorkerSendCommandInterface* send_command_interface_ = nullptr;
   std::list<struct evbuffer*> receive_buffer_;
   std::map<VariableId, PartitionData*> read_partition_data_map_;
   std::map<VariableId, PartitionData*> write_partition_data_map_;
   int self_partition_id_ = -1;
+  int parallelism_ = -1;
   int scatter_partitioning_ = -1;
   int gather_partitioning_ = -1;
   ApplicationId application_id_ = ApplicationId::INVALID;
+  VariableGroupId variable_group_id_ = VariableGroupId::INVALID;
   VariableGroupId gather_variable_group_id_ = VariableGroupId::INVALID;
   StageId gather_stage_id_ = StageId::INVALID;
+  WorkerId worker_id_ = WorkerId::INVALID;
 };
 
 //! Specifies the number of data expected by a gather task.

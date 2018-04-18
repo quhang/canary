@@ -82,7 +82,7 @@ bool WorkerSchedulerBase::ReceiveRoutedData(ApplicationId application_id,
 void WorkerSchedulerBase::ReceiveDirectData(struct evbuffer* buffer) {
   // MIGRATION, step four: receives migrated data.
   CHECK(is_ready_);
-  auto header = CHECK_NOTNULL(message::ExamineControlHeader(buffer));
+  auto header = CHECK_NOTNULL(message::ExamineDataHeader(buffer));
   CHECK(header->category_group ==
         message::MessageCategoryGroup::APPLICATION_DATA_DIRECT);
   CHECK(header->category == message::MessageCategory::DIRECT_DATA_MIGRATE);
@@ -129,6 +129,7 @@ void WorkerSchedulerBase::ReceiveCommandFromController(
     PROCESS_MESSAGE(WORKER_PAUSE_EXECUTION, ProcessPauseExecution);
     PROCESS_MESSAGE(WORKER_INSTALL_BARRIER, ProcessInstallBarrier);
     PROCESS_MESSAGE(WORKER_RELEASE_BARRIER, ProcessReleaseBarrier);
+    PROCESS_MESSAGE(WORKER_UPDATE_PLACEMENT_DONE, ProcessUpdatePlacementDone);
     default:
       LOG(FATAL) << "Unexpected message category!";
   }
@@ -291,6 +292,19 @@ void WorkerSchedulerBase::ProcessReleaseBarrier(
   DeliverCommandToEachThread(worker_command, StageId::RELEASE_BARRIER,
                              []() { return nullptr; });
 }
+
+// NOTE: By chinmayee
+void WorkerSchedulerBase::ProcessUpdatePlacementDone(
+    const message::WorkerUpdatePlacementDone& worker_command) {
+  CHECK(application_record_map_.find(worker_command.application_id) !=
+        application_record_map_.end());
+  FullPartitionId full_partition_id {
+    worker_command.application_id, worker_command.variable_group_id,
+    PartitionId(worker_command.partition_id) };
+  auto iter = thread_map_.find(full_partition_id);
+  CHECK(iter != thread_map_.end());
+  iter->second->DeliverMessage(StageId::UPDATE_PLACEMENT_DONE, nullptr);
+}  // ProcessUpdatePlacementDone
 
 void WorkerSchedulerBase::ProcessChangeApplicationPriority(
     const message::WorkerChangeApplicationPriority& worker_command) {

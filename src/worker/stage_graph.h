@@ -96,6 +96,8 @@ class StageGraph {
   std::pair<StageId, StatementId> GetNextReadyStage();
   //! Feeds a control flow decision.
   void FeedControlFlowDecision(StageId stage_id, bool control_decision);
+  //! Update placement done.
+  void UpdatePlacementDone();
 
   //! Gets the earliest stage that is not finished.
   StageId get_earliest_unfinished_stage_id() {
@@ -113,10 +115,20 @@ class StageGraph {
       return last_finished_stage_id_;
     }
   }
+  //! Retrieve statement stats.
+  void retrieve_statement_stats(
+    std::map<StatementId, std::pair<double, int>> *statement_stats) {
+    statement_stats->swap(statement_stats_);
+  }
   //! The timestamp of critical stages.
   void retrieve_timestamp_stats(
       std::map<StageId, std::pair<StatementId, double>>* timestamp_storage) {
     timestamp_storage->swap(timestamp_storage_);
+  }
+  //! The timestamp of critical stages.
+  void retrieve_cycles_track_stats(
+      std::map<StageId, std::pair<StatementId, double>>* cycles_track_storage) {
+    cycles_track_storage->swap(cycles_track_storage_);
   }
   //! The cycles for stages.
   void retrieve_cycle_stats(
@@ -156,10 +168,12 @@ class StageGraph {
     archive(received_control_flow_decisions_);
     archive(next_statement_to_spawn_, next_stage_to_spawn_,
             no_more_statement_to_spawn_);
-    archive(is_blocked_by_control_flow_decision_, is_inside_loop_,
-            spawned_loops_);
+    archive(is_blocked_by_control_flow_decision_, spawned_loops_);
+    archive(is_blocked_update_placement_);
     archive(last_finished_stage_id_, timestamp_storage_, cycle_storage_);
     archive(next_barrier_stage_id_, barrier_ready_stage_queue_);
+    archive(compute_time_, scatter_gather_time_);
+    archive(statement_stats_);
   }
 
  private:
@@ -178,6 +192,9 @@ class StageGraph {
   std::map<StageId, StageRecord> uncomplete_stage_map_;
   //! Ready stages to be executed.
   std::set<StageId> ready_stage_queue_;
+  //! Information about last barrier.
+  bool last_barrier_valid_ = false;
+  StageId last_barrier_stage_id_ = StageId::INVALID;
 
   //! Records the last stage that reads/writes a variable.
   std::map<VariableId, VariableRecord> variable_access_map_;
@@ -194,17 +211,33 @@ class StageGraph {
 
   //! Control flow states.
   bool is_blocked_by_control_flow_decision_ = false;
-  bool is_inside_loop_ = false;
-  int spawned_loops_ = 0;
+  std::string blocking_control_loop_ = "";
+  std::map<StatementId, int> spawned_loops_;
+  bool is_blocked_update_placement_ = false;
 
   //! Running stats.
+  double cycles_from_previous_track_ = 0;
+  double compute_time_ = 0;
+  double scatter_gather_time_ = 0;
+  double migration_time_ = 0;
   StageId last_finished_stage_id_ = StageId::INVALID;
+  std::map<StatementId, std::pair<double, int>> statement_stats_;
   std::map<StageId, std::pair<StatementId, double>> timestamp_storage_;
+  std::map<StageId, std::pair<StatementId, double>> cycles_track_storage_;
   std::map<StageId, std::pair<StatementId, double>> cycle_storage_;
 
   //! Barrier states.
   StageId next_barrier_stage_id_ = StageId::INVALID;
   std::set<StageId> barrier_ready_stage_queue_;
+
+ public:
+  // Accessors.
+  double migration_time() const { return migration_time_; }
+  void set_migration_time(double mt) { migration_time_ = mt; }
+  double compute_time() const { return compute_time_; }
+  void set_compute_time(double ct) { compute_time_ = ct; }
+  double scatter_gather_time() const { return scatter_gather_time_; }
+  void set_scatter_gather_time(double sgt) { scatter_gather_time_ = sgt; }
 };
 
 }  // namespace canary

@@ -247,6 +247,8 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void ProcessInstallBarrier(struct evbuffer* command);
   //! Processes a command that releases a buffer.
   void ProcessReleaseBarrier();
+  //! Process update placement done.
+  void ProcessUpdatePlacementDone();
 
   //! Runs the second step of a gather task.
   void RunGatherStage(StageId stage_id, StatementId statement_id,
@@ -271,6 +273,10 @@ class WorkerExecutionContext : public WorkerLightThreadContext {
   void load(CanaryInputArchive& archive) override;  // NOLINT
   //! Serialization function. Data are destroyed after serialization.
   void save(CanaryOutputArchive& archive) const override;  // NOLINT
+
+  StageGraph* get_stage_graph() {
+    return &stage_graph_;
+  }
 
  private:
   StageGraph stage_graph_;

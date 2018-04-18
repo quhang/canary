@@ -111,6 +111,7 @@ CanaryApplication* CanaryApplication::LoadApplication(
   loaded_application->LoadParameter(application_parameter);
   loaded_application->Program();
   loaded_application->FillInProgram();
+  LOG(INFO) << loaded_application->Print() << std::endl;
   return loaded_application;
 }
 
@@ -246,7 +247,7 @@ void CanaryApplication::FillInProgram() {
         ++statement_id;
         CHECK(statement_info_map_.find(statement_id) !=
               statement_info_map_.end())
-            << "Loops unpaired!";
+            << "Loops unpaired! Depth = " << layer;
         switch (statement_info_map_.at(statement_id).statement_type) {
           case StatementType::LOOP:
           case StatementType::WHILE:
@@ -266,6 +267,19 @@ void CanaryApplication::FillInProgram() {
   }
 }
 
+void CanaryApplication::SetMigratableVariablesInternal() {
+  SetMigratableVariables();
+  for (const auto &group : variable_group_info_map_) {
+    if (!group.second.update_placement) {
+      continue;
+    }
+    for (const auto vid : group.second.variable_id_set) {
+      // Make sure all internal variables too are set migratable correctly
+      variable_info_map_[vid].update_placement = true;
+    }
+  }
+}  // SetMigratableVariablesInternal
+
 std::string CanaryApplication::Print() const {
   std::stringstream ss;
   for (const auto& pair : variable_info_map_) {
@@ -281,44 +295,60 @@ std::string CanaryApplication::Print() const {
   }
 
   for (const auto& pair : statement_info_map_) {
-    ss << "statement#" << get_value(pair.first) << " group#"
-       << get_value(pair.second.variable_group_id);
-    for (const auto& access_pair : pair.second.variable_access_map) {
-      if (access_pair.second == VariableAccess::WRITE) {
-        ss << " w(" << get_value(access_pair.first) << ")";
+    std::stringstream local_ss;
+    local_ss << "statement#" << get_value(pair.first);
+    local_ss << ", name: " << pair.second.name;
+    local_ss << ", group#" << get_value(pair.second.variable_group_id);
+    for (const auto& accelocal_ss_pair : pair.second.variable_access_map) {
+      if (accelocal_ss_pair.second == VariableAccess::WRITE) {
+        local_ss << " w(" << get_value(accelocal_ss_pair.first) << ")";
       } else {
-        ss << " r(" << get_value(access_pair.first) << ")";
+        local_ss << " r(" << get_value(accelocal_ss_pair.first) << ")";
       }
     }
     switch (pair.second.statement_type) {
       case StatementType::TRANSFORM:
-        ss << " transform(" << pair.second.parallelism << ")";
+        local_ss << " transform(" << pair.second.parallelism << ")";
         break;
       case StatementType::SCATTER:
-        ss << " scatter(" << pair.second.parallelism << "/"
+        local_ss << " scatter(" << pair.second.parallelism << "/"
            << pair.second.paired_gather_parallelism << ")";
         break;
       case StatementType::GATHER:
-        ss << " gather(" << pair.second.paired_scatter_parallelism << "/"
+        local_ss << " gather(" << pair.second.paired_scatter_parallelism << "/"
            << pair.second.parallelism << ")";
         break;
+      case StatementType::FLUSH_BARRIER:
+        local_ss << " flush_barrier(" << pair.second.parallelism << ")";
+        break;
+      case StatementType::BARRIER:
+        local_ss << " barrier(" << pair.second.parallelism << ")";
+        break;
+      case StatementType::UPDATE_PLACEMENT:
+        local_ss << " update_placement(" << pair.second.parallelism << ")";
+        break;
       case StatementType::LOOP:
-        ss << " loop(" << pair.second.num_loop << "/"
+        local_ss << " loop(" << pair.second.num_loop << "/"
            << get_value(pair.second.branch_statement) << ")";
         break;
       case StatementType::END_LOOP:
-        ss << " end_loop(" << get_value(pair.second.branch_statement) << ")";
+        local_ss << " end_loop(" << get_value(pair.second.branch_statement) << ")";
         break;
       case StatementType::WHILE:
-        ss << " while(" << get_value(pair.second.branch_statement) << ")";
+        local_ss << " while(" << get_value(pair.second.branch_statement) << ")";
         break;
       case StatementType::END_WHILE:
-        ss << " end_while(" << get_value(pair.second.branch_statement) << ")";
+        local_ss << " end_while(" << get_value(pair.second.branch_statement) << ")";
         break;
       default:
         LOG(FATAL) << "Intenal error!";
     }
-    ss << "\n";
+    if (pair.second.compute_timer_active) {
+      local_ss << ", included in compute timer";
+    }
+    local_ss << "\n";
+    ss << local_ss.str();
+    LOG(INFO) << local_ss.str();
   }
   return ss.str();
 }
